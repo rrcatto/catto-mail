@@ -65,9 +65,13 @@ Both are gitignored.
 │   │   ├── Containerfile
 │   │   └── templates/smarthost.conf.template
 │   ├── postgres/bootstrap.sh
-│   ├── quadlet/*.in               18 Quadlet templates
+│   ├── quadlet/*.in               19 Quadlet templates (pod, network, volumes, containers)
 │   ├── systemd/*.in               target + timers
-│   └── tests/phase1_client.py
+│   └── tests/
+│       ├── Containerfile          Verification tool image
+│       ├── requirements.txt
+│       ├── phase1_client.py
+│       └── phase1-verify.sh       Phase 1 verification suite
 ├── tests/fake-smtp/               Deterministic SMTP test server
 │   ├── Containerfile
 │   ├── README.md
@@ -106,7 +110,7 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, current phase, WSL Podman-machine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history (0.1 = Phase 0 complete, Phase 1 in progress). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete) and 0.1.1 (Phase 1 complete, `smarthost` pod). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
 
@@ -118,7 +122,7 @@ Both are gitignored.
 | `20260908-1644-smarthost-human-specification.md` | Human-readable companion that mirrors the YAML. |
 | `README.md` | Index of the documentation. |
 | `PROJECT.md` | This guide. |
-| `development-environment.md` | How to run the Phase 1 Podman environment, the topology and ports, and what has been observed and what is still pending. |
+| `development-environment.md` | How to run the Phase 1 Podman environment: topology, ports, volumes, mail safety, facts established in Phase 1, and the verification suite. |
 | `api/openapi.v1.yaml` | OpenAPI 3.1 contract for `/v1`: validation jobs, batched send jobs (create → recipients → submit), messages, events and webhooks. |
 | `contracts/status-vocabulary.yaml` | Every allowed status, event, event source, failure scope and classification value, with transitions and ranks. |
 | `contracts/environment.md` | The only list of permitted environment variables, with consumers, secrecy and phase. |
@@ -126,7 +130,7 @@ Both are gitignored.
 | `schema/schema.md` | ERD, tenant ownership, required indexes, CHECK rules and the database grant matrix. |
 | `architecture/overview.md` | One-page map from the specification to the contracts and flows. |
 | `architecture/conventions.md` | Cross-language rules: IDs, time, leases, API, webhooks, logging, wording. |
-| `architecture/postfix-integration.md` | Postfix/OpenDKIM/Go channels, cursors, reconciliation and the V-1…V-7 verification tasks. |
+| `architecture/postfix-integration.md` | Postfix/OpenDKIM/Go channels, cursors, reconciliation and the verified V-1…V-7 results. |
 | `architecture/open-decisions.md` | Decision log (D-01…D-30). Not a source of authority. |
 
 ### `infra/`: environment, units and tooling
@@ -135,29 +139,32 @@ Both are gitignored.
 |---|---|
 | `.env.example` | Safe template of every contract variable, with secrets empty. Generated from `docs/contracts/environment.md`. |
 | `README.md` | What lives in `infra/`. |
-| `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install, dkim-dev-key, start/stop/restart, status, logs, uninstall, destroy-volumes. |
+| `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install, dkim-dev-key, start/stop/restart, status, logs, systemctl pass-through, uninstall, destroy-volumes, verify. |
 | `bin/smarthost-machine-helper.sh` | Runs inside the Podman engine's systemd namespace. It installs and uninstalls units and passes commands through to `systemctl --user` and `journalctl --user`. |
 | `lib/smarthost_render.py` | Regenerates `.env.example` and creates `infra/.env` with random development secrets. It renders per-consumer env files and Quadlet/systemd templates, and refuses non-contract variables. |
 | `nginx/Containerfile` | nginx 1.28 image without the default site. |
 | `nginx/templates/smarthost.conf.template` | HTTPS server. `/healthz` goes to PHP-FPM over FastCGI, with request-time DNS resolution. Also a loopback-only health server. |
 | `postgres/bootstrap.sh` | Idempotent role bootstrap: five least-privilege roles; owner of the database and schema; runtime roles get CONNECT and USAGE only. |
-| `quadlet/smarthost-internal.network.in` | `Internal=true` network `10.89.20.0/24`, with no Internet route. |
+| `quadlet/smarthost.pod.in` | The `smarthost` pod. Every container joins it. It owns the network attachment, the service aliases and the two published loopback ports. |
+| `quadlet/smarthost-internal.network.in` | `Internal=true` network `10.89.20.0/24`, with no Internet route. The pod is its only member. |
 | `quadlet/smarthost-*.volume.in` (6) | Named volumes: postgres-data, postfix-queue, postfix-observability, dsn-spool, opendkim-keys, opendkim-tables. |
 | `quadlet/smarthost-postgres.container.in` | PostgreSQL 16.15, with readiness via `pg_isready`. |
 | `quadlet/smarthost-db-bootstrap.container.in` | Oneshot that runs `infra/postgres/bootstrap.sh` after PostgreSQL. |
 | `quadlet/smarthost-symfony-app.container.in` | PHP-FPM (alias `symfony-app`), with an FPM-ping health check. |
 | `quadlet/smarthost-webhook-worker.container.in` | Webhook-worker unit from the same image (a Phase 1 placeholder process). |
-| `quadlet/smarthost-nginx.container.in` | nginx. Publishes `PROXY_HTTPS_BIND`; TLS from Podman secrets. |
-| `quadlet/smarthost-validator.container.in` | Python validator probe as uid 10001. |
+| `quadlet/smarthost-nginx.container.in` | nginx (pod member). Its HTTPS port is published by the pod as `PROXY_HTTPS_BIND`. TLS comes from Podman secrets. |
+| `quadlet/smarthost-validator.container.in` | Python validator probe as uid 10001 (pod member). |
 | `quadlet/smarthost-delivery.container.in` | Go probe as `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID`. Observability is read-only; the spool is read-write. |
 | `quadlet/smarthost-postfix.container.in` | Postfix with the queue, observability and spool volumes, and TLS secrets. |
 | `quadlet/smarthost-opendkim.container.in` | OpenDKIM, the only container that mounts the key volumes. |
-| `quadlet/smarthost-mailpit.container.in` | Mailpit v1.31.0. UI published at `MAILPIT_UI_BIND`. |
+| `quadlet/smarthost-mailpit.container.in` | Mailpit v1.31.0 (pod member). Its UI is published by the pod at `MAILPIT_UI_BIND`. |
 | `quadlet/smarthost-fake-smtp.container.in` | Fake SMTP (alias `fake-smtp`), internal only. |
 | `systemd/smarthost.target.in` | Groups every unit (`PartOf`/`WantedBy`) so the topology starts and stops together. |
 | `systemd/smarthost-postfix-queue-snapshot.{service,timer}.in` | Periodic `podman exec … smarthost-queue-snapshot`. |
 | `systemd/smarthost-postfix-logrotate.{service,timer}.in` | Daily `podman exec … smarthost-postfix-logrotate`. |
-| `tests/phase1_client.py` | Throwaway test client: authenticated submission on 587, synthetic DSN on port 25, PostgreSQL wrong-password test. |
+| `tests/phase1-verify.sh` | Phase 1 verification suite behind `smarthostctl verify [--clean]`. It runs 22 test groups and writes an evidence log to `infra/.generated/verify/`. The groups cover images, units, clean start, readiness, ports, network isolation, the live-mode guard, nginx→FPM, PostgreSQL roles, mail capture, DKIM, the milter-failure policy, V-1…V-7, the DSN spool, fake SMTP, persistence, stop/start and untouched neighbours. |
+| `tests/phase1_client.py` | Test client run inside the tool image on the internal network: submission (with queue ID), port-25 DSN injection, Mailpit lookup, cryptographic DKIM verification, fake-SMTP scenarios, PostgreSQL role/privilege probes and inotify watching. |
+| `tests/Containerfile`, `tests/requirements.txt` | Verification tool image (`localhost/smarthost-testtools:dev`): Python with dkimpy, psycopg and inotify_simple. Test-only; never a service. |
 
 ### Service images
 
@@ -205,7 +212,7 @@ The per-directory `README.md` files describe each component's role and limits.
 flowchart LR
     subgraph host["Workstation / VPS (rootless Podman)"]
         direction LR
-        subgraph net["smarthost-internal (Internal=true, no Internet route)"]
+        subgraph net["pod smarthost on smarthost-internal (Internal=true, no Internet route)"]
             nginx["nginx :443"] -- FastCGI --> fpm["symfony-app<br/>PHP-FPM :9000"]
             fpm --> pg[(postgres)]
             ww["webhook-worker"] --> pg

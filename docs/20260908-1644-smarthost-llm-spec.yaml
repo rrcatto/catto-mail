@@ -137,7 +137,7 @@ architecture:
     symfony_app:
       language: PHP
       framework: Symfony
-      runtime: PHP-FPM, reachable only from nginx on the internal Podman network
+      runtime: PHP-FPM, never host-published; called only by nginx over FastCGI inside the smarthost pod
       public: false
       exposed_through: reverse_proxy
       responsibilities:
@@ -269,7 +269,7 @@ architecture:
     opendkim:
       role: outbound DKIM signing for Postfix through the Milter protocol
       public: false
-      network: private Podman network only; reachable from Postfix only
+      network: never host-published; runs in the smarthost pod and is called only by Postfix (milter)
       key_custody: >-
         DKIM private keys are mounted into OpenDKIM only; Go, Symfony and Python never hold
         them and never sign
@@ -410,6 +410,16 @@ podman_environment:
     principle: >-
       Client applications and unrelated projects may run on the same Podman machine during
       development, but as separate projects, networks and databases.
+    pod:
+      name: smarthost
+      rule: >-
+        All Smarthost containers run in one Podman pod named smarthost. The pod joins the internal
+        network, carries the service aliases used by the environment contract (postgres,
+        symfony-app, postfix, opendkim, mailpit, fake-smtp) and publishes the only host ports.
+      shared_network_namespace: >-
+        Pod members share one network namespace, so listening ports must not collide, and loopback
+        (127.0.0.1) is shared by every member. No service may treat a loopback client address as
+        authorisation; for example, Postfix port 25 never relays for any client address.
     smarthost_services:
       - reverse-proxy (nginx)
       - symfony-app (PHP-FPM)
@@ -423,11 +433,11 @@ podman_environment:
       - fake-smtp
     other_projects: client applications and unrelated projects run as separate Podman projects
   networking:
-    - Smarthost internal services use a dedicated internal Podman network.
+    - Smarthost services run in the smarthost pod, which is attached to a dedicated internal Podman network.
     - PostgreSQL is never exposed publicly.
     - Python and Go expose no public ports.
-    - PHP-FPM is reachable only from nginx on the internal network.
-    - OpenDKIM is reachable only from Postfix on the internal network.
+    - PHP-FPM and OpenDKIM are never host-published; they are reached only inside the pod and on the internal network.
+    - Host ports are published by the pod, never by individual containers.
     - Development Mailpit UI must bind only to a local/development interface.
     - Client applications access Smarthost through the same HTTP API boundary expected in production.
   process_management:

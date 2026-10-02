@@ -1,5 +1,5 @@
 [Unit]
-Description=Smarthost Symfony PHP-FPM (internal; reached only by nginx via FastCGI)
+Description=Smarthost Symfony PHP-FPM (not published; called by nginx via FastCGI)
 PartOf=smarthost.target
 Wants=smarthost-db-bootstrap.service
 After=smarthost-db-bootstrap.service
@@ -8,8 +8,7 @@ After=smarthost-db-bootstrap.service
 ContainerName=smarthost-symfony-app
 Image=localhost/smarthost-app:dev
 Pull=never
-Network=smarthost-internal.network
-NetworkAlias=symfony-app
+Pod=smarthost.pod
 EnvironmentFile=@GENERATED@/env/app.env
 HealthCmd=smarthost-fpm-healthcheck
 HealthInterval=15s

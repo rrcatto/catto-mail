@@ -16,10 +16,12 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
 
 ## Current state
 - **Phase 0:** complete.
-- **Phase 1** (rootless Podman development environment): in progress. Images, Quadlet units and
-  the topology exist and start healthy. The verification suite and the V-1…V-7 verifications are
-  pending. See `docs/development-environment.md`.
+- **Phase 1** (rootless Podman development environment): complete. `infra/bin/smarthostctl verify`
+  (optionally `--clean`) re-proves it. See `docs/development-environment.md`.
 - Do not start Phase 2 or later work unless the user explicitly asks for it.
+
+## Public repository
+This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
 
 ## Rules that are easy to get wrong
 - **Podman only, rootless, Quadlet.** In this development setup the engine runs in the WSL
@@ -30,6 +32,10 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
     `/usr/local/bin/enterns`.
   - Do not run the in-machine `podman` CLI from an ad-hoc `wsl.exe` shell outside that
     namespace, because it creates a separate rootless user namespace.
+- **All Smarthost containers run in the `smarthost` pod** (`infra/quadlet/smarthost.pod.in`).
+  New containers join it with `Pod=smarthost.pod`. Host ports and network aliases belong on the
+  pod, never on a container. Loopback is shared by all members, so never use `127.0.0.1` as an
+  authorisation boundary.
 - **Other projects' containers may run on the same Podman machine.** Never stop, modify or
   remove any container, volume or network that is not Smarthost's (`smarthost-*`, label
   `project=smarthost`). Smarthost avoids common host ports such as 80, 443, 5433 and 8025.
@@ -51,6 +57,7 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
 - `python3 scripts/check-contracts.py` must pass.
 - For infrastructure changes:
   - `infra/bin/smarthostctl install` must succeed (the Quadlet dry-run validates units);
-  - `infra/bin/smarthostctl status` must show the services healthy.
+  - `infra/bin/smarthostctl status` must show the services healthy;
+  - `infra/bin/smarthostctl verify` must pass.
 - Report the files changed, the checks run and their results, anything unverified, and any
   specification ambiguity (see `AGENTS.md`).

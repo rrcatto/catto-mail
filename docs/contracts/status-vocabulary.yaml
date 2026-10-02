@@ -321,9 +321,9 @@ event_source:
     postfix_log:
       origin: spec
       key_rule: >-
-        "<log_generation_id>:<record_position>" — the identity of the log
-        generation plus the record's position in it (exact derivation is a
-        Phase 1 verification task)
+        "<log_generation_id>:<record_position>" — the SHA-256 fingerprint of the
+        generation's first record plus the record's byte position in the
+        uncompressed generation (verified in Phase 1; see postfix-integration §8 V-1)
     dsn_spool:
       origin: spec
       key_rule: "<Maildir unique file name> (stable across claim, retry and restart)"

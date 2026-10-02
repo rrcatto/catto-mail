@@ -66,16 +66,20 @@ are listed here so they are visible for review.
 
 ## 3. Verification tasks (not architecture decisions)
 
-These are confirmed against the Phase 1 container images before Phase 4 relies on them. The full
-list is in `docs/architecture/postfix-integration.md` §8:
+All seven were resolved in Phase 1 against the actual container images. The observed results are
+recorded in `docs/architecture/postfix-integration.md` §8 and re-proved by
+`infra/bin/smarthostctl verify`:
 
-* **V-1:** log-generation identity;
+* **V-1:** log-generation identity — a first-record fingerprint, because compressed generations
+  get a new inode;
 * **V-2:** `postlogd` ownership and `postfix logrotate` behaviour;
 * **V-3:** `postqueue -j` format;
-* **V-4:** shared GID under rootless Podman;
+* **V-4:** shared identity under rootless Podman;
 * **V-5:** Maildir delivery semantics;
 * **V-6:** milter scope and tempfail;
 * **V-7:** inotify on the shared volumes.
+
+None of them required an architectural change.
 
 ## 4. Remaining open decisions
 

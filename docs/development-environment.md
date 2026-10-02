@@ -1,8 +1,7 @@
 # Development Environment (Phase 1)
 
-**Status:** in progress (version 0.1). The topology builds, installs and starts with every
-service healthy. The automated verification suite and several V-1…V-7 verifications are still
-pending (§6).
+**Status:** Phase 1 complete. `smarthostctl verify --clean` passes all 162 checks, starting from
+destroyed volumes (§6).
 
 ## 1. Requirements
 
@@ -10,7 +9,7 @@ pending (§6).
   6.0.2 in a WSL Podman machine (Fedora 44) and client `podman-remote` 6.1.1.
 - A systemd user manager on the engine host, with lingering enabled.
 - Python 3.10 or later on the workstation (for `infra/lib/smarthost_render.py` and the contract
-  checker).
+  checker). `curl` is needed by the verification suite.
 
 ### WSL Podman machine notes
 
@@ -34,6 +33,7 @@ flowchart TD
     C --> D[install<br/>render env files + units, Quadlet dry-run, daemon-reload]
     D --> E[dkim-dev-key<br/>disposable key in OpenDKIM volume]
     E --> F[start<br/>smarthost.target]
+    F --> V[verify<br/>Phase 1 suite]
     F --> G{status / logs}
     G --> H[restart / stop]
     H --> F
@@ -48,21 +48,35 @@ flowchart TD
 | `smarthostctl build` | Builds the seven Smarthost images (`localhost/smarthost-*:dev`). |
 | `smarthostctl secrets` | Creates disposable self-signed TLS certificates for Postfix and nginx as Podman secrets. |
 | `smarthostctl install` | Renders the files, installs them, runs the Quadlet dry-run and reloads systemd. |
-| `smarthostctl dkim-dev-key [domain selector]` | Generates a dev DKIM key inside the OpenDKIM volume. The default is `smarthost-dev.test` / `phase1`. |
-| `smarthostctl start`, `stop`, `restart` | Operate `smarthost.target`. |
+| `smarthostctl dkim-dev-key [domain selector]` | Generates a dev DKIM key inside the OpenDKIM volume, creating the volume with its project label if needed. The default is `smarthost-dev.test` / `phase1`. |
+| `smarthostctl start` | Starts `smarthost.target`. It returns once every service reports healthy (`Notify=healthy`). |
+| `smarthostctl stop`, `restart` | Stop the target, its timers, every member service and the pod by name. `systemctl stop smarthost.target` alone returns before PartOf-propagated stops finish, so naming the members makes stop deterministic. `restart` is a stop followed by a start. |
 | `smarthostctl status [unit]`, `logs <unit> [n]` | Show unit status and the unit's journal. |
+| `smarthostctl systemctl <args>` | Pass-through to `systemctl --user` on the engine host. |
 | `smarthostctl uninstall` | Stops the services and removes the units. Volumes are kept. |
-| `smarthostctl destroy-volumes --yes` | Deletes every volume labelled `project=smarthost`. |
-| `smarthostctl verify` | Reserved for the Phase 1 verification suite. It is **not written yet**, so the command currently fails. |
+| `smarthostctl destroy-volumes --yes` | Deletes the six Smarthost volumes by name. Nothing else is touched. |
+| `smarthostctl verify [--clean]` | Runs the Phase 1 verification suite (§6). `--clean` first destroys the Smarthost volumes and network to prove a clean-state start. |
 
 ## 3. Topology
 
-All containers are attached to **`smarthost-internal`**: `Internal=true`, subnet
-`10.89.20.0/24`, aardvark DNS aliases.
+All Smarthost containers run in one Podman **pod**, `smarthost`, defined in
+`infra/quadlet/smarthost.pod.in`.
 
-| Unit (`smarthost-…`) | Image | Alias | Identity | Readiness check |
+- **Networking is owned by the pod.** The pod (its infra container `smarthost-infra`) is the only
+  thing attached to **`smarthost-internal`** (`Internal=true`, subnet `10.89.20.0/24`).
+  - It carries the aardvark DNS aliases `postgres`, `symfony-app`, `postfix`, `opendkim`,
+    `mailpit` and `fake-smtp`, so the environment contract's host names are unchanged.
+  - It publishes the only host ports.
+- **Members share the pod's network namespace.** Ports cannot collide, and loopback is shared.
+  For that reason Postfix port 25 no longer has `permit_mynetworks`: it relays for no client
+  address, including `127.0.0.1`.
+- **Throwaway test clients** from the verification suite run outside the pod on
+  `smarthost-internal` and reach the services through the same aliases.
+
+| Unit (`smarthost-…`) | Image | Pod alias | Identity | Readiness check |
 |---|---|---|---|---|
-| postgres | postgres:16.15-trixie | `postgres` | image default | `pg_isready` |
+| pod (`smarthost-pod.service`) | infra (`smarthost-infra`) | — | — | — |
+| postgres | postgres:16.15-trixie | `postgres` | image default | `pg_isready -U … -d …` |
 | db-bootstrap (oneshot) | postgres:16.15-trixie | — | admin connection | exit status |
 | symfony-app | smarthost-app | `symfony-app` | FPM master root, workers www-data | FastCGI `/fpm-ping` |
 | webhook-worker | smarthost-app | — | www-data | heartbeat file |
@@ -77,7 +91,7 @@ All containers are attached to **`smarthost-internal`**: `Internal=true`, subnet
 The timers are `smarthost-postfix-queue-snapshot.timer` (every
 `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS`) and `smarthost-postfix-logrotate.timer` (daily).
 
-### Published host ports
+### Published host ports (published by the pod; verified with `podman port smarthost-infra`, T05)
 
 | Bind | Service | Why |
 |---|---|---|
@@ -85,9 +99,9 @@ The timers are `smarthost-postfix-queue-snapshot.timer` (every
 | `127.0.0.1:8026` → 8025 | Mailpit UI | Development inspection (`MAILPIT_UI_BIND`). 8025 is often taken by other local Mailpit instances. |
 
 PostgreSQL, PHP-FPM, OpenDKIM, Postfix, the Python and Go workers, and fake SMTP publish no
-ports.
+ports. PostgreSQL is unreachable even from other Podman networks.
 
-### Persistent volumes
+### Persistent volumes (verified across full container recreation, T19)
 
 | Volume | Mounted by |
 |---|---|
@@ -98,41 +112,70 @@ ports.
 | `smarthost-opendkim-keys` | opendkim only |
 | `smarthost-opendkim-tables` | opendkim only |
 
-## 4. Mail safety
+## 4. Mail safety (verified, T06/T07/T10/T14)
 
 Three independent layers keep development mail off the Internet:
 
-1. **Capture mode.** With `SMARTHOST_LIVE_DELIVERY_ENABLED=false`, Postfix relays all outbound
-   mail to `POSTFIX_RELAYHOST` (`[mailpit]:1025`) and refuses to start without one.
-2. **Live-mode guard.** `SMARTHOST_LIVE_DELIVERY_ENABLED=true` is rejected unless
-   `SMARTHOST_ENV=production` and the relayhost is empty.
-3. **Network isolation.** `smarthost-internal` has no route out. An experiment on an equivalent
-   internal network returned "Network is unreachable" for TCP to 1.1.1.1, and external DNS had no
-   answer. Published loopback ports and container aliases still worked.
+1. **Capture mode.** With `SMARTHOST_LIVE_DELIVERY_ENABLED=false`, Postfix relays all outbound mail
+   to `POSTFIX_RELAYHOST` (`[mailpit]:1025`).
+   - A message submitted to `someone@example.com` arrived in Mailpit, and Postfix's log shows
+     `relay=mailpit[…]:1025 status=sent` and no other relay attempt.
+   - With Mailpit stopped, the message stayed **deferred** ("Host not found") instead of falling
+     back to an MX lookup, and it was delivered to Mailpit when Mailpit returned.
+2. **Live-mode guard.** The Postfix image refuses to start (exit 64) in each of these cases:
+   - live mode in `development` or `test`;
+   - live mode in `production` while a relayhost is still set;
+   - capture mode without a relayhost;
+   - any value of the switch other than `true` or `false`.
+3. **Network isolation.** Containers on `smarthost-internal` have no default route.
+   - TCP to `1.1.1.1:25` fails with "Network is unreachable", and public MX hosts do not resolve.
+   - Published loopback ports and container aliases still work.
 
-## 5. Facts observed so far (Phase 1)
+## 5. Facts established in Phase 1
 
 | Topic | Observation |
 |---|---|
 | Postfix version | 3.10.13 (Debian trixie). `postqueue -j` is available. |
 | `maillog_file_prefixes` | Default `/var, /dev/stdout`, so the observability directory must be under `/var`. |
-| `maillog_file_permissions` | Exists, default `0600`. Set to `0640`. Observed log file: `-rw-r----- root:5000` in a setgid `2750 root:5000` directory. |
-| `milter_default_action` | The default in 3.10 is **`shutdown`**, so `tempfail` is set explicitly (globally and on the submission service). |
-| Health check | Sending `QUIT` before the greeting triggers Postfix's pipelining protection (`554 5.5.0 SMTP protocol synchronization`), so the check waits for the 220 banner. |
-| OpenDKIM | 2.11.0. `opendkim-genkey` needs the `openssl` CLI. Dev keys are `0600 opendkim:opendkim` in the keys volume. |
-| PostgreSQL bootstrap | The runtime roles connect and get `permission denied for schema public` on `CREATE TABLE`, as intended. |
-| First start | During the first start, the network and volume units failed once with no error output. A manual run, and every later start, succeeded. This is still under investigation as part of the clean-state test. |
+| `maillog_file_permissions` | Default `0600`; set to `0640`. The log file is `0640 root:5000` in a setgid `2750 root:5000` directory. |
+| `milter_default_action` | The 3.10 default is **`shutdown`**, so `tempfail` is set explicitly (globally and on the submission service). |
+| Health check | Sending `QUIT` before the greeting triggers Postfix's pipelining protection (`554 5.5.0`), so the check waits for the 220 banner. |
+| Cyrus SASL | Debian's Cyrus SASL does not look in `/etc/postfix/sasl` unless `cyrus_sasl_config_path` is set, and `smtpd.conf` must be readable by the `postfix` user. |
+| Config file modes | `virtual(8)` runs as the delivery UID and must read the bounce-recipient table, so the entrypoint writes configuration with umask `022`. Only the shared-volume layout uses `027`. The sasldb is explicitly `0640 root:postfix`. |
+| OpenDKIM | 2.11.0. `opendkim-genkey` needs the `openssl` CLI. Dev keys are `0600 opendkim:opendkim` in the keys volume. It signs only mail tagged `ORIGINATING` by the submission service. |
+| PostgreSQL roles | `smarthost_owner` can create tables. `smarthost_app`, `smarthost_webhook`, `smarthost_validator` and `smarthost_delivery` cannot (`permission denied for schema public`). None is superuser, createdb or createrole, and a wrong password is refused. |
+| nginx → PHP-FPM | `/healthz` is served with `sapi=fpm-fcgi`. After a PHP-FPM restart (new container and IP), nginx reaches it again without being restarted, because it resolves the upstream at request time. |
+| `smarthost.target` stop | `systemctl stop smarthost.target` returns before PartOf-propagated stops complete. `smarthostctl stop` names every member, so stop is deterministic. |
+| First-start failure | The one-off network/volume unit failure seen during the very first installation was not reproduced in two clean-state runs that destroyed all volumes and the network. |
+| Postfix V-1…V-7 | See `docs/architecture/postfix-integration.md` §8. |
 
-## 6. Pending (Phase 1 not yet complete)
+## 6. Verification suite
 
-- The automated verification suite (`infra/tests/phase1-verify.sh`). The test client
-  `infra/tests/phase1_client.py` exists.
-- An end-to-end test: submission on 587, then Mailpit, with no Internet delivery attempt.
-- Verifying the DKIM signature on a Mailpit message.
-- Milter-unavailable behaviour (expected: 4xx tempfail on submission; port 25 unaffected).
-- Format of a non-empty `postqueue -j` snapshot, and log rotation and compression (V-2, V-3).
-- DSN spool file ownership and mode (expected `0600` as UID 5001), plus the claim-by-rename test
-  from the delivery identity (V-5).
-- Shared-GID read access from the delivery container (V-4).
-- Restart persistence of PostgreSQL and the Postfix queue.
-- A clean-state start from destroyed volumes.
+```sh
+infra/bin/smarthostctl verify          # against the running environment
+infra/bin/smarthostctl verify --clean  # destroy Smarthost volumes/network first (disposable data)
+```
+
+The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
+`localhost/smarthost-testtools:dev` on the internal network and writes an evidence log to
+`infra/.generated/verify/` (gitignored). It exits non-zero if any check fails.
+
+| Group | Proves |
+|---|---|
+| T01–T02 | All images build; render/install passes the Quadlet dry-run; every unit loads |
+| T03–T04 | Clean-state start; all 10 services healthy; bootstrap oneshot succeeded; timers active |
+| T05–T06 | Every service is a pod member sharing the pod network namespace; only the pod publishes ports (nginx HTTPS and the Mailpit UI, both on loopback); the pod sits only on the `Internal=true` network; no Internet egress |
+| T07 | The live-mode guard refuses every unsafe combination; a pod member cannot relay through port 25 via `127.0.0.1` |
+| T08 | nginx → FastCGI → PHP-FPM, including after a PHP-FPM restart |
+| T09 | PostgreSQL 16 version, role privileges and isolation from other networks |
+| T10–T11 | Submission on 587 → Mailpit only, with a cryptographically valid DKIM signature |
+| T12 | The DKIM private key is visible only to OpenDKIM |
+| T13 | OpenDKIM down → 4xx tempfail and no unsigned mail; port 25 unaffected; recovery |
+| T14–T17 | V-1…V-7: snapshots, rotation, DSN spool claim, inotify, shared identity |
+| T18 | Fake SMTP reproduces 250/421/450/451/550, DATA discard and timeout |
+| T19 | Persistence of PostgreSQL, the Postfix queue (held message), the observability log, the DSN spool and the DKIM key across a restart that recreates every container |
+| T20 | Stop leaves nothing running; start returns to healthy |
+| T21 | Contract checks pass |
+| T22 | Containers of other Podman projects are unchanged |
+
+The latest clean-state run passed all 162 checks.

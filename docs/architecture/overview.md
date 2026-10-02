@@ -139,7 +139,7 @@ stateDiagram-v2
 
 | Service | Production public | Development published |
 |---|---|---|
-| nginx | 443 | `127.0.0.1:8443` |
+| nginx (published by the `smarthost` pod) | 443 | `127.0.0.1:8443` |
 | Postfix | 25 (bounce domain only), 587 (authenticated) | none, or loopback for tests |
 | PHP-FPM, webhook worker, OpenDKIM, Python, Go, PostgreSQL | **none** | **none** |
-| Mailpit | n/a | `127.0.0.1:8025` |
+| Mailpit | n/a | `127.0.0.1:8026` |

@@ -164,14 +164,14 @@ Client applications and unrelated projects may share the same Podman machine dur
 ```text
 Podman machine
 │
-├── Smarthost project/network
-│   ├── nginx reverse proxy          [only public HTTPS entry]
-│   ├── Symfony app (PHP-FPM)        [internal; reached via FastCGI]
+├── Smarthost pod "smarthost" on the internal network
+│   ├── nginx reverse proxy          [only public HTTPS entry; published by the pod]
+│   ├── Symfony app (PHP-FPM)        [not published; called by nginx via FastCGI]
 │   ├── Symfony webhook worker       [same image, separate unit]
 │   ├── Python validator
 │   ├── Go delivery daemon
 │   ├── Postfix
-│   ├── OpenDKIM                     [milter; reachable from Postfix only]
+│   ├── OpenDKIM                     [milter; not published; called by Postfix only]
 │   ├── PostgreSQL
 │   ├── Mailpit                      [development only]
 │   └── fake SMTP server             [development/test]
@@ -179,6 +179,14 @@ Podman machine
 └── Client application and other projects
     └── their own networks and databases
 ```
+
+In development all Smarthost containers run in a single Podman **pod** named `smarthost`:
+
+- The pod alone joins the internal network, carries the service aliases (`postgres`,
+  `symfony-app`, `postfix`, `opendkim`, `mailpit`, `fake-smtp`) and publishes the only host ports
+  (nginx HTTPS and the Mailpit UI).
+- Members share one network namespace, so loopback is shared. No service treats `127.0.0.1` as a
+  trusted client: Postfix port 25 never relays, whatever the client address.
 
 Smarthost and its client applications should remain independently deployable. In production
 Smarthost runs on its own containerised VPS.

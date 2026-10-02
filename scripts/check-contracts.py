@@ -40,6 +40,7 @@ DDL = ROOT / "docs/schema/reference-schema.sql"
 SCHEMA_MD = ROOT / "docs/schema/schema.md"
 ENV_MD = ROOT / "docs/contracts/environment.md"
 ENV_EXAMPLE = ROOT / "infra/.env.example"
+LICENSE_FILE = ROOT / "LICENSE"
 DECISION_LOG = ROOT / "docs/architecture/open-decisions.md"
 OTHER_DOCS = [
     ROOT / "docs/architecture/overview.md",
@@ -248,6 +249,15 @@ def check_vocabulary(spec: dict, vocab: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+def check_licence(api: dict) -> None:
+    """The OpenAPI licence metadata must match the repository LICENSE (MIT)."""
+    first_line = LICENSE_FILE.read_text(encoding="utf-8").splitlines()[0].strip() if LICENSE_FILE.is_file() else ""
+    check(first_line == "MIT License", f"LICENSE: expected an MIT licence file, found {first_line!r}")
+    lic = api.get("info", {}).get("license", {})
+    check(lic.get("name") == "MIT" and lic.get("identifier") == "MIT",
+          f"openapi: info.license must be name=MIT identifier=MIT to match LICENSE, found {lic}")
+
+
 def check_openapi(spec: dict, vocab: dict, api: dict) -> None:
     schemas = api["components"]["schemas"]
     for name, key in OPENAPI_ENUMS.items():
@@ -440,6 +450,7 @@ def main() -> int:
     check_spec_metadata(spec)
     check_vocabulary(spec, vocab)
     check_openapi(spec, vocab, api)
+    check_licence(api)
     check_ddl(spec, vocab, sql, SCHEMA_MD.read_text(encoding="utf-8"))
     check_environment(spec, api, ENV_MD.read_text(encoding="utf-8"), ENV_EXAMPLE.read_text(encoding="utf-8"))
     check_human_spec(spec, vocab, human)

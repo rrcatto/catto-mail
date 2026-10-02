@@ -63,6 +63,10 @@ mkdir -p "$spool/processing" "$spool/done" "$spool/failed"
 chown "$duid:$gid" "$spool" "$spool/processing" "$spool/done" "$spool/failed"
 chmod 2770 "$spool" "$spool/processing" "$spool/done" "$spool/failed"
 # inbound/ (Maildir) is created by virtual(8) on first delivery, owned by $duid.
+# Configuration files below must be readable by unprivileged Postfix daemons:
+# smtpd (postfix user) reads the SASL config; virtual(8) runs as $duid and reads
+# the bounce-recipient table. Secrets (sasldb2) get explicit modes.
+umask 022
 
 # ---------------------------------------------------------------------- main.cf
 cat > /etc/postfix/main.cf <<EOF
@@ -99,7 +103,9 @@ virtual_mailbox_maps = regexp:/etc/postfix/smarthost_bounce_recipients
 virtual_uid_maps = static:$duid
 virtual_gid_maps = static:$gid
 virtual_minimum_uid = 100
-smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+# Port 25 never relays, whatever the client address: in the Smarthost pod every
+# container reaches Postfix from 127.0.0.1, which is in mynetworks.
+smtpd_relay_restrictions = reject_unauth_destination
 smtpd_recipient_restrictions = reject_unauth_destination
 
 # TLS
@@ -111,6 +117,8 @@ smtp_tls_security_level = may
 # SASL for the submission service (Cyrus sasldb).
 smtpd_sasl_type = cyrus
 smtpd_sasl_path = smtpd
+# Debian's Cyrus SASL does not search /etc/postfix/sasl by default (observed Phase 1).
+cyrus_sasl_config_path = /etc/postfix/sasl
 smtpd_sasl_local_domain = \$myhostname
 smtpd_sasl_auth_enable = no
 

@@ -4,7 +4,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 **bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
 start, so it can later serve third-party clients as a SaaS.
 
-**Version:** 0.1 · **Status:** Phase 0 complete; Phase 1 in progress
+**Version:** 0.1.1 · **Status:** Phases 0 and 1 complete
 
 ---
 
@@ -41,8 +41,9 @@ flowchart LR
     pf -- "log · queue snapshots · DSN Maildir" --> del
 ```
 
-Everything runs under **rootless Podman** with **Quadlet/systemd user units**. There is no
-Docker, no Kubernetes and no message broker: PostgreSQL is the only coordination medium.
+Everything runs under **rootless Podman** with **Quadlet/systemd user units**, in a single pod
+named `smarthost` on an internal network with no Internet route. There is no Docker, no
+Kubernetes and no message broker: PostgreSQL is the only coordination medium.
 
 ## Repository layout
 
@@ -52,7 +53,7 @@ validator/        Python validator image (Phase 1 probe)
 delivery/         Go delivery image (Phase 1 probe)
 postfix/          Postfix image: capture/live safety switch, DSN spool, snapshots
 opendkim/         OpenDKIM milter image and disposable dev-key tool
-infra/            Quadlet templates, systemd timers, nginx, DB bootstrap, smarthostctl
+infra/            Quadlet templates (smarthost pod), systemd timers, nginx, DB bootstrap, smarthostctl, verification suite
 tests/fake-smtp/  Deterministic fake SMTP server
 docs/             Specifications, contracts, architecture, schema, API
 scripts/          Contract consistency checker
@@ -84,6 +85,7 @@ infra/bin/smarthostctl install      # render + install Quadlet/systemd units
 infra/bin/smarthostctl dkim-dev-key # disposable dev DKIM key (OpenDKIM volume only)
 infra/bin/smarthostctl start        # start the whole topology
 infra/bin/smarthostctl status
+infra/bin/smarthostctl verify       # Phase 1 verification suite
 ```
 
 Development mail never leaves the machine. Postfix runs in capture mode, relaying everything to
@@ -101,7 +103,7 @@ python3 scripts/check-contracts.py
 | Phase | Status |
 |---|---|
 | 0: Architecture and contracts | **Complete** (specification 2.1) |
-| 1: Rootless Podman development environment | **In progress.** Images, units and topology are built and the services start healthy. The verification suite and the V-1…V-7 Postfix verifications are not finished. |
+| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 162/162 checks. |
 | 2–10 | Not started |
 
 See [CHANGELOG.md](CHANGELOG.md).

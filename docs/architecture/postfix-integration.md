@@ -15,9 +15,10 @@ keys, and never implements a milter.
 | 4 | Queue snapshots | Postfix → Go | Atomic JSON queue snapshots in the shared observability volume (`queue/`) | Go mounts it **read-only** |
 | 5 | Inbound DSN/bounce/complaint | Postfix → Go | Maildir on the shared DSN spool volume | Go mounts it read-write, for atomic claim by rename |
 
-The verification tasks in §8 must be confirmed against the Phase 1 Postfix and OpenDKIM images
-before Phase 4 code relies on them. They are implementation checks, not open architecture
-decisions.
+The verification tasks V-1…V-7 were resolved in Phase 1 against the actual images (Postfix
+3.10.13 and OpenDKIM 2.11.0 on Debian trixie, rootless Podman 6.0). §8 records the observed
+results; the rest of this document already reflects them. The Phase 1 suite
+(`infra/bin/smarthostctl verify`) re-proves them.
 
 ## 1. Submission (Go → Postfix)
 
@@ -60,7 +61,8 @@ decisions.
 
 ## 2. DKIM signing (Postfix ↔ OpenDKIM)
 
-* OpenDKIM listens on `SMARTHOST_OPENDKIM_MILTER_ADDRESS`, which is reachable only from Postfix.
+* OpenDKIM listens on `SMARTHOST_OPENDKIM_MILTER_ADDRESS`. It is never host-published, and Postfix
+  is its only client; both run in the `smarthost` pod.
   Private keys are mounted only into OpenDKIM (`OPENDKIM_KEY_DIR`).
 * The milter is attached **only to the authenticated submission service** (`smtpd_milters` set on
   the 587 service in `master.cf`).
@@ -69,41 +71,60 @@ decisions.
   * `non_smtpd_milters` (Postfix-generated bounces and local deliveries to the DSN spool).
 
   Inbound DSN traffic is therefore never treated as outbound client mail.
+* **Signing scope.** OpenDKIM signs only messages whose `{daemon_name}` milter macro is
+  `ORIGINATING`. That value is set via `milter_macro_daemon_name` on the submission service only.
 * **Signing basis.** The SigningTable and KeyTable in `OPENDKIM_TABLES_DIR` contain only domains
   whose `sending_domains.status = verified` and `dkim_status = active`, each with that domain's
   `dkim_selector`. Generating these tables from the database and provisioning keys is
   infrastructure tooling (Phase 8 for production keys; a development test key in Phase 1).
 * **Failure policy.**
-  * For submitted mail, `milter_default_action = tempfail`. If OpenDKIM is unavailable or errors,
-    Postfix answers 4xx. Go keeps the message `queued` and retries with backoff, so it is never
-    sent unsigned.
+  * For submitted mail, `milter_default_action = tempfail` is set explicitly. Postfix 3.10's
+    default is `shutdown`, so the setting matters.
+  * If OpenDKIM is unavailable, Postfix fails the milter at connection time. It logs
+    `milter-reject: CONNECT … 451 4.7.1 Service unavailable - try again later` and answers the
+    session's next command with a 4xx; the observed reply was `454 4.3.0 Try again later` at
+    STARTTLS. Nothing is queued.
+  * Go keeps the message `queued` and retries with backoff, so it is never sent unsigned.
   * In production, the API's submit step and Go both refuse jobs whose sending domain is not
     verified with active DKIM. OpenDKIM is therefore never asked to sign for an unknown domain.
-* **Testing.** Phase 4 tests two cases against Mailpit: a signed message, and the tempfail-and-retry
-  behaviour when OpenDKIM is stopped.
+* **Testing.** Phase 1 verifies both cases against Mailpit:
+  * a signed message, cryptographically verified with dkimpy against the published key record;
+  * tempfail when OpenDKIM is stopped, with port 25 unaffected and signing resuming once OpenDKIM
+    returns.
+
+  Phase 4 adds Go's retry behaviour.
 
 ## 3. Transport events (Postfix log → Go)
 
-**Writer.** Postfix ≥ 3.4 `postlogd` writes
+**Writer.** Postfix `postlogd` writes
 `maillog_file = ${SMARTHOST_POSTFIX_OBSERVABILITY_DIR}/log/postfix.log`. There is no syslog and
-no journald.
+no journald. Postfix 3.10 only accepts `maillog_file` paths under `maillog_file_prefixes`
+(`/var, /dev/stdout`), so the directory must be under `/var`.
 
 **Ownership.**
 
 | Path | Owner | Mode |
 |---|---|---|
-| Volume root, `log/`, `queue/` | Postfix, group `SMARTHOST_SPOOL_GID` | `2750` |
-| Files | as above | `0640` |
+| Volume root, `log/`, `queue/` | `root:SMARTHOST_SPOOL_GID` | `2750` (setgid) |
+| Log files (`maillog_file_permissions = 0640`) and snapshots | `root:SMARTHOST_SPOOL_GID` | `0640` |
 
-Go runs with that supplementary group and mounts the volume `:ro`.
+Go runs as `SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID` and mounts the volume `:ro`. A write
+attempt fails with `read-only file system`.
 
 **Cursor (generation + position).**
 * `delivery_ingest_cursors` holds `(source = 'postfix_log', generation_id, position)`.
 * `generation_id` identifies one log generation. A raw byte offset alone is not sufficient across
-  rotation. The planned derivation is `device:inode` of the file plus a fingerprint of its first
-  record, so that a recycled inode cannot be mistaken for an earlier generation. This is
-  verification task V-1.
-* `position` is the byte offset of the next unread record within that generation.
+  rotation, and neither is the inode (V-1):
+  * `postfix logrotate` gzip-compresses the rotated file at once, so the previous generation
+    survives only as a `.gz` with a **different inode**;
+  * inode numbers are reused.
+
+  `generation_id` is therefore the **SHA-256 fingerprint of the generation's first record**. It is
+  identical in the active file and in its compressed copy. The active file's `device:inode` is used
+  only to detect that a rotation happened.
+* `position` is the byte offset of the next unread record within that generation's
+  **uncompressed** stream, which is the same whether it is read from the active file or from the
+  `.gz`.
 * The cursor is updated **in the same database transaction** as the events derived from the batch.
 * Only complete, newline-terminated records are consumed.
 
@@ -121,11 +142,13 @@ Go runs with that supplementary group and mounts the volume `:ro`.
   Symfony Mailer notifications and DSN-spool deliveries.
 
 **Rotation and retention.**
-* A daily systemd user timer runs `postfix logrotate` in the Postfix container. This renames the
-  file with `maillog_file_rotate_suffix` and may compress the old file with
-  `maillog_file_compressor` (verification task V-2).
-* When Go sees the active file's identity change, it finishes the previous generation (reading the
-  compressed copy if necessary) and then starts the new generation at position 0.
+* A daily systemd user timer runs `postfix logrotate` in the Postfix container (V-2):
+  * the active file is renamed to `postfix.log.<%Y%m%d-%H%M%S>` (`maillog_file_rotate_suffix`) and
+    immediately compressed with `maillog_file_compressor = gzip`, giving `postfix.log.<suffix>.gz`;
+  * `postlogd` reopens a **new** active file straight away, with a new inode,
+    `0640 root:SMARTHOST_SPOOL_GID`.
+* When Go sees the active file's `device:inode` change, it finishes the previous generation from
+  the `.gz` (matched by first-record fingerprint) and then starts the new generation at position 0.
 * The timer deletes rotated files older than `POSTFIX_LOG_RETENTION_DAYS`.
 * If a generation recorded in the checkpoint has disappeared, Go records a **log gap**: it is
   logged, shown on the operator dashboard, and the affected messages are left for reconciliation
@@ -141,8 +164,19 @@ Go runs with that supplementary group and mounts the volume `:ro`.
   The rename is atomic, so Go never sees a partial file, and an empty file genuinely means an
   empty queue. A failed run produces no snapshot.
 * The step keeps the newest `POSTFIX_QUEUE_SNAPSHOT_RETENTION_COUNT` snapshots.
-* The snapshot format is verification task V-3: one JSON object per queued message, including
-  `queue_id` and recipients.
+* **Snapshot format (V-3)**, from `postqueue -j` in Postfix 3.10: JSON Lines, one object per
+  queued message:
+
+  ```json
+  {"queue_name": "deferred", "queue_id": "4hxKf66gyVz187c", "arrival_time": 1790971838,
+   "message_size": 522, "forced_expire": false, "sender": "editor@smarthost-dev.test",
+   "recipients": [{"address": "queued@example.com", "delay_reason": "…"}]}
+  ```
+
+  * `queue_name` is one of `active`, `deferred`, `hold`, `incoming` or `maildrop`.
+  * `delay_reason` appears only for deferred recipients.
+  * An empty queue gives a zero-length file.
+  * Snapshots are `0640 root:SMARTHOST_SPOOL_GID`; no `.tmp-*` file survives a run.
 * **Freshness.** If the newest snapshot is older than three intervals, Go suspends reconciliation
   conclusions and raises an operator alert (`postfix_queue_snapshot_age`).
 
@@ -153,23 +187,33 @@ Go runs with that supplementary group and mounts the volume `:ro`.
 * Recipients are accepted only for `{SMARTHOST_VERP_LOCAL_PART}{SMARTHOST_VERP_DELIMITER}*`,
   `postmaster@` and a registered feedback-loop address. All other recipients are rejected at RCPT.
 * There is no relaying and no milter.
-* Accepted mail is delivered by `virtual(8)` to `inbound/` with the static GID
-  `SMARTHOST_SPOOL_GID`.
+* Accepted mail is delivered by `virtual(8)` to `inbound/` as
+  `SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID` (`virtual_uid_maps`/`virtual_gid_maps`).
+* Unknown bounce-domain users are rejected with `550 5.1.1`, and relaying to other domains with
+  `554 5.7.1 Relay access denied`.
+* `smtpd_relay_restrictions = reject_unauth_destination`, with no `permit_mynetworks`. In the
+  Smarthost pod every member reaches Postfix from `127.0.0.1`, so port 25 must never trust the
+  client address.
+* `virtual(8)` runs as the delivery UID, so the recipient table it reads must be world-readable.
+  The entrypoint writes configuration with umask `022`.
 
 **Layout.**
 
 | Directory | Writer | Purpose |
 |---|---|---|
-| `inbound/{tmp,new,cur}` | Postfix | Standard Maildir. Postfix writes to `tmp/` and renames into `new/`, so files in `new/` are always complete. |
+| `inbound/{tmp,new,cur}` | Postfix (`virtual(8)`) | Standard Maildir, created by `virtual(8)` on first delivery as `0700` (setgid group inherited) and owned by the delivery UID. Postfix writes the file in `tmp/` and then links it into `new/`, so a file in `new/` is always complete. A watcher sees this as **`IN_CREATE`**, not `IN_MOVED_TO` (V-5, V-7). |
 | `processing/` | Go | Claimed files |
 | `done/` | Go | Processed files. Deleted after `DELIVERY_DSN_RETENTION_DAYS`. |
 | `failed/` | Go | Files that could not be read or stored at all. These raise an operator alert. |
 
-All directories have mode `2770` with group `SMARTHOST_SPOOL_GID`, and both processes use umask
-`007`.
+The spool root, `processing/`, `done/` and `failed/` are `2770 SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID`
+(created by the Postfix entrypoint). DSN files are `0600` and owned by the delivery UID, which is
+why Go must run as `SMARTHOST_DELIVERY_UID`: a group member could not read them.
 
 **Ingestion identity.**
 * The key is the Maildir unique file name: the base name with any `:2,…` info suffix stripped.
+  The observed form is `<epoch>.V<dev>I<inode>M<usec>.<hostname>`, where `<hostname>` is the
+  Postfix container's hostname.
 * It is unique by Maildir construction and preserved by every rename, so it stays stable across
   claim, retry and restart.
 * Matched events use `event_source = dsn_spool` with that key. Unmatched rows store it in
@@ -254,14 +298,17 @@ A `dispatched` job becomes `completed` when none of its messages remains in a no
 | Unmatched-DSN resolutions | Claimed with SKIP LOCKED inside one transaction. |
 | Reconciliation | Performed by any one Go instance holding a PostgreSQL advisory lock, so two instances never reconcile at the same time. |
 
-## 8. Verification tasks (Phase 1, before Phase 4 relies on them)
+## 8. Verification results (Phase 1)
 
-| ID | Verify against the Phase 1 images |
+Each result was observed on the Phase 1 images and is re-checked by `smarthostctl verify`
+(test groups in brackets).
+
+| ID | Result |
 |---|---|
-| V-1 | Exact log-generation identity: whether `device:inode` plus a first-record fingerprint is stable under `postfix logrotate` on the chosen volume driver. |
-| V-2 | `postlogd` file ownership and modes; `postfix logrotate` behaviour and the `maillog_file_rotate_suffix` and `maillog_file_compressor` parameter names in the image's Postfix version. |
-| V-3 | `postqueue -j` output format (one JSON object per line) and its behaviour when the queue is empty. |
-| V-4 | Rootless Podman: both containers see the same numeric `SMARTHOST_SPOOL_GID` on the shared volumes, checked with `podman unshare`. |
-| V-5 | `virtual(8)` Maildir delivery uses tmp→new rename semantics on the shared volume, and the unique-name format is as expected. |
-| V-6 | The OpenDKIM milter is attached to the submission service only; `milter_default_action = tempfail` produces a 4xx to Go when OpenDKIM is stopped. |
-| V-7 | Inotify behaviour on the shared volumes. If it is unreliable, polling at `DELIVERY_FILE_POLL_INTERVAL_SECONDS` is used. |
+| V-1 | **Generation identity is the first-record fingerprint, not the inode.** Compression after rotation gives the old generation a new inode, and inode numbers are reused. The first record of the `.gz` equals the first record of the generation before rotation [T15]. |
+| V-2 | `postlogd` creates the log as `0640 root:SMARTHOST_SPOOL_GID` (`maillog_file_permissions = 0640`, setgid directory). `postfix logrotate` renames with `%Y%m%d-%H%M%S`, gzip-compresses immediately and reopens a new active file. `maillog_file_prefixes` restricts the path to `/var` [T14, T15]. |
+| V-3 | `postqueue -j` is available. It outputs JSON Lines with `queue_name`, `queue_id`, `arrival_time`, `message_size`, `forced_expire`, `sender` and `recipients[{address, delay_reason}]`. An empty queue gives an empty file, and snapshots are written atomically [T14]. |
+| V-4 | Every container uses the same default rootless user-namespace mapping, so numeric IDs are identical across containers. The delivery container (`5001:5000`) reads `root:5000 0640` files and cannot write the read-only volume [T14, T17]. |
+| V-5 | `virtual(8)` delivers `0600` files owned by `SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID`, and creates `inbound/{tmp,new,cur}` itself as `0700`. Files appear complete in `new/`, and `tmp/` is empty afterwards. Go's rename claim succeeds exactly once, and a second claim gets `ENOENT` [T16]. |
+| V-6 | The milter is attached to the submission service only. With OpenDKIM stopped, submission gets a 4xx and nothing is queued; port 25 still accepts DSNs. With OpenDKIM running, Mailpit receives messages carrying a cryptographically valid signature [T11, T13]. |
+| V-7 | inotify works across containers on the shared volumes. A new DSN raises `IN_CREATE` in `inbound/new` (the link from `tmp/`), and log writes raise `IN_MODIFY`. Polling at `DELIVERY_FILE_POLL_INTERVAL_SECONDS` stays as a fallback [T16]. |

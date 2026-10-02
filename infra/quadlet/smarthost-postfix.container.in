@@ -8,8 +8,7 @@ After=smarthost-opendkim.service smarthost-mailpit.service
 ContainerName=smarthost-postfix
 Image=localhost/smarthost-postfix:dev
 Pull=never
-Network=smarthost-internal.network
-NetworkAlias=postfix
+Pod=smarthost.pod
 EnvironmentFile=@GENERATED@/env/postfix.env
 Secret=smarthost-postfix-tls-cert,type=mount,target=${POSTFIX_TLS_CERT_FILE}
 Secret=smarthost-postfix-tls-key,type=mount,target=${POSTFIX_TLS_KEY_FILE}

@@ -49,8 +49,8 @@ info:
     is not a success state. `open_recorded` is a recorded open, not a proven
     read.
   license:
-    name: Proprietary
-    identifier: LicenseRef-Proprietary
+    name: MIT
+    identifier: MIT
 servers:
   - url: https://smarthost.example.com/v1
     description: Placeholder; the real host comes from SMARTHOST_PUBLIC_BASE_URL.

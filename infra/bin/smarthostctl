@@ -20,6 +20,7 @@ IMAGES=(
   "localhost/smarthost-delivery:dev|delivery"
   "localhost/smarthost-fake-smtp:dev|tests/fake-smtp"
 )
+VOLUMES=(smarthost-postgres-data smarthost-postfix-queue smarthost-postfix-observability smarthost-dsn-spool smarthost-opendkim-keys smarthost-opendkim-tables)
 DEV_DKIM_DOMAIN="smarthost-dev.test"   # RFC 2606 reserved: disposable test domain
 DEV_DKIM_SELECTOR="phase1"
 
@@ -40,6 +41,16 @@ machine() {
 }
 
 units() { echo smarthost-{postgres,db-bootstrap,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service; }
+
+# `systemctl stop smarthost.target` returns once the target's own job is done,
+# while PartOf-propagated stops may still be running (observed in Phase 1). Naming
+# every member (timers, services, pod) makes systemctl wait for all of them.
+stop_all() {
+  local members
+  read -ra members <<<"$(units)"
+  machine systemctl stop smarthost.target smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer \
+    "${members[@]}" smarthost-pod.service
+}
 
 cmd_build() {
   for entry in "${IMAGES[@]}"; do
@@ -65,6 +76,9 @@ cmd_secrets() {
 
 cmd_dkim_dev_key() {
   local domain="${1:-$DEV_DKIM_DOMAIN}" selector="${2:-$DEV_DKIM_SELECTOR}"
+  # Create the volumes with the project label (same as the Quadlet volume units) if missing.
+  podman volume create --ignore --label project=smarthost smarthost-opendkim-keys >/dev/null
+  podman volume create --ignore --label project=smarthost smarthost-opendkim-tables >/dev/null
   podman run --rm --env-file "$GEN/env/opendkim.env" \
     -v smarthost-opendkim-keys:"$(envval OPENDKIM_KEY_DIR)" -v smarthost-opendkim-tables:"$(envval OPENDKIM_TABLES_DIR)" \
     --entrypoint smarthost-dkim-dev-key localhost/smarthost-opendkim:dev "$domain" "$selector"
@@ -81,6 +95,7 @@ usage: smarthostctl <command>
   dkim-dev-key [domain selector]   generate a DISPOSABLE dev DKIM key inside the OpenDKIM volume
   start|stop|restart|status        operate the whole topology (smarthost.target)
   status <unit>     systemctl --user status for one unit (e.g. smarthost-postfix)
+  systemctl <args>  pass-through to systemctl --user on the Podman engine host
   logs <unit> [n]   journal of one unit (default 100 lines)
   uninstall         stop and remove the installed units (volumes are kept)
   destroy-volumes --yes            delete all Smarthost volumes (DATA LOSS)
@@ -96,16 +111,17 @@ case "${1:-}" in
   install) $RENDER render && machine install ;;
   dkim-dev-key) shift; cmd_dkim_dev_key "$@" ;;
   start) machine systemctl start smarthost.target ;;
-  stop) machine systemctl stop smarthost.target ;;
-  restart) machine systemctl restart smarthost.target ;;
+  stop) stop_all ;;
+  restart) stop_all && machine systemctl start smarthost.target ;;
   status)
     if [[ -n "${2:-}" ]]; then machine systemctl status --no-pager "${2%.service}.service" || true
     else machine systemctl list-units --no-pager --all 'smarthost*' || true; fi ;;
   logs) machine journal -u "${2:?unit}" -n "${3:-100}" ;;
+  systemctl) shift; machine systemctl "$@" ;;
   uninstall) machine uninstall ;;
   destroy-volumes)
     [[ "${2:-}" == "--yes" ]] || die "refusing without --yes (deletes PostgreSQL, Postfix queue, spool and DKIM volumes)"
-    podman volume ls --filter label=project=smarthost --format '{{.Name}}' | xargs -r podman volume rm ;;
-  verify) exec "$REPO/infra/tests/phase1-verify.sh" ;;
+    for v in "${VOLUMES[@]}"; do podman volume rm --force "$v" >/dev/null 2>&1 && echo "removed $v" || true; done ;;
+  verify) shift; exec "$REPO/infra/tests/phase1-verify.sh" "$@" ;;
   *) usage; exit 64 ;;
 esac

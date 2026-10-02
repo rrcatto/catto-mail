@@ -1,13 +1,12 @@
 [Unit]
-Description=Smarthost OpenDKIM milter (reachable from Postfix only; holds DKIM keys)
+Description=Smarthost OpenDKIM milter (called only by Postfix; holds DKIM keys)
 PartOf=smarthost.target
 
 [Container]
 ContainerName=smarthost-opendkim
 Image=localhost/smarthost-opendkim:dev
 Pull=never
-Network=smarthost-internal.network
-NetworkAlias=opendkim
+Pod=smarthost.pod
 EnvironmentFile=@GENERATED@/env/opendkim.env
 Volume=smarthost-opendkim-keys.volume:${OPENDKIM_KEY_DIR}
 Volume=smarthost-opendkim-tables.volume:${OPENDKIM_TABLES_DIR}

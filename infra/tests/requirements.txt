@@ -1,0 +1,5 @@
+# Phase 1 verification tooling only (never part of a service image).
+dkimpy==1.1.8
+dnspython==2.7.0
+psycopg[binary]==3.2.10
+inotify_simple==1.3.5

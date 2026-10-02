@@ -4,6 +4,42 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.1.
 
+## [0.1.1] - 2026-10-03
+
+Phase 1 complete: verified rootless Podman development environment, with all services in one pod.
+
+### Changed
+- All Smarthost containers now run in one Podman pod, `smarthost` (`infra/quadlet/smarthost.pod.in`).
+  The pod joins `smarthost-internal`, carries the service aliases and publishes the only host
+  ports. Containers have no network, alias or port keys of their own.
+- Postfix port 25 drops `permit_mynetworks`. Pod members share loopback, so no client address is
+  trusted for relaying.
+
+### Added
+- Phase 1 verification suite `infra/tests/phase1-verify.sh` (`smarthostctl verify [--clean]`):
+  22 test groups and 162 checks, with an evidence log in `infra/.generated/verify/`.
+- Verification tool image (`infra/tests/Containerfile`): dkimpy, psycopg, inotify_simple.
+- `smarthostctl systemctl` pass-through.
+- A licence check in `scripts/check-contracts.py`: the OpenAPI licence must match `LICENSE`.
+- The public-repository content rule in `CLAUDE.md`.
+
+### Fixed
+- OpenAPI licence metadata is now `MIT` (it was `Proprietary`).
+- Postfix SASL on 587: added `cyrus_sasl_config_path`; `smtpd.conf` is now readable by the
+  `postfix` user.
+- Postfix `virtual(8)` could not read the bounce-recipient table. The entrypoint now uses umask
+  `022` for configuration files.
+- `smarthostctl stop` and `restart` are deterministic: they name every member unit.
+- `dkim-dev-key` creates the OpenDKIM volumes with the project label, and `destroy-volumes`
+  removes the six Smarthost volumes by name.
+- The PostgreSQL health check names its user and database (no more `role "root"` log noise).
+
+### Verified
+- Phase 1 is complete; `smarthostctl verify --clean` passes 162/162 checks.
+- V-1…V-7 are recorded as observed facts in `docs/architecture/postfix-integration.md` §8. Log
+  generation identity is now a first-record fingerprint, because compressed generations get a new
+  inode.
+
 ## [0.1] - 2026-10-02
 
 First published snapshot: Phase 0 is complete and Phase 1 is in progress.

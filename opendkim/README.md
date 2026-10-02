@@ -1,7 +1,8 @@
 # opendkim/ — OpenDKIM milter container and configuration templates
 
 Signs outbound mail for Postfix through the Milter protocol on the private Podman network (spec
-`service_topology.opendkim`). It is reachable only from Postfix.
+`service_topology.opendkim`). It runs in the `smarthost` pod, is never host-published, and Postfix
+is its only client.
 
 - DKIM private keys are mounted here only (`OPENDKIM_KEY_DIR`). Go, Symfony and Python never hold
   them.

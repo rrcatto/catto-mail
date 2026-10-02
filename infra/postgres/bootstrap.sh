@@ -20,7 +20,7 @@ for v in POSTGRES_PASSWORD SMARTHOST_DB_OWNER_PASSWORD APP_DB_PASSWORD APP_WEBHO
 export PGHOST="$SMARTHOST_DB_HOST" PGPORT="$SMARTHOST_DB_PORT" PGUSER="$POSTGRES_USER" \
        PGPASSWORD="$POSTGRES_PASSWORD" PGDATABASE="$SMARTHOST_DB_NAME" PGSSLMODE="$SMARTHOST_DB_SSLMODE"
 
-for i in $(seq 1 60); do pg_isready -q && break; sleep 1; done
+for _ in $(seq 1 60); do pg_isready -q && break; sleep 1; done
 pg_isready -q || { echo "bootstrap: PostgreSQL not ready" >&2; exit 1; }
 
 psql -v ON_ERROR_STOP=1 -q \
