@@ -1,0 +1,4 @@
+# OpenDKIM KeyTable/SigningTable
+[Volume]
+VolumeName=smarthost-opendkim-tables
+Label=project=smarthost

@@ -1,0 +1,14 @@
+# Smarthost Symfony runtime: PHP-FPM only (no PHP HTTP server; nginx is the
+# HTTP entry via FastCGI). Phase 1 ships infrastructure probes only; the
+# Symfony application is added in Phase 2. The same image runs the webhook
+# worker as a separate unit.
+FROM docker.io/library/php:8.5-fpm-trixie
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libpq-dev libfcgi-bin \
+ && docker-php-ext-install pdo_pgsql pcntl \
+ && apt-get purge -y --auto-remove libpq-dev && apt-get install -y --no-install-recommends libpq5 \
+ && rm -rf /var/lib/apt/lists/*
+COPY docker/zz-smarthost-fpm.conf /usr/local/etc/php-fpm.d/zz-smarthost.conf
+COPY phase1-probe/ /srv/probe/
+COPY docker/fpm-healthcheck.sh /usr/local/bin/smarthost-fpm-healthcheck
+RUN chmod 0755 /usr/local/bin/smarthost-fpm-healthcheck && chmod -R a+rX /srv/probe

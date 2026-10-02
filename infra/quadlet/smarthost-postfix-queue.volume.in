@@ -1,0 +1,4 @@
+# Postfix queue (/var/spool/postfix)
+[Volume]
+VolumeName=smarthost-postfix-queue
+Label=project=smarthost

@@ -1,0 +1,22 @@
+[Unit]
+Description=Smarthost PostgreSQL role bootstrap (infrastructure, D-15)
+PartOf=smarthost.target
+Requires=smarthost-postgres.service
+After=smarthost-postgres.service
+
+[Container]
+ContainerName=smarthost-db-bootstrap
+Image=docker.io/library/postgres:16.15-trixie
+Pull=never
+Network=smarthost-internal.network
+EnvironmentFile=@GENERATED@/env/bootstrap.env
+Volume=@REPO@/infra/postgres:/bootstrap:ro
+Entrypoint=/bootstrap/bootstrap.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=180
+
+[Install]
+WantedBy=smarthost.target

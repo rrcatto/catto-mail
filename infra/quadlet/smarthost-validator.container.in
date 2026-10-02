@@ -1,0 +1,23 @@
+[Unit]
+Description=Smarthost Python validator (Phase 1 probe process; unprivileged)
+PartOf=smarthost.target
+Wants=smarthost-db-bootstrap.service
+After=smarthost-db-bootstrap.service
+
+[Container]
+ContainerName=smarthost-validator
+Image=localhost/smarthost-validator:dev
+Pull=never
+Network=smarthost-internal.network
+EnvironmentFile=@GENERATED@/env/validator.env
+HealthCmd=python /opt/smarthost/phase1_probe.py check-db
+HealthInterval=60s
+HealthStartPeriod=20s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=smarthost.target

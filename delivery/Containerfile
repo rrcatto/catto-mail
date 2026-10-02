@@ -1,0 +1,16 @@
+# Smarthost Go delivery runtime (Phase 1: infrastructure probe only).
+FROM docker.io/library/golang:1.25-trixie AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ cmd/
+RUN CGO_ENABLED=0 go build -trimpath -o /out/smarthost-delivery-probe ./cmd/smarthost-delivery-probe
+
+FROM docker.io/library/debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/smarthost-delivery-probe /usr/local/bin/smarthost-delivery-probe
+# Runtime identity is set by the Quadlet unit: User=SMARTHOST_DELIVERY_UID,
+# Group/GroupAdd=SMARTHOST_SPOOL_GID. The default below matches .env.example.
+USER 5001:5000
+ENTRYPOINT ["/usr/local/bin/smarthost-delivery-probe"]
+CMD ["serve"]

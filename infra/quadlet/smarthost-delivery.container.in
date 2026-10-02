@@ -1,0 +1,28 @@
+[Unit]
+Description=Smarthost Go delivery daemon (Phase 1 probe process; unprivileged)
+PartOf=smarthost.target
+Wants=smarthost-db-bootstrap.service smarthost-postfix.service
+After=smarthost-db-bootstrap.service smarthost-postfix.service
+
+[Container]
+ContainerName=smarthost-delivery
+Image=localhost/smarthost-delivery:dev
+Pull=never
+Network=smarthost-internal.network
+EnvironmentFile=@GENERATED@/env/delivery.env
+User=${SMARTHOST_DELIVERY_UID}
+Group=${SMARTHOST_SPOOL_GID}
+# Observability is read-only for Go; the DSN spool is read-write (claim by rename).
+Volume=smarthost-postfix-observability.volume:${SMARTHOST_POSTFIX_OBSERVABILITY_DIR}:ro
+Volume=smarthost-dsn-spool.volume:${SMARTHOST_DSN_SPOOL_DIR}
+HealthCmd=smarthost-delivery-probe check-db
+HealthInterval=60s
+HealthStartPeriod=20s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=smarthost.target

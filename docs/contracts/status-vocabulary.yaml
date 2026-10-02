@@ -1,0 +1,478 @@
+# Smarthost canonical status and event vocabulary
+#
+# Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
+# (specification 2.1). Every enum value used in the database, the /v1 API,
+# webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
+# verifies that the spec, the OpenAPI document and the reference DDL use
+# exactly these values.
+#
+# Each value carries `origin`:
+#   spec      - the value is enumerated in the canonical specification
+#   contract  - the specification delegates the detailed value list to this
+#               contract file (the spec defines the field, this file its values)
+#
+# Storage convention: every enum is stored as lower_snake_case text with a
+# CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
+# Doctrine migration without ALTER TYPE.
+
+vocabulary_version: "2.1.0"
+specification_version: "2.1"
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+
+validation_job_status:
+  description: Lifecycle of a public validation job (validation_jobs.status). D-29.
+  values:
+    queued:
+      origin: spec
+      terminal: false
+      meaning: Accepted; addresses persisted; not yet claimed by a validator worker.
+    processing:
+      origin: spec
+      terminal: false
+      meaning: At least one address has been claimed by a validator worker.
+    completed:
+      origin: spec
+      terminal: true
+      meaning: >-
+        Every address has a final overall_classification (which may be
+        temporarily_unverifiable or unknown). Emits webhook validation.completed.
+    failed:
+      origin: spec
+      terminal: true
+      meaning: The job could not be processed as a whole. Emits webhook validation.failed.
+    cancelled:
+      origin: spec
+      terminal: true
+      meaning: Stopped by an operator. No public cancel endpoint exists in v1.
+  transitions:
+    queued: [processing, failed, cancelled]
+    processing: [completed, failed, cancelled]
+
+send_job_status:
+  description: >-
+    Lifecycle of a tracked send job (send_jobs.status). D-07, D-24, D-29.
+    Operator throttling/suspension acts at client level (clients.status);
+    the per-job emergency stop is `cancelled`.
+  values:
+    collecting:
+      origin: spec
+      terminal: false
+      meaning: >-
+        Created with job-level metadata; recipient batches may be added. The
+        only state in which the recipient set may change.
+    queued:
+      origin: spec
+      terminal: false
+      meaning: Sealed by submit; recipient set immutable; awaiting the Go delivery daemon.
+    processing:
+      origin: spec
+      terminal: false
+      meaning: Go is creating messages from recipients and submitting them to Postfix.
+    dispatched:
+      origin: spec
+      terminal: false
+      meaning: >-
+        Recipient creation/submission work is finished: every recipient has a
+        message that was accepted into Postfix, deliberately suppressed, or hit
+        an immediate submission failure. Sets dispatch_completed_at.
+    completed:
+      origin: spec
+      terminal: true
+      meaning: >-
+        No automated SMTP transport resolution remains outstanding: every
+        message has a terminal knowledge state (message_status.terminal,
+        including outcome_unknown). Sets completed_at; emits send.completed.
+        Later engagement, complaint or recovered transport events never reopen it.
+    failed:
+      origin: spec
+      terminal: true
+      meaning: The job as a whole could not be executed. Emits send.failed.
+    cancelled:
+      origin: spec
+      terminal: true
+      meaning: >-
+        Operator emergency stop before dispatch finished, or an abandoned
+        collecting job removed by staged-content cleanup. Recipients without a
+        message are never sent.
+  transitions:
+    collecting: [queued, cancelled]
+    queued: [processing, failed, cancelled]
+    processing: [dispatched, failed, cancelled]
+    dispatched: [completed]
+
+message_class:
+  description: send_jobs.message_class (D-20).
+  values:
+    transactional:
+      origin: spec
+      meaning: Individually triggered mail. unsubscribe_url and list_id are not accepted in v1.
+    subscription:
+      origin: spec
+      meaning: >-
+        Newsletter/marketing mail. list_id is mandatory and every recipient
+        must carry a client-generated HTTPS unsubscribe_url; Go adds
+        List-Unsubscribe, List-Unsubscribe-Post and List-Id headers.
+
+# ---------------------------------------------------------------------------
+# Validation result model
+# ---------------------------------------------------------------------------
+# Status columns are NULL until the address has been processed. Once processed
+# every status column is non-NULL; a stage that was not executed records `skipped`.
+
+validation_processing_state:
+  description: Internal work state of one validation address (not exposed by the API).
+  values:
+    pending: {origin: contract, meaning: Not yet claimed.}
+    claimed: {origin: contract, meaning: Leased by a validator worker until lease_expires_at.}
+    retry_scheduled: {origin: contract, meaning: Temporary condition; eligible again at next_attempt_at.}
+    done: {origin: contract, meaning: Final result recorded.}
+
+syntax_status:
+  values:
+    valid: {origin: contract, meaning: Parses as an RFC 5321/5322 mailbox usable for SMTP.}
+    invalid: {origin: contract, meaning: Malformed; no network checks are performed.}
+
+domain_status:
+  values:
+    mx: {origin: contract, meaning: One or more usable MX records.}
+    null_mx: {origin: contract, meaning: 'RFC 7505 Null MX ("MX 0 ."); the domain accepts no mail.'}
+    address_fallback: {origin: contract, meaning: No MX, but A/AAAA records permit RFC 5321 implicit-MX delivery.}
+    no_mail_host: {origin: contract, meaning: Domain exists but has neither MX nor usable A/AAAA records.}
+    nxdomain: {origin: contract, meaning: Authoritative NXDOMAIN.}
+    temporary_failure: {origin: contract, meaning: SERVFAIL/timeout/refused. Never a permanent verdict on first occurrence.}
+    invalid_response: {origin: contract, meaning: Malformed or unusable DNS response.}
+    skipped: {origin: contract, meaning: Not evaluated because an earlier stage was decisive.}
+
+smtp_status:
+  values:
+    accepted: {origin: contract, meaning: RCPT TO answered 2xx. Evidence, not proof of a human mailbox.}
+    rejected: {origin: contract, meaning: Mailbox-level permanent rejection (5xx on RCPT, e.g. 5.1.1).}
+    temporary_failure: {origin: contract, meaning: 4xx at any stage, including suspected greylisting.}
+    blocked: {origin: contract, meaning: The probe itself was refused by policy; says nothing about the mailbox.}
+    timeout: {origin: contract, meaning: Connection or command timeout.}
+    connection_failed: {origin: contract, meaning: Connection refused/unreachable on all candidate hosts.}
+    inconclusive: {origin: contract, meaning: Unexpected or ambiguous protocol behaviour.}
+    skipped: {origin: contract, meaning: Not probed (earlier stage decisive, probing disabled, or domain policy).}
+
+overall_classification:
+  values:
+    deliverable: {origin: spec}
+    probably_deliverable: {origin: spec}
+    undeliverable: {origin: spec}
+    temporarily_unverifiable: {origin: spec}
+    unknown: {origin: spec}
+    risky: {origin: spec}
+
+confidence_level:
+  description: >-
+    validation_addresses.confidence and suggestion_confidence (D-04). Categorical;
+    never presented as a probability.
+  values:
+    low: {origin: spec}
+    medium: {origin: spec}
+    high: {origin: spec}
+
+typo_reason_code:
+  description: validation_addresses.suggestion_reason_code (D-04). A suggestion never modifies an address.
+  values:
+    provider_domain_edit_distance: {origin: spec, meaning: Small edit distance from a known mailbox-provider domain.}
+    transposition: {origin: spec, meaning: Adjacent-character transposition of a known domain.}
+    tld_typo: {origin: spec, meaning: Likely top-level-domain error (e.g. .con, .cmo).}
+    legacy_domain_alias: {origin: spec, meaning: Known, explicitly maintained legacy alias.}
+    other_domain_typo_rule: {origin: spec, meaning: Another recognised, documented domain typo rule.}
+
+validation_evidence_type:
+  values:
+    dns_mx: {origin: contract}
+    dns_address: {origin: contract}
+    smtp_connect: {origin: contract}
+    smtp_ehlo: {origin: contract}
+    smtp_mail_from: {origin: contract}
+    smtp_rcpt_to: {origin: contract}
+    smtp_accept_all_probe: {origin: contract, meaning: RCPT for a random non-existent local part on the same domain.}
+
+# ---------------------------------------------------------------------------
+# Messages
+# ---------------------------------------------------------------------------
+
+message_status:
+  description: >-
+    messages.current_status: a projection of message_events. A new event
+    changes current_status only to a status of higher `rank`, so out-of-order
+    arrival cannot regress state. failed and suppressed are reachable only
+    from created/queued. `terminal` statuses are terminal knowledge states
+    and count towards send-job completion.
+  values:
+    created: {origin: spec, rank: 10, terminal: false, meaning: Message row created by Go from a send_job_recipient.}
+    queued: {origin: spec, rank: 20, terminal: false, meaning: Waiting in Go for a pacing slot; not yet in Postfix.}
+    submitted: {origin: spec, rank: 30, terminal: false, meaning: Postfix accepted the submission; queue id recorded.}
+    deferred: {origin: spec, rank: 40, terminal: false, meaning: Postfix reported a temporary failure and will retry.}
+    outcome_unknown:
+      origin: spec
+      rank: 45
+      terminal: true
+      meaning: >-
+        Reconciliation found the queue id gone from Postfix without any
+        recoverable authoritative outcome. Smarthost cannot determine the final
+        SMTP result. NOT a delivery-success state. Any later authoritative
+        transport event or DSN supersedes it (higher rank).
+    remote_accepted:
+      origin: spec
+      rank: 50
+      terminal: true
+      meaning: >-
+        The receiving SMTP system accepted responsibility for the message.
+        NOT proof of inbox placement, human receipt or reading.
+    soft_bounced:
+      origin: spec
+      rank: 60
+      terminal: true
+      meaning: Final failure of a temporary nature (expiry or 4.x.x failed DSN).
+    hard_bounced: {origin: spec, rank: 70, terminal: true, meaning: Permanent failure (5.x.x), synchronous or by DSN.}
+    complained: {origin: spec, rank: 80, terminal: true, meaning: A complaint was attributed to this message.}
+    failed: {origin: spec, rank: 90, terminal: true, meaning: Immediate submission failure; never handed to Postfix.}
+    suppressed:
+      origin: spec
+      rank: 90
+      terminal: true
+      meaning: Deliberately not submitted because an active suppression matched.
+  resolved_at_rule: >-
+    messages.resolved_at is set the first time the message enters a terminal
+    status and is never changed afterwards.
+
+message_event_type:
+  description: >-
+    message_events.event_type. Append-only. `sets_status` is the status the
+    event moves the message to (subject to rank); null means informational.
+    `sources` lists the event_source values that may produce it.
+  values:
+    message_created: {origin: spec, sets_status: created, sources: [delivery_daemon]}
+    message_queued: {origin: spec, sets_status: queued, sources: [delivery_daemon]}
+    message_suppressed:
+      origin: spec
+      sets_status: suppressed
+      sources: [delivery_daemon]
+      meaning: An active suppression matched; metadata_json carries the suppression id and reason.
+    submission_failed:
+      origin: spec
+      sets_status: failed
+      sources: [delivery_daemon, postfix_submission]
+      meaning: Postfix permanently refused the submission, or an unrecoverable build error occurred.
+    submitted_to_postfix:
+      origin: spec
+      sets_status: submitted
+      sources: [postfix_submission, postfix_log]
+      meaning: >-
+        Postfix accepted the message; queue id from the SMTP reply, or recovered
+        from the log after an ambiguous submission.
+    postfix_queued: {origin: spec, sets_status: null, sources: [postfix_log], meaning: Postfix log confirms the queue entry.}
+    delivery_attempt: {origin: spec, sets_status: null, sources: [postfix_log], meaning: Postfix re-attempted a deferred message.}
+    deferred:
+      origin: spec
+      sets_status: deferred
+      sources: [postfix_log, dsn_spool]
+      meaning: Postfix status=deferred or a DELAY DSN.
+    connection_failure: {origin: spec, sets_status: deferred, sources: [postfix_log], meaning: Attempt failed at TCP/TLS level.}
+    remote_accepted: {origin: spec, sets_status: remote_accepted, sources: [postfix_log], meaning: Postfix status=sent.}
+    soft_bounce: {origin: spec, sets_status: soft_bounced, sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]}
+    hard_bounce: {origin: spec, sets_status: hard_bounced, sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]}
+    complaint: {origin: spec, sets_status: complained, sources: [dsn_spool, unmatched_dsn_resolution]}
+    transport_outcome_unknown:
+      origin: spec
+      sets_status: outcome_unknown
+      sources: [queue_reconciliation]
+      meaning: >-
+        Explicit reconciliation event (D-27): the queue id was absent from more
+        than one Postfix queue snapshot after the grace interval and no
+        authoritative outcome could be recovered from logs or DSNs.
+    open_recorded:
+      origin: spec
+      sets_status: null
+      sources: [tracking_endpoint]
+      meaning: Tracking pixel fetched. A recorded open, not a proven read.
+    click_recorded:
+      origin: spec
+      sets_status: null
+      sources: [tracking_endpoint]
+      meaning: Tracked link followed; metadata_json carries link_index.
+    dsn_unmatched:
+      origin: spec
+      sets_status: null
+      sources: [dsn_spool]
+      meaning: >-
+        A DSN partially correlated to this message whose recipient/status could
+        not be reconciled. DSNs matching no message go to unmatched_dsns.
+
+event_source:
+  description: >-
+    message_events.event_source (D-06). Uniqueness of (event_source,
+    source_event_key) is enforced whenever source_event_key is not null.
+    De-duplication never derives from event content alone.
+  values:
+    delivery_daemon:
+      origin: spec
+      key_rule: "<event_type>:<message_id> (each lifecycle event happens once per message)"
+    postfix_submission:
+      origin: spec
+      key_rule: "<message_id>:<postfix_queue_id>"
+    postfix_log:
+      origin: spec
+      key_rule: >-
+        "<log_generation_id>:<record_position>" — the identity of the log
+        generation plus the record's position in it (exact derivation is a
+        Phase 1 verification task)
+    dsn_spool:
+      origin: spec
+      key_rule: "<Maildir unique file name> (stable across claim, retry and restart)"
+    unmatched_dsn_resolution:
+      origin: spec
+      key_rule: "<unmatched_dsn_id>"
+    queue_reconciliation:
+      origin: spec
+      key_rule: "<message_id>:<postfix_queue_id>"
+    tracking_endpoint:
+      origin: spec
+      key_rule: null (repeated opens/clicks are legitimate distinct events)
+
+failure_scope:
+  description: >-
+    message_events.failure_scope, set by Go's classifier on deferred,
+    connection_failure, soft_bounce and hard_bounce events (D-18). Only
+    `recipient` soft bounces count towards repeated_soft_bounce suppression.
+  values:
+    recipient: {origin: spec, meaning: Mailbox-specific condition (e.g. 4.2.2 mailbox full, 4.2.1 mailbox disabled).}
+    domain: {origin: spec, meaning: General domain-level deferral.}
+    provider_policy: {origin: spec, meaning: Provider-wide rate limiting or policy/reputation deferral.}
+    connection: {origin: spec, meaning: TCP/TLS connection failure.}
+    dns: {origin: spec, meaning: DNS resolution failure for the destination.}
+    infrastructure: {origin: spec, meaning: Temporary remote or local infrastructure failure.}
+    unknown: {origin: spec, meaning: Not classifiable.}
+
+dsn_classification:
+  values:
+    hard_bounce: {origin: spec, message_event: hard_bounce}
+    soft_bounce: {origin: spec, message_event: soft_bounce}
+    deferred: {origin: spec, message_event: deferred}
+    connection_failure: {origin: spec, message_event: connection_failure}
+    complaint: {origin: spec, message_event: complaint}
+    malformed_or_unmatched_dsn: {origin: spec, message_event: dsn_unmatched}
+
+unmatched_dsn_status:
+  description: unmatched_dsns.status (D-05). Rows are retained after resolution.
+  values:
+    open: {origin: spec, meaning: Awaiting operator investigation.}
+    match_requested: {origin: spec, meaning: Operator identified the candidate message; queued for Go.}
+    matched: {origin: spec, meaning: Go interpreted the DSN and created the transport event.}
+    dismissed: {origin: spec, meaning: Operator decided no message applies.}
+  transitions:
+    open: [match_requested, dismissed]
+    match_requested: [matched, open]
+
+# ---------------------------------------------------------------------------
+# Tenancy, identity, domains
+# ---------------------------------------------------------------------------
+
+client_status:
+  values:
+    pending_approval: {origin: contract, meaning: Registered; may not submit meaningful production volume.}
+    active: {origin: contract}
+    throttled: {origin: contract, meaning: Operator-imposed reduced limits.}
+    suspended: {origin: contract, meaning: Job creation refused; workers do not claim or continue its work.}
+    closed: {origin: contract}
+
+sending_domain_status:
+  description: sending_domains.status (D-13).
+  values:
+    pending: {origin: spec, meaning: Verification token issued; TXT challenge not yet matched.}
+    verified: {origin: spec, meaning: TXT challenge matched; verified_at set.}
+    disabled: {origin: spec, meaning: Disabled by an operator or the client; not usable for sending.}
+
+dkim_status:
+  description: sending_domains.dkim_status (D-13, D-26).
+  values:
+    not_configured: {origin: spec}
+    pending_dns: {origin: spec, meaning: Key pair provisioned in OpenDKIM; public key not yet confirmed in DNS.}
+    active: {origin: spec, meaning: OpenDKIM signs for this domain.}
+    disabled: {origin: spec}
+
+user_status:
+  values:
+    active: {origin: contract}
+    disabled: {origin: contract, meaning: Cannot log in; memberships retained for audit.}
+
+global_role:
+  description: users.global_role (D-12). NULL for ordinary users. operator -> ROLE_OPERATOR.
+  values:
+    operator: {origin: contract}
+
+client_membership_role:
+  description: client_memberships.role (D-12), enforced with Symfony voters per client.
+  values:
+    admin: {origin: contract, meaning: Manages API keys, sending domains, webhook endpoints and members.}
+    member: {origin: contract, meaning: Creates and inspects validation and send jobs.}
+    viewer: {origin: contract, meaning: Read-only access.}
+
+# ---------------------------------------------------------------------------
+# Suppression, usage, webhooks, audit
+# ---------------------------------------------------------------------------
+
+suppression_reason:
+  values:
+    hard_bounce: {origin: spec}
+    complaint: {origin: spec}
+    repeated_soft_bounce: {origin: spec}
+    operator_block: {origin: spec}
+    client_abuse_block: {origin: spec}
+
+suppression_scope_type:
+  values:
+    address: {origin: contract, meaning: Matches the D-18 normalised address (local part preserved, domain lower-cased).}
+    domain: {origin: contract, meaning: Matches every address at the lower-cased domain.}
+
+usage_type:
+  values:
+    validation_address: {origin: contract, meaning: One address reached a final validation result.}
+    message_submitted: {origin: contract, meaning: One message accepted into Postfix.}
+
+usage_reference_type:
+  values:
+    validation_job: {origin: contract}
+    send_job: {origin: contract}
+    message: {origin: contract}
+
+webhook_event_type:
+  values:
+    validation.completed: {origin: spec}
+    validation.failed: {origin: spec}
+    send.completed: {origin: spec}
+    send.failed: {origin: spec}
+    message.hard_bounced: {origin: spec}
+    message.complained: {origin: spec}
+    webhook.test: {origin: contract, meaning: Emitted only by POST /v1/webhooks/test.}
+
+webhook_subject_type:
+  values:
+    validation_job: {origin: contract}
+    send_job: {origin: contract}
+    message: {origin: contract}
+    webhook_endpoint: {origin: contract, meaning: Subject of webhook.test.}
+
+webhook_endpoint_status:
+  values:
+    enabled: {origin: contract}
+    disabled: {origin: contract}
+
+webhook_delivery_status:
+  values:
+    pending: {origin: contract, meaning: Awaiting first attempt or a retry at next_attempt_at.}
+    delivered: {origin: contract, meaning: Endpoint answered 2xx.}
+    failed: {origin: contract, meaning: Retry limit exhausted; visible on the operator dashboard.}
+
+audit_actor_type:
+  values:
+    user: {origin: contract, meaning: A dashboard user (users.id).}
+    api_key: {origin: contract}
+    system: {origin: contract, meaning: Workers and scheduled processes.}

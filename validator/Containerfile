@@ -1,0 +1,9 @@
+# Smarthost Python validator runtime (Phase 1: infrastructure probe only).
+FROM docker.io/library/python:3.14-slim-trixie
+RUN useradd --system --uid 10001 --no-create-home validator
+COPY requirements-phase1.txt /opt/smarthost/requirements-phase1.txt
+RUN pip install --no-cache-dir -r /opt/smarthost/requirements-phase1.txt
+COPY phase1_probe.py /opt/smarthost/phase1_probe.py
+USER 10001
+ENTRYPOINT ["python", "/opt/smarthost/phase1_probe.py"]
+CMD ["serve"]

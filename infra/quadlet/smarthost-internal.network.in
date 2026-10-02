@@ -1,0 +1,9 @@
+# Smarthost internal network (spec podman_environment.networking).
+# Internal=true: no route to the Internet. Development mail physically cannot
+# reach public MX hosts; published loopback ports still work (verified Phase 1).
+[Network]
+NetworkName=smarthost-internal
+Internal=true
+Subnet=10.89.20.0/24
+Gateway=10.89.20.1
+Label=project=smarthost

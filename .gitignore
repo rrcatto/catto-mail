@@ -1,0 +1,13 @@
+# Filled-in environment files and secrets must never be committed.
+.env
+.env.*
+!.env.example
+infra/.env
+infra/*.env
+!infra/.env.example
+secrets/
+*.pem
+*.key
+
+# Phase 1 generated per-service env files, rendered units and dev TLS material.
+infra/.generated/

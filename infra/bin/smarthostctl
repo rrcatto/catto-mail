@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# smarthostctl — Smarthost Phase 1 rootless Podman development environment.
+#
+# Container operations use the normal `podman` CLI (local or podman-remote).
+# systemd/Quadlet operations run where the Podman engine's systemd user manager
+# lives: locally on a Linux host, or inside the Podman machine on WSL (entered
+# with the machine's own /usr/local/bin/enterns, as `podman machine ssh` does).
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GEN="$REPO/infra/.generated"
+HELPER="$REPO/infra/bin/smarthost-machine-helper.sh"
+RENDER="python3 $REPO/infra/lib/smarthost_render.py"
+IMAGES=(
+  "localhost/smarthost-postfix:dev|postfix"
+  "localhost/smarthost-opendkim:dev|opendkim"
+  "localhost/smarthost-app:dev|app"
+  "localhost/smarthost-nginx:dev|infra/nginx"
+  "localhost/smarthost-validator:dev|validator"
+  "localhost/smarthost-delivery:dev|delivery"
+  "localhost/smarthost-fake-smtp:dev|tests/fake-smtp"
+)
+DEV_DKIM_DOMAIN="smarthost-dev.test"   # RFC 2606 reserved: disposable test domain
+DEV_DKIM_SELECTOR="phase1"
+
+die() { echo "smarthostctl: $*" >&2; exit 1; }
+envval() { grep -E "^$1=" "$REPO/infra/.env" | head -n1 | cut -d= -f2-; }
+
+# Run the helper inside the engine's systemd namespace.
+machine() {
+  if [[ "$(podman info --format '{{.Host.ServiceIsRemote}}')" != "true" ]]; then
+    "$HELPER" "$@"; return
+  fi
+  local wsl=/mnt/c/Windows/System32/wsl.exe uri name user
+  [[ -x "$wsl" ]] || die "remote Podman engine is not a WSL Podman machine; run systemd steps on the engine host"
+  uri="$(podman system connection list --format '{{if .Default}}{{.URI}}{{end}}' | grep -v '^$' | head -n1)"
+  name="$(sed -E 's#.*/podman-sockets/([^/]+)/.*#\1#' <<<"$uri")"
+  user="$(podman info --format '{{.Store.GraphRoot}}' | sed -E 's#^/home/([^/]+)/.*#\1#')"
+  "$wsl" -d "$name" -u "$user" --cd / -- /usr/local/bin/enterns "$HELPER" "$@"
+}
+
+units() { echo smarthost-{postgres,db-bootstrap,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service; }
+
+cmd_build() {
+  for entry in "${IMAGES[@]}"; do
+    podman build -q -t "${entry%%|*}" "$REPO/${entry#*|}" >/dev/null && echo "built ${entry%%|*}"
+  done
+}
+
+cmd_secrets() {
+  local tls="$GEN/tls" pf proxy
+  mkdir -p "$tls"; chmod 700 "$GEN" "$tls"
+  pf="$(envval POSTFIX_MYHOSTNAME)"; proxy="$(envval PROXY_SERVER_NAME)"
+  # Disposable self-signed development certificates (never production material).
+  podman run --rm --entrypoint sh -v "$tls:/tls" localhost/smarthost-postfix:dev -c "
+    openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj '/CN=$pf' -addext 'subjectAltName=DNS:$pf,DNS:postfix' \
+      -keyout /tls/postfix.key -out /tls/postfix.crt 2>/dev/null &&
+    openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj '/CN=$proxy' -addext 'subjectAltName=DNS:$proxy,DNS:localhost,IP:127.0.0.1' \
+      -keyout /tls/proxy.key -out /tls/proxy.crt 2>/dev/null"
+  for s in postfix-tls-cert:postfix.crt postfix-tls-key:postfix.key proxy-tls-cert:proxy.crt proxy-tls-key:proxy.key; do
+    podman secret rm "smarthost-${s%%:*}" >/dev/null 2>&1 || true
+    podman secret create "smarthost-${s%%:*}" "$tls/${s#*:}" >/dev/null && echo "secret smarthost-${s%%:*}"
+  done
+}
+
+cmd_dkim_dev_key() {
+  local domain="${1:-$DEV_DKIM_DOMAIN}" selector="${2:-$DEV_DKIM_SELECTOR}"
+  podman run --rm --env-file "$GEN/env/opendkim.env" \
+    -v smarthost-opendkim-keys:"$(envval OPENDKIM_KEY_DIR)" -v smarthost-opendkim-tables:"$(envval OPENDKIM_TABLES_DIR)" \
+    --entrypoint smarthost-dkim-dev-key localhost/smarthost-opendkim:dev "$domain" "$selector"
+}
+
+usage() {
+  cat <<USAGE
+usage: smarthostctl <command>
+  init-env          create infra/.env with random development secrets (never overwrites)
+  render            render per-service env files and Quadlet/systemd units into infra/.generated/
+  build             build all Smarthost images
+  secrets           create disposable development TLS certificates as Podman secrets
+  install           render + install Quadlet/systemd units for the user and daemon-reload
+  dkim-dev-key [domain selector]   generate a DISPOSABLE dev DKIM key inside the OpenDKIM volume
+  start|stop|restart|status        operate the whole topology (smarthost.target)
+  status <unit>     systemctl --user status for one unit (e.g. smarthost-postfix)
+  logs <unit> [n]   journal of one unit (default 100 lines)
+  uninstall         stop and remove the installed units (volumes are kept)
+  destroy-volumes --yes            delete all Smarthost volumes (DATA LOSS)
+  verify            run the Phase 1 verification suite
+USAGE
+}
+
+case "${1:-}" in
+  init-env) $RENDER init-env ;;
+  render) $RENDER render ;;
+  build) cmd_build ;;
+  secrets) cmd_secrets ;;
+  install) $RENDER render && machine install ;;
+  dkim-dev-key) shift; cmd_dkim_dev_key "$@" ;;
+  start) machine systemctl start smarthost.target ;;
+  stop) machine systemctl stop smarthost.target ;;
+  restart) machine systemctl restart smarthost.target ;;
+  status)
+    if [[ -n "${2:-}" ]]; then machine systemctl status --no-pager "${2%.service}.service" || true
+    else machine systemctl list-units --no-pager --all 'smarthost*' || true; fi ;;
+  logs) machine journal -u "${2:?unit}" -n "${3:-100}" ;;
+  uninstall) machine uninstall ;;
+  destroy-volumes)
+    [[ "${2:-}" == "--yes" ]] || die "refusing without --yes (deletes PostgreSQL, Postfix queue, spool and DKIM volumes)"
+    podman volume ls --filter label=project=smarthost --format '{{.Name}}' | xargs -r podman volume rm ;;
+  verify) exec "$REPO/infra/tests/phase1-verify.sh" ;;
+  *) usage; exit 64 ;;
+esac

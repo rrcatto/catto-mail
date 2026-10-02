@@ -1,0 +1,8 @@
+[Unit]
+Description=Smarthost atomic Postfix queue snapshot (postqueue -j)
+After=smarthost-postfix.service
+Requisite=smarthost-postfix.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/podman exec smarthost-postfix smarthost-queue-snapshot

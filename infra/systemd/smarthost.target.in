@@ -1,0 +1,5 @@
+# Groups every Smarthost unit: start/stop/restart the whole topology at once.
+# Each Quadlet unit has PartOf=smarthost.target and WantedBy=smarthost.target.
+[Unit]
+Description=Smarthost development topology
+Wants=smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer

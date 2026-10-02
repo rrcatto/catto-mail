@@ -1,0 +1,1022 @@
+openapi: 3.1.0
+info:
+  title: Smarthost API
+  version: 1.0.0-draft.3
+  summary: Email validation and tracked delivery API (specification 2.1 contract).
+  description: |
+    Public Smarthost API contract. Normative elaboration of
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.1), which wins on
+    any conflict. Status and event values are defined in
+    `docs/contracts/status-vocabulary.yaml`.
+
+    ## Conventions
+    * The client (tenant) is always derived from the API key. No request carries
+      or overrides a `client_id`. Resources owned by another client return `404`.
+    * Identifiers are UUIDv7 strings. Timestamps are RFC 3339 in UTC (`Z`).
+    * JSON field names are `snake_case`. Errors use RFC 9457
+      `application/problem+json`.
+    * Request bodies are limited to 10 MiB (`413` above it). Collections use
+      cursor (keyset) pagination: `limit` and an opaque `cursor`.
+
+    ## Send-job lifecycle (staged recipient upload)
+    1. `POST /send-jobs` creates the job in `collecting` state with job-level
+       metadata only.
+    2. `POST /send-jobs/{id}/recipients` adds up to 500 fully rendered recipients
+       per request (idempotent per batch). The job total may not exceed the
+       configured limit (default and ceiling 10000), and duplicate addresses are
+       rejected within and across batches. Recipients can only be added while
+       the job is `collecting`.
+    3. `POST /send-jobs/{id}/submit` atomically seals the recipient set and moves
+       the job to `queued`.
+
+    The job then moves through `processing` and `dispatched` (all recipients
+    handed to Postfix, suppressed or immediately failed) to `completed` (every
+    message has a terminal knowledge state, which can take days).
+
+    ## Content boundary
+    Smarthost performs no mail merge, template rendering or variable
+    substitution. The client submits a rendered subject and HTML and/or plain
+    text per recipient. Arbitrary MIME headers are not accepted. When enabled
+    per job, Smarthost inserts an open pixel into HTML parts and rewrites
+    eligible HTTP/HTTPS links in HTML parts for click tracking. It never
+    rewrites plain-text, `mailto:`, fragment-only, non-HTTP(S) or unsubscribe
+    URLs.
+
+    ## Delivery semantics
+    `remote_accepted` means the receiving SMTP system accepted responsibility for
+    the message. It does not prove inbox placement, receipt or reading.
+    `outcome_unknown` means Smarthost cannot determine the final SMTP result. It
+    is not a success state. `open_recorded` is a recorded open, not a proven
+    read.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://smarthost.example.com/v1
+    description: Placeholder; the real host comes from SMARTHOST_PUBLIC_BASE_URL.
+security:
+  - apiKey: []
+tags:
+  - name: Validation
+    description: Asynchronous evidence-based email-address validation jobs.
+  - name: Sending
+    description: Tracked send jobs executed by the Go delivery service through Postfix.
+  - name: Messages
+    description: Per-recipient message state and append-only event history.
+  - name: Webhooks
+    description: Signed event notifications to the client's registered endpoints.
+
+paths:
+  /validation-jobs:
+    post:
+      tags: [Validation]
+      operationId: createValidationJob
+      summary: Create an asynchronous validation job (max 10000 addresses).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ValidationJobCreateRequest'}
+      responses:
+        '202':
+          description: Job accepted (or idempotent replay of an earlier identical request).
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ValidationJob'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/IdempotencyInProgress'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /validation-jobs/{id}:
+    get:
+      tags: [Validation]
+      operationId: getValidationJob
+      summary: Retrieve validation job state and summary.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Job state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ValidationJob'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /validation-jobs/{id}/addresses:
+    get:
+      tags: [Validation]
+      operationId: listValidationAddresses
+      summary: Paginated per-address validation results.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: overall_classification
+          in: query
+          required: false
+          description: Filter by overall classification.
+          schema: {$ref: '#/components/schemas/OverallClassification'}
+      responses:
+        '200':
+          description: One page of results, ordered by address id ascending (submission order).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ValidationAddressPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /send-jobs:
+    post:
+      tags: [Sending]
+      operationId: createSendJob
+      summary: Create a send job in `collecting` state (job-level metadata only).
+      description: >-
+        The sender identity's domain must be a registered sending domain of the
+        client. Verification (and, in production, active DKIM) is enforced at
+        submit.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SendJobCreateRequest'}
+      responses:
+        '201':
+          description: Job created in `collecting` state (or idempotent replay).
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendJob'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/IdempotencyInProgress'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /send-jobs/{id}/recipients:
+    post:
+      tags: [Sending]
+      operationId: addSendJobRecipients
+      summary: Add a batch of up to 500 fully rendered recipients to a collecting job.
+      description: >-
+        The batch is accepted or rejected as a whole. It is rejected with 422 if
+        the job total would exceed the configured maximum, if any address
+        duplicates another in this batch or an earlier batch (after D-18
+        normalisation), or if class rules are violated: `subscription` jobs
+        require `unsubscribe_url` on every recipient, and `transactional` jobs
+        do not accept it. Returns 409 when the job is no longer `collecting`.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecipientBatchRequest'}
+      responses:
+        '201':
+          description: Batch accepted (or idempotent replay).
+          headers:
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecipientBatchResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /send-jobs/{id}/submit:
+    post:
+      tags: [Sending]
+      operationId: submitSendJob
+      summary: Atomically seal the recipient set and queue the job.
+      description: >-
+        Rejects (422) an empty job, a job over the configured recipient
+        ceiling, missing class metadata, or an unverified sending domain (in
+        production also one without active DKIM), except in explicitly
+        controlled local/test modes. On success the staged recipient set
+        becomes immutable and the job becomes `queued`. Submitting a job that is
+        already sealed returns 202 with its current state, so retries are safe.
+        Returns 409 for a cancelled or failed job.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '202':
+          description: Job sealed and queued (or already sealed; current state returned).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendJob'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /send-jobs/{id}:
+    get:
+      tags: [Sending]
+      operationId: getSendJob
+      summary: Retrieve send-job summary.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Job state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendJob'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /send-jobs/{id}/messages:
+    get:
+      tags: [Sending]
+      operationId: listSendJobMessages
+      summary: Paginated recipient/message state.
+      description: >-
+        Messages are created by the delivery service as it processes the job,
+        so `collecting` and `queued` jobs return an empty page and a
+        `processing` job returns a partial one.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: current_status
+          in: query
+          required: false
+          description: Filter by current message status.
+          schema: {$ref: '#/components/schemas/MessageStatus'}
+      responses:
+        '200':
+          description: One page of messages, ordered by message id ascending.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessagePage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /messages/{id}/events:
+    get:
+      tags: [Messages]
+      operationId: listMessageEvents
+      summary: Retrieve the append-only event history of one message.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of events ordered by occurred_at ascending, then id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessageEventPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /webhooks/test:
+    post:
+      tags: [Webhooks]
+      operationId: testWebhook
+      summary: Record a `webhook.test` event for the client's webhook endpoint(s).
+      description: >-
+        Endpoints are registered per client through the client dashboard; API
+        management endpoints are not part of the initial v1 set. The test event
+        is written to the transactional outbox and delivered by the Symfony
+        webhook worker. With no body, every enabled endpoint receives it. Until
+        webhook support is implemented (Phase 7) the endpoint returns 501.
+      x-smarthost-available-from-phase: 7
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WebhookTestRequest'}
+      responses:
+        '202':
+          description: Test event recorded for delivery.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookTestResult'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: No enabled webhook endpoint is registered for this client.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '501':
+          description: Webhook support not yet implemented.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+
+webhooks:
+  smarthostEvent:
+    post:
+      operationId: receiveSmarthostEvent
+      summary: Signed event delivered to a registered client webhook endpoint.
+      description: |
+        Delivered as an HTTPS POST by the Smarthost webhook worker. Headers:
+
+        * `Smarthost-Event-Id`: the event `id` (use for de-duplication; delivery is at-least-once).
+        * `Smarthost-Signature`: `t=<unix-seconds>,v1=<hex>` where `v1` is
+          HMAC-SHA256 over the exact bytes `<t>.<raw request body>` using the
+          endpoint's signing secret. While a rotated-out secret is still within
+          its overlap window, a second `v1=` value signed with the previous
+          secret is included; accept the request if any value matches.
+          Receivers should reject timestamps older than 5 minutes.
+
+        Any 2xx response acknowledges delivery. Other responses and timeouts
+        are retried with exponential backoff up to a configured limit.
+      parameters:
+        - name: Smarthost-Signature
+          in: header
+          required: true
+          schema: {type: string, example: 't=1767225600,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd'}
+        - name: Smarthost-Event-Id
+          in: header
+          required: true
+          schema: {$ref: '#/components/schemas/Uuid'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WebhookEvent'}
+      responses:
+        '2XX':
+          description: Acknowledged.
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque API key
+      description: >-
+        `Authorization: Bearer <api key>`. Keys are shown once at creation and
+        stored only as a hash. Revoked keys return 401. API keys are for
+        machine clients only and are never accepted for dashboard login.
+
+  headers:
+    Location:
+      description: URL of the created resource.
+      schema: {type: string, format: uri-reference}
+    IdempotentReplayed:
+      description: Present with value `true` when the response replays an earlier request with the same Idempotency-Key.
+      schema: {type: string, enum: ['true']}
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: {type: integer, minimum: 0}
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Client-generated unique key (a UUID is recommended), scoped to the
+        client and to the endpoint (and, for recipient batches, to the send
+        job). Same key + same body replays the original response. Same key +
+        different body returns 422. Same key while the first request is still
+        being processed returns 409.
+      schema: {type: string, minLength: 8, maxLength: 255, pattern: '^[\x21-\x7E]+$'}
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Uuid'}
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from `pagination.next_cursor` of the previous page.
+      schema: {type: string, maxLength: 512}
+
+  responses:
+    BadRequest:
+      description: Malformed request (unparseable JSON, bad query parameter, missing Idempotency-Key).
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unauthorized:
+      description: Missing, invalid or revoked API key.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Forbidden:
+      description: Client is not permitted to perform this action (e.g. suspended or pending approval).
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    NotFound:
+      description: Resource does not exist or belongs to another client.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Conflict:
+      description: >-
+        The job is not in a state that permits this operation (e.g. no longer
+        `collecting`), or an identical request is in flight.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    IdempotencyInProgress:
+      description: A request with the same Idempotency-Key is still being processed.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    PayloadTooLarge:
+      description: Request body exceeds the configured size limit (10 MiB).
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    UnprocessableEntity:
+      description: >-
+        Semantically invalid request: schema violation, recipient ceiling
+        exceeded, duplicate recipient address, class-specific rules, unknown or
+        unverified sending domain, empty job at submit, or an Idempotency-Key
+        reused with a different body.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+
+  schemas:
+    # ---- primitives -------------------------------------------------------
+    Uuid:
+      type: string
+      format: uuid
+      description: UUIDv7.
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339, UTC.
+    ExternalReference:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: Client-supplied opaque reference, scoped to the client. Not required to be unique.
+    ConfidenceLevel:
+      type: string
+      description: Categorical confidence; never a probability.
+      enum: [low, medium, high]
+    Pagination:
+      type: object
+      additionalProperties: false
+      required: [limit, next_cursor]
+      properties:
+        limit: {type: integer}
+        next_cursor:
+          type: [string, 'null']
+          description: Null when there are no further pages.
+    EmailIdentity:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: {type: string, format: email, maxLength: 320}
+        name: {type: string, maxLength: 200}
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: {type: string, format: uri-reference, example: 'https://smarthost.example.com/problems/validation-error'}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string, format: uri-reference}
+        errors:
+          type: array
+          description: Field-level errors for 422 responses.
+          items:
+            type: object
+            required: [pointer, message]
+            properties:
+              pointer: {type: string, description: 'JSON Pointer into the request body, e.g. /recipients/3/email_address.'}
+              message: {type: string}
+
+    # ---- vocabulary enums (must match docs/contracts/status-vocabulary.yaml)
+    ValidationJobStatus:
+      type: string
+      enum: [queued, processing, completed, failed, cancelled]
+    SendJobStatus:
+      type: string
+      enum: [collecting, queued, processing, dispatched, completed, failed, cancelled]
+    MessageClass:
+      type: string
+      enum: [transactional, subscription]
+    SyntaxStatus:
+      type: string
+      enum: [valid, invalid]
+    DomainStatus:
+      type: string
+      enum: [mx, null_mx, address_fallback, no_mail_host, nxdomain, temporary_failure, invalid_response, skipped]
+    SmtpStatus:
+      type: string
+      enum: [accepted, rejected, temporary_failure, blocked, timeout, connection_failed, inconclusive, skipped]
+    OverallClassification:
+      type: string
+      enum: [deliverable, probably_deliverable, undeliverable, temporarily_unverifiable, unknown, risky]
+    TypoReasonCode:
+      type: string
+      enum: [provider_domain_edit_distance, transposition, tld_typo, legacy_domain_alias, other_domain_typo_rule]
+    MessageStatus:
+      type: string
+      enum:
+        - created
+        - queued
+        - submitted
+        - deferred
+        - outcome_unknown
+        - remote_accepted
+        - soft_bounced
+        - hard_bounced
+        - complained
+        - failed
+        - suppressed
+    MessageEventType:
+      type: string
+      enum:
+        - message_created
+        - message_queued
+        - message_suppressed
+        - submission_failed
+        - submitted_to_postfix
+        - postfix_queued
+        - delivery_attempt
+        - deferred
+        - connection_failure
+        - remote_accepted
+        - soft_bounce
+        - hard_bounce
+        - complaint
+        - transport_outcome_unknown
+        - open_recorded
+        - click_recorded
+        - dsn_unmatched
+    WebhookEventType:
+      type: string
+      enum:
+        - validation.completed
+        - validation.failed
+        - send.completed
+        - send.failed
+        - message.hard_bounced
+        - message.complained
+        - webhook.test
+
+    # ---- validation -------------------------------------------------------
+    ValidationAddressInput:
+      type: object
+      additionalProperties: false
+      required: [address]
+      properties:
+        address:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Address exactly as held by the client; retained verbatim as `original_address`.
+        external_address_reference:
+          $ref: '#/components/schemas/ExternalReference'
+          description: >-
+            Optional opaque client reference for this address (e.g. a source
+            record id), separate from the job's external_reference.
+
+    ValidationJobCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [addresses]
+      properties:
+        external_reference: {$ref: '#/components/schemas/ExternalReference'}
+        addresses:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          description: Duplicates are permitted and validated individually. Smarthost never rewrites an address.
+          items: {$ref: '#/components/schemas/ValidationAddressInput'}
+
+    ValidationJob:
+      type: object
+      additionalProperties: false
+      required: [id, status, submitted_at, total_addresses, processed_count, classification_counts]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        external_reference:
+          oneOf:
+            - {$ref: '#/components/schemas/ExternalReference'}
+            - {type: 'null'}
+        status: {$ref: '#/components/schemas/ValidationJobStatus'}
+        submitted_at: {$ref: '#/components/schemas/Timestamp'}
+        started_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        completed_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        total_addresses: {type: integer, minimum: 1, maximum: 10000}
+        processed_count: {type: integer, minimum: 0}
+        classification_counts:
+          $ref: '#/components/schemas/ClassificationCounts'
+
+    ClassificationCounts:
+      type: object
+      description: Count of processed addresses per overall_classification. All keys always present.
+      additionalProperties: false
+      required: [deliverable, probably_deliverable, undeliverable, temporarily_unverifiable, unknown, risky]
+      properties:
+        deliverable: {type: integer, minimum: 0}
+        probably_deliverable: {type: integer, minimum: 0}
+        undeliverable: {type: integer, minimum: 0}
+        temporarily_unverifiable: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+        risky: {type: integer, minimum: 0}
+
+    ValidationAddress:
+      type: object
+      additionalProperties: false
+      description: >-
+        Evidence-based result for one submitted address. Result fields are null
+        until `checked_at` is set. A suggestion is never applied automatically.
+      required:
+        - id
+        - external_address_reference
+        - original_address
+        - normalized_address
+        - syntax_status
+        - domain_status
+        - smtp_status
+        - is_role
+        - is_disposable
+        - is_catch_all_or_accept_all
+        - is_domain_typo_suspected
+        - suggested_address
+        - suggestion_reason_code
+        - suggestion_confidence
+        - overall_classification
+        - confidence
+        - diagnostic_code
+        - diagnostic_text
+        - checked_at
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        external_address_reference:
+          oneOf: [{$ref: '#/components/schemas/ExternalReference'}, {type: 'null'}]
+        original_address: {type: string, description: Exactly as submitted.}
+        normalized_address:
+          type: [string, 'null']
+          description: Surrounding whitespace removed and domain lower-cased; local part untouched. Null if unparseable.
+        syntax_status:
+          oneOf: [{$ref: '#/components/schemas/SyntaxStatus'}, {type: 'null'}]
+        domain_status:
+          oneOf: [{$ref: '#/components/schemas/DomainStatus'}, {type: 'null'}]
+        smtp_status:
+          oneOf: [{$ref: '#/components/schemas/SmtpStatus'}, {type: 'null'}]
+        is_role: {type: [boolean, 'null']}
+        is_disposable: {type: [boolean, 'null']}
+        is_catch_all_or_accept_all: {type: [boolean, 'null']}
+        is_domain_typo_suspected: {type: [boolean, 'null']}
+        suggested_address:
+          type: [string, 'null']
+          description: A suggestion only. Never applied automatically.
+        suggestion_reason_code:
+          oneOf: [{$ref: '#/components/schemas/TypoReasonCode'}, {type: 'null'}]
+        suggestion_confidence:
+          oneOf: [{$ref: '#/components/schemas/ConfidenceLevel'}, {type: 'null'}]
+        overall_classification:
+          oneOf: [{$ref: '#/components/schemas/OverallClassification'}, {type: 'null'}]
+        confidence:
+          oneOf: [{$ref: '#/components/schemas/ConfidenceLevel'}, {type: 'null'}]
+        diagnostic_code:
+          type: [string, 'null']
+          description: Stable machine-readable code, e.g. smtp.rcpt.5.1.1 or dns.nxdomain.
+        diagnostic_text: {type: [string, 'null'], description: Human-readable diagnostic; may quote the remote server.}
+        checked_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+
+    ValidationAddressPage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/ValidationAddress'}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+
+    # ---- sending ----------------------------------------------------------
+    TrackingOptions:
+      type: object
+      additionalProperties: false
+      description: Delivery-time instrumentation switches. Both default to false (tracking disabled).
+      properties:
+        opens:
+          type: boolean
+          default: false
+          description: Insert an open-tracking pixel into the HTML part. Messages without HTML get no open tracking.
+        clicks:
+          type: boolean
+          default: false
+          description: >-
+            Rewrite eligible absolute HTTP/HTTPS links in the HTML part through
+            the click tracker. Never rewritten: plain-text URLs, `mailto:`,
+            fragment-only and non-HTTP(S) links, and unsubscribe URLs.
+
+    SendJobCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [external_reference, message_class, sender_identity]
+      description: >-
+        Job-level metadata only; recipients are added in batches. `client_id`
+        and arbitrary headers are not accepted. `list_id` is mandatory for
+        `subscription` and not accepted for `transactional`.
+      properties:
+        external_reference: {$ref: '#/components/schemas/ExternalReference'}
+        message_class: {$ref: '#/components/schemas/MessageClass'}
+        list_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: RFC 2919 `List-Id` header value.
+        sender_identity:
+          $ref: '#/components/schemas/EmailIdentity'
+          description: >-
+            Header From. Its domain must be a registered sending domain of the
+            client. The envelope return-path is always a Smarthost VERP address.
+        reply_to:
+          $ref: '#/components/schemas/EmailIdentity'
+          description: Optional job-level Reply-To.
+        tracking: {$ref: '#/components/schemas/TrackingOptions'}
+      if:
+        required: [message_class]
+        properties: {message_class: {const: subscription}}
+      then:
+        required: [list_id]
+      else:
+        not: {required: [list_id]}
+
+    Recipient:
+      type: object
+      additionalProperties: false
+      required: [external_recipient_reference, email_address, subject]
+      description: >-
+        One recipient with fully rendered, recipient-specific content produced
+        by the client. No merge data or template syntax is accepted.
+      properties:
+        external_recipient_reference: {$ref: '#/components/schemas/ExternalReference'}
+        email_address:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: >-
+            Normalised for matching by trimming surrounding whitespace and
+            lower-casing the domain. The local part is preserved, so
+            `John@example.com` and `john@example.com` are distinct.
+        subject: {type: string, minLength: 1, maxLength: 998, description: Rendered subject.}
+        html_body: {type: string, minLength: 1, description: Rendered HTML body.}
+        text_body: {type: string, minLength: 1, description: Rendered plain-text body.}
+        unsubscribe_url:
+          type: string
+          format: uri
+          pattern: '^https://'
+          maxLength: 2048
+          description: >-
+            Opaque per-recipient one-click unsubscribe URL generated and hosted
+            by the client (RFC 8058). Mandatory for `subscription` jobs and not
+            accepted for `transactional` jobs. It is written to
+            `List-Unsubscribe` and `List-Unsubscribe-Post` and is never
+            click-tracked.
+      anyOf:
+        - required: [html_body]
+        - required: [text_body]
+
+    RecipientBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [recipients]
+      properties:
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: >-
+            Contract ceiling 500 per request. The effective limit is
+            APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH, which may only lower it.
+          items: {$ref: '#/components/schemas/Recipient'}
+
+    RecipientBatchResult:
+      type: object
+      additionalProperties: false
+      required: [batch_id, accepted_count, total_recipients]
+      properties:
+        batch_id: {$ref: '#/components/schemas/Uuid'}
+        accepted_count: {type: integer, minimum: 1, maximum: 500}
+        total_recipients:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Running total across all accepted batches of the job.
+
+    SendJob:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - external_reference
+        - message_class
+        - sender_identity
+        - status
+        - created_at
+        - queued_at
+        - started_at
+        - dispatch_completed_at
+        - completed_at
+        - total_recipients
+        - summary_counts
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        external_reference: {$ref: '#/components/schemas/ExternalReference'}
+        message_class: {$ref: '#/components/schemas/MessageClass'}
+        list_id: {type: [string, 'null']}
+        sender_identity: {$ref: '#/components/schemas/EmailIdentity'}
+        reply_to:
+          oneOf: [{$ref: '#/components/schemas/EmailIdentity'}, {type: 'null'}]
+        tracking: {$ref: '#/components/schemas/TrackingOptions'}
+        status: {$ref: '#/components/schemas/SendJobStatus'}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        queued_at:
+          description: When the job was sealed by submit.
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        started_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        dispatch_completed_at:
+          description: When the job became `dispatched`.
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        completed_at:
+          description: When every message reached a terminal knowledge state.
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        total_recipients:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Running total while collecting; fixed once sealed.
+        summary_counts: {$ref: '#/components/schemas/MessageStatusCounts'}
+
+    MessageStatusCounts:
+      type: object
+      description: Count of messages per current_status. All keys always present.
+      additionalProperties: false
+      required:
+        - created
+        - queued
+        - submitted
+        - deferred
+        - outcome_unknown
+        - remote_accepted
+        - soft_bounced
+        - hard_bounced
+        - complained
+        - failed
+        - suppressed
+      properties:
+        created: {type: integer, minimum: 0}
+        queued: {type: integer, minimum: 0}
+        submitted: {type: integer, minimum: 0}
+        deferred: {type: integer, minimum: 0}
+        outcome_unknown: {type: integer, minimum: 0}
+        remote_accepted: {type: integer, minimum: 0}
+        soft_bounced: {type: integer, minimum: 0}
+        hard_bounced: {type: integer, minimum: 0}
+        complained: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+        suppressed: {type: integer, minimum: 0}
+
+    Message:
+      type: object
+      additionalProperties: false
+      required: [id, send_job_id, external_recipient_reference, recipient_address, current_status, created_at, resolved_at]
+      description: >-
+        One recipient message. VERP tokens, return paths, tracking tokens and
+        Postfix queue ids are internal and not exposed.
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        send_job_id: {$ref: '#/components/schemas/Uuid'}
+        external_recipient_reference: {$ref: '#/components/schemas/ExternalReference'}
+        recipient_address: {type: string, description: Normalised address used for delivery.}
+        current_status: {$ref: '#/components/schemas/MessageStatus'}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        resolved_at:
+          description: First time the message reached a terminal status; never changed afterwards.
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+
+    MessagePage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Message'}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+
+    MessageEvent:
+      type: object
+      additionalProperties: false
+      required: [id, message_id, event_type, smtp_code, enhanced_status_code, remote_host, diagnostic, occurred_at]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        message_id: {$ref: '#/components/schemas/Uuid'}
+        event_type: {$ref: '#/components/schemas/MessageEventType'}
+        smtp_code: {type: [integer, 'null'], minimum: 200, maximum: 599}
+        enhanced_status_code:
+          type: [string, 'null']
+          pattern: '^[245]\.\d{1,3}\.\d{1,3}$'
+        remote_host: {type: [string, 'null']}
+        diagnostic: {type: [string, 'null']}
+        occurred_at: {$ref: '#/components/schemas/Timestamp'}
+
+    MessageEventPage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/MessageEvent'}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+
+    # ---- webhooks ---------------------------------------------------------
+    WebhookTestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        webhook_endpoint_id: {$ref: '#/components/schemas/Uuid'}
+
+    WebhookTestResult:
+      type: object
+      additionalProperties: false
+      required: [webhook_event_id]
+      properties:
+        webhook_event_id: {$ref: '#/components/schemas/Uuid'}
+
+    WebhookEvent:
+      type: object
+      additionalProperties: false
+      required: [id, type, created_at, data]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        type: {$ref: '#/components/schemas/WebhookEventType'}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        data:
+          description: >-
+            validation.* carries a ValidationJob; send.* carries a SendJob;
+            message.* carries a MessageWebhookData; webhook.test carries an empty object.
+          oneOf:
+            - {$ref: '#/components/schemas/ValidationJob'}
+            - {$ref: '#/components/schemas/SendJob'}
+            - {$ref: '#/components/schemas/MessageWebhookData'}
+            - {type: object, additionalProperties: false, maxProperties: 0}
+
+    MessageWebhookData:
+      type: object
+      additionalProperties: false
+      required: [message, event]
+      properties:
+        message: {$ref: '#/components/schemas/Message'}
+        event: {$ref: '#/components/schemas/MessageEvent'}

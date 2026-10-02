@@ -1,0 +1,1910 @@
+project:
+  name: Smarthost
+  specification_version: "2.1"
+  specification_date: "2026-10-02"
+  original_specification_date: "2026-09-08"
+  version_note: >-
+    The specification version is a documentation/specification revision number. It is not a
+    Smarthost software, project or release version.
+  status: canonical_design
+  purpose: >-
+    Build a self-hosted email validation, outbound SMTP delivery, bounce/event tracking,
+    reputation-control and reporting platform for client applications, with an architecture
+    that starts single-tenant in operation and can later support third-party clients as a
+    multi-tenant SaaS.
+
+instruction_for_llm:
+  audience:
+    - GPT Astra
+    - Claude CLI
+    - other coding LLMs and autonomous development agents
+  authority:
+    - This file is the canonical Smarthost implementation specification unless the user explicitly overrides it.
+    - Do not infer requirements that contradict this specification.
+    - When implementation details are ambiguous, choose the simplest design consistent with the stated architecture and invariants.
+    - Preserve clear service boundaries. Do not collapse services merely to reduce file count.
+    - >-
+      The normative contract files listed in normative_contracts elaborate this specification
+      (exact enum values, API shapes, reference schema, environment variables, Postfix
+      integration mechanics). They must not contradict it; if they do, this file wins.
+    - >-
+      docs/architecture/open-decisions.md is a decision log only. It is never a source of
+      architectural authority; approved decisions are incorporated into this file.
+  normative_contracts:
+    vocabulary: docs/contracts/status-vocabulary.yaml
+    api: docs/api/openapi.v1.yaml
+    reference_schema: docs/schema/reference-schema.sql
+    schema_documentation: docs/schema/schema.md
+    environment: docs/contracts/environment.md
+    postfix_integration: docs/architecture/postfix-integration.md
+  change_control:
+    - Do not change architecture, service ownership, database ownership, protocols, security boundaries, or deployment topology without explicit user instruction.
+    - Do not commit, push, tag, create releases, bump project versions, or rebuild release packages unless explicitly instructed by the user in that turn.
+    - Do not silently substitute Docker for Podman.
+    - Do not introduce Kubernetes.
+    - Do not introduce Redis, RabbitMQ, Kafka, or another queue/broker unless explicitly approved.
+    - Do not implement a custom SMTP transport to replace Postfix.
+    - Do not let client applications access the Smarthost database directly.
+  implementation_style:
+    - Prefer explicit, maintainable code over clever abstractions.
+    - Document modified or new code where intent, invariants, side effects, protocol details, or non-obvious behavior need explanation.
+    - Add automated tests with every functional component.
+    - Use deterministic local tests before live Internet tests.
+    - Keep configuration in environment files or mounted configuration, never hard-code secrets or environment-specific hostnames.
+  validation_before_completion:
+    - Run relevant unit, integration, database migration and service health tests.
+    - Report exactly what changed, what tests ran, what passed, what remains unverified, and any known risks.
+    - Never claim a feature works unless it has been tested or clearly state that it remains untested.
+
+integration_context:
+  client_applications:
+    role: external API clients, for example mailing-list and campaign applications
+    relationship_to_smarthost: external API client
+    responsibilities:
+      - mailing lists and list membership
+      - subscribers
+      - consent history and confirmation state
+      - campaign authoring
+      - templates
+      - merge fields and rendering of recipient-specific subject, HTML and plain text
+      - segmentation
+      - unsubscribe state
+      - per-recipient unsubscribe URLs and the one-click unsubscribe endpoint
+    prohibitions:
+      - must not connect directly to Smarthost PostgreSQL
+      - must not bypass Smarthost API for tracked bulk sends
+  smarthost:
+    role: email infrastructure service
+    responsibilities:
+      - email-address validation
+      - SMTP send job execution
+      - Postfix integration
+      - delivery event recording
+      - bounce and DSN processing
+      - suppression and reputation signals
+      - open and click event recording
+      - client/API authentication
+      - usage metering
+      - operational dashboards
+      - future SaaS support
+
+architecture:
+  principles:
+    - Smarthost is a distinct application and infrastructure boundary.
+    - Client applications are external integrators, not internal Smarthost services.
+    - Smarthost internal services coordinate through Smarthost PostgreSQL and PostgreSQL LISTEN/NOTIFY where useful.
+    - Client applications communicate only through the versioned Smarthost HTTPS API and Smarthost webhooks.
+    - PostgreSQL is the durable source of truth for Smarthost jobs and events.
+    - Symfony/Doctrine is the sole owner of the Smarthost database schema and migrations.
+    - Go and Python may read/write approved tables but must never create or alter schema.
+    - Postfix remains the SMTP transport and queueing engine.
+    - Tracked bulk/campaign messages are executed by the Go delivery service and submitted to Postfix.
+    - Smarthost performs no mail merge or template rendering; clients submit fully rendered recipient-specific content.
+    - Only the Symfony webhook worker performs HTTP webhook delivery; producers record webhook events in a transactional outbox.
+    - The design begins single-tenant in operation but multi-tenant in data model and security boundaries.
+  work_claiming:
+    # D-03
+    mechanism: PostgreSQL transactional claiming with SELECT ... FOR UPDATE SKIP LOCKED where appropriate
+    lease_fields: [claimed_by, lease_expires_at, attempt_count, next_attempt_at, last_error]
+    leased_work:
+      - validation_addresses (Python validator)
+      - send_jobs (Go delivery daemon)
+      - webhook_deliveries (Symfony webhook worker)
+    short_transactional_claims: >-
+      webhook_events fan-out and unmatched_dsns match requests complete within one transaction
+      using SKIP LOCKED and need no lease.
+    rules:
+      - a worker processing long-running work renews its lease before it expires
+      - a worker whose lease renewal fails stops processing that item immediately
+      - every worker write is conditional on claimed_by = self and lease_expires_at > now() (fencing)
+      - two workers never process the same active lease concurrently
+      - after lease expiry another worker may reclaim the work; all work is idempotent under reclaim
+    wake_up: LISTEN/NOTIFY hints plus periodic polling; no broker
+  service_topology:
+    reverse_proxy:
+      role: TLS termination and public HTTPS routing
+      software: nginx
+      upstream: PHP-FPM in the Symfony container via FastCGI over the private Podman network
+      configuration_location: infra/
+      topology_parity: >-
+        development and production use the same nginx topology; only certificates, hostnames,
+        bind addresses and resource limits differ
+      public: true
+      production_required: true
+      must_not:
+        - be replaced by Caddy or Traefik
+        - front a separate PHP HTTP application server
+    symfony_app:
+      language: PHP
+      framework: Symfony
+      runtime: PHP-FPM, reachable only from nginx on the internal Podman network
+      public: false
+      exposed_through: reverse_proxy
+      responsibilities:
+        - public versioned API
+        - client authentication and authorization
+        - API keys
+        - human dashboard user accounts and client memberships
+        - sending-domain registration and DNS TXT verification
+        - usage metering
+        - validation-job creation and result presentation
+        - send-job creation, batched recipient ingestion, submission and status presentation
+        - client dashboard
+        - operator dashboard
+        - tracking endpoints for opens/clicks
+        - webhook dispatch (webhook_worker process only)
+        - Doctrine entities and migrations
+        - application-level audit logging
+        - configurable retention cleanup
+      processes:
+        web: PHP-FPM serving the API, dashboards and tracking endpoints behind nginx
+        webhook_worker: >-
+          dedicated long-running Symfony console worker built from the same application image,
+          with its own database credentials; consumes webhook_events, creates/updates
+          webhook_deliveries, signs requests, delivers, retries and records outcomes; may run
+          as its own Podman service
+        scheduled_commands: >-
+          Symfony console commands run by systemd user timers (retention cleanup,
+          abandoned-collecting-job cleanup, sending-domain verification re-checks)
+      must_not:
+        - perform SMTP mailbox validation itself
+        - implement SMTP transport to the Internet
+        - execute bulk/campaign sends directly through Symfony Mailer
+        - call Python or Go over bespoke RPC
+        - perform mail merge, template rendering or variable substitution
+        - accept API keys as browser-login credentials
+        - hold DKIM private keys
+    python_validator:
+      language: Python
+      model: asyncio background worker
+      public: false
+      responsibilities:
+        - claim validation work from PostgreSQL using leases
+        - syntax parsing
+        - domain/DNS evaluation
+        - disposable-domain flags
+        - role-account flags
+        - typo-suggestion analysis
+        - SMTP RCPT probing where appropriate
+        - retry/backoff for temporary conditions
+        - per-domain and per-MX throttling
+        - evidence-based classification
+        - record validation webhook events in the transactional outbox
+      must_not:
+        - send DATA during validation
+        - send real validation emails
+        - claim certainty when the server response is inconclusive
+        - expose a public API
+        - send HTTP webhooks
+    go_delivery:
+      language: Go
+      model: long-running background daemon
+      public: false
+      responsibilities:
+        - claim tracked send jobs from PostgreSQL using leases
+        - create messages rows from the sealed send_job_recipients set
+        - build per-recipient MIME messages from client-supplied, fully rendered content
+        - allocate message identifiers, VERP tokens, envelope return paths and tracking tokens
+        - apply delivery-time tracking instrumentation when enabled for the job
+        - add List-Unsubscribe, List-Unsubscribe-Post and List-Id headers to subscription messages
+        - submit messages to local Postfix
+        - record Postfix queue identifiers and purge the recipient's rendered content
+        - monitor Postfix delivery events from the shared observability volume
+        - reconcile unresolved messages against Postfix queue snapshots
+        - process inbound DSNs/bounces from the shared DSN spool
+        - apply operator-requested unmatched-DSN resolutions
+        - classify hard bounce, soft bounce, deferral and connection failures, including failure scope
+        - apply transport suppression policy
+        - apply per-destination pacing controls
+        - append message events to PostgreSQL
+        - record send/message webhook events in the transactional outbox
+      initial_integration_strategy:
+        # mechanics: docs/architecture/postfix-integration.md
+        submission: >-
+          SMTP from Go to Postfix over the private Podman network (authenticated submission);
+          the queue id is captured from the SMTP acceptance reply
+        transport_events: >-
+          Postfix writes its log into the container-owned shared observability volume, which Go
+          mounts read-only where possible; Go never reads the host systemd journal
+        queue_snapshots: >-
+          the Postfix environment periodically writes atomic JSON queue snapshots
+          (postqueue -j or an equivalent supported mechanism) into the same observability volume
+        inbound_dsn: >-
+          Postfix delivers bounce-domain mail into a dedicated shared Maildir spool volume; Go
+          claims each file atomically by rename
+        ingest_position: >-
+          Go stores its log-ingestion position in PostgreSQL (delivery_ingest_cursors), identified
+          by log generation and position; never only in local container state
+      milter_policy: >-
+        Go never implements or runs a milter. The only approved milter is OpenDKIM attached to
+        Postfix for outbound DKIM signing; this is an explicit, justified exception to the
+        original no-milter preference because DKIM signing is a concrete requirement. Any other
+        milter requires explicit approval.
+      must_not:
+        - become a general-purpose SMTP server
+        - operate an inbound SMTP listener to receive bounces
+        - replace Postfix retry/queue logic
+        - own mailing-list membership or campaign business rules
+        - perform mail merge, template rendering or variable substitution
+        - hold DKIM private keys or implement DKIM signing
+        - send HTTP webhooks
+        - expose a public API
+    postfix:
+      role: SMTP transport, queueing, retry and TLS negotiation
+      public_ports_production:
+        - 25
+        - 587
+      port_25_reason: receive DSNs and bounces for the configured bounce domain
+      port_587_reason: authenticated message submission where required
+      milter: >-
+        OpenDKIM over the Milter protocol on the private Podman network, applied only to
+        outbound mail on the authenticated submission service
+      persistence:
+        - queue
+        - configuration
+        - TLS material
+        - shared observability volume (log, queue snapshots)
+        - shared DSN Maildir spool
+      authentication: required_on_submission
+    opendkim:
+      role: outbound DKIM signing for Postfix through the Milter protocol
+      public: false
+      network: private Podman network only; reachable from Postfix only
+      key_custody: >-
+        DKIM private keys are mounted into OpenDKIM only; Go, Symfony and Python never hold
+        them and never sign
+      signing_basis: >-
+        sign when the From domain is a verified sending domain whose dkim_status is active,
+        using that domain's selector
+      excluded_traffic:
+        - inbound DSN/bounce mail received on port 25
+        - Postfix-local deliveries into the DSN spool
+        - Postfix-generated bounce notifications for the bounce domain
+      failure_policy:
+        - >-
+          if OpenDKIM is unavailable or errors on submitted mail, Postfix temporarily rejects
+          the submission (milter default action tempfail); Go treats it as a 4xx and retries
+          with backoff
+        - a tracked message is never sent unsigned because the milter failed
+        - >-
+          in production a send job is rejected before submission unless its sending domain is
+          verified and has dkim_status active
+      testing: signing success and milter-failure behaviour are tested in Phase 4; production keys in Phase 8
+    postgres:
+      software: PostgreSQL 16.x
+      public: false
+      ownership: Smarthost only
+      role:
+        - jobs
+        - validation evidence/results
+        - clients/API keys
+        - send state
+        - append-only message events
+        - suppression signals
+        - audit records
+        - usage metering
+      roles_and_privileges:
+        # D-15
+        provisioning: >-
+          PostgreSQL roles are infrastructure: an explicit bootstrap process under infra/
+          creates them with an administrative connection; the same tooling applies table
+          grants (re-run idempotently after each migration)
+        doctrine_scope: Doctrine migrations own tables, indexes, foreign keys and constraints, executed as the owner role
+        identities:
+          smarthost_owner: schema owner; used only by Doctrine migrations
+          smarthost_app: Symfony web process and scheduled commands (DML only)
+          smarthost_webhook: Symfony webhook worker (DML on webhook tables; read access for payloads)
+          smarthost_validator: Python validator (DML on approved tables only)
+          smarthost_delivery: Go delivery daemon (DML on approved tables only)
+        rule: Python and Go never receive schema-altering privileges
+        grant_matrix: docs/schema/schema.md
+    mailpit:
+      environment: development_only
+      role: capture outgoing mail so no test message reaches the public Internet
+    fake_smtp:
+      environment: development_and_test
+      role: deterministic SMTP server for hard-bounce, soft-bounce, timeout, greylist and accept-all scenarios
+
+project_boundaries:
+  data_ownership:
+    smarthost_owns:
+      - clients
+      - users
+      - client_memberships
+      - sending_domains
+      - api_keys
+      - validation_jobs
+      - validation_addresses
+      - validation_evidence
+      - send_jobs
+      - send_job_recipient_batches
+      - send_job_recipients
+      - messages
+      - message_links
+      - message_events
+      - unmatched_dsns
+      - delivery_ingest_cursors
+      - suppressions
+      - disposable_domains
+      - domain_reputation
+      - usage_records
+      - webhook_endpoints
+      - webhook_events
+      - webhook_deliveries
+      - audit_log
+    client_application_owns:
+      - mailing_lists
+      - subscribers
+      - list_memberships
+      - consent_history
+      - subscriber_confirmation_state
+      - campaigns
+      - campaign_templates
+      - campaign_segments
+      - merge_fields_and_template_rendering
+      - rendered_recipient_specific_subject_html_and_text
+      - unsubscribe_business_state
+      - per_recipient_unsubscribe_urls_and_one_click_unsubscribe_endpoint
+      - visible_unsubscribe_content_in_message_bodies
+  integration_rules:
+    - Client applications call Smarthost through HTTPS /v1 endpoints.
+    - Smarthost returns job identifiers immediately for asynchronous work.
+    - Client applications may poll job state and/or consume signed webhooks.
+    - Smarthost never queries a client application's database.
+    - Client applications map Smarthost message/job IDs to their own campaign/subscriber records.
+    - Integrations built on top of a client application must not create an alternate SMTP path.
+
+repository_strategy:
+  recommended_layout:
+    root: smarthost/
+    entries:
+      - path: app/
+        purpose: Symfony application (PHP-FPM web process and webhook worker)
+      - path: validator/
+        purpose: Python validation worker
+      - path: delivery/
+        purpose: Go delivery/control daemon
+      - path: postfix/
+        purpose: Postfix container/config templates
+      - path: opendkim/
+        purpose: OpenDKIM milter container/config templates
+      - path: infra/
+        purpose: >-
+          Podman networks, Quadlet units, nginx configuration, database role bootstrap, environment
+          templates and deployment scripts
+      - path: tests/fake-smtp/
+        purpose: deterministic SMTP test service
+      - path: docs/
+        purpose: architecture, API and operational documentation
+      - path: scripts/
+        purpose: explicit development/maintenance helpers
+  repository_policy:
+    - Smarthost should remain a separate repository/project from its client applications.
+    - Shared client libraries may be extracted only after API contracts stabilise.
+
+podman_environment:
+  container_runtime: Podman
+  rootless: true
+  development_host: developer workstation (Linux host or WSL Podman machine)
+  topology:
+    principle: >-
+      Client applications and unrelated projects may run on the same Podman machine during
+      development, but as separate projects, networks and databases.
+    smarthost_services:
+      - reverse-proxy (nginx)
+      - symfony-app (PHP-FPM)
+      - symfony-webhook-worker (same image as symfony-app)
+      - python-validator
+      - go-delivery
+      - postfix
+      - opendkim
+      - postgres
+      - mailpit
+      - fake-smtp
+    other_projects: client applications and unrelated projects run as separate Podman projects
+  networking:
+    - Smarthost internal services use a dedicated internal Podman network.
+    - PostgreSQL is never exposed publicly.
+    - Python and Go expose no public ports.
+    - PHP-FPM is reachable only from nginx on the internal network.
+    - OpenDKIM is reachable only from Postfix on the internal network.
+    - Development Mailpit UI must bind only to a local/development interface.
+    - Client applications access Smarthost through the same HTTP API boundary expected in production.
+  process_management:
+    primary: Podman Quadlet with systemd user units
+    requirements:
+      - restart on failure
+      - boot/start automation where appropriate
+      - systemctl status support
+      - journalctl visibility
+    timers:
+      - Postfix log rotation
+      - Postfix queue snapshots
+      - Symfony scheduled commands
+  environment_parity:
+    same_between_dev_and_prod:
+      - container images
+      - service boundaries
+      - database migrations
+      - internal API contracts
+      - queue/job logic
+      - nginx and OpenDKIM topology
+    allowed_differences:
+      - secrets
+      - domain names
+      - certificates
+      - DKIM keys (development test keys versus production keys)
+      - relay/live Internet enablement
+      - Mailpit versus live delivery
+      - resource limits
+  persistence:
+    postfix:
+      - queue
+      - TLS/configuration material as appropriate
+    shared_volumes:
+      postfix_observability: Postfix log and queue snapshots; written by Postfix, read-only for Go
+      dsn_spool: inbound DSN Maildir; written by Postfix, claimed by Go
+    opendkim:
+      - DKIM private keys as mounted secrets
+    postgres:
+      - data directory
+    app_services: stateless_where_possible
+
+api:
+  base_path: /v1
+  format: JSON
+  transport: HTTPS
+  contract: docs/api/openapi.v1.yaml
+  request_limits:
+    max_request_bytes: 10 MiB (APP_API_MAX_REQUEST_BYTES)
+    rule: the request limit is not raised to fit large send jobs; large jobs use batched recipient upload
+  authentication:
+    initial: API key
+    storage: hashed_only
+    client_identity: >-
+      Always derived from the authenticated API credential. Request bodies never carry or
+      override client_id; the server populates client_id from the API-key context.
+    requirements:
+      - per-client scoping
+      - revocation
+      - last-used tracking
+      - rate limiting
+  idempotency:
+    required_for:
+      - validation job creation
+      - send job creation
+      - send-job recipient batch upload
+    naturally_idempotent:
+      - send-job submit (submitting an already sealed job returns its current state)
+    mechanism: Idempotency-Key header persisted with the created resource
+    semantics:
+      - same key and same body replays the original response
+      - same key with a different body is rejected (422)
+      - same key while the first request is in flight is rejected (409)
+  endpoints_initial:
+    - method: POST
+      path: /validation-jobs
+      purpose: create an asynchronous validation job
+    - method: GET
+      path: /validation-jobs/{id}
+      purpose: retrieve job state and summary
+    - method: GET
+      path: /validation-jobs/{id}/addresses
+      purpose: paginated validation results
+    - method: POST
+      path: /send-jobs
+      purpose: create a send job in collecting state with job-level metadata only
+    - method: POST
+      path: /send-jobs/{id}/recipients
+      purpose: add a batch of fully rendered recipients while the job is collecting
+    - method: POST
+      path: /send-jobs/{id}/submit
+      purpose: atomically seal the recipient set and queue the job
+    - method: GET
+      path: /send-jobs/{id}
+      purpose: retrieve send-job summary
+    - method: GET
+      path: /send-jobs/{id}/messages
+      purpose: paginated recipient/message state
+    - method: GET
+      path: /messages/{id}/events
+      purpose: retrieve append-only event history
+    - method: POST
+      path: /webhooks/test
+      purpose: test client webhook endpoint after webhook support is added
+  webhooks:
+    delivery: signed_https
+    retry: exponential_backoff_with_limit
+    endpoints: >-
+      Registered per client in webhook_endpoints; a client may have more than one endpoint,
+      each enabled or disabled, with subscribed event types and its own signing secret.
+    signing_secret_storage: >-
+      Encrypted at rest with application-managed encryption (keyring APP_ENCRYPTION_KEYS); never
+      only hashed, because Smarthost must hold the secret to compute the HMAC. Rotation keeps the
+      previous secret valid for a bounded overlap during which both signatures are sent.
+    transactional_outbox: >-
+      When Python, Go or Symfony performs a state transition that generates an externally
+      visible webhook event, the producer inserts the webhook_events row in the same PostgreSQL
+      transaction as the underlying state/event change.
+    dispatcher: >-
+      The Symfony webhook_worker is the only component that performs HTTP webhook delivery. It
+      consumes webhook_events, creates/updates webhook_deliveries, signs requests, retries
+      failures and records delivery outcomes. Python and Go never send HTTP webhooks.
+    no_broker: true
+    events_initial:
+      - validation.completed
+      - validation.failed
+      - send.completed
+      - send.failed
+      - message.hard_bounced
+      - message.complained
+  pagination:
+    mandatory_for_large_collections: true
+
+validation:
+  max_addresses_per_public_job: 10000
+  job_statuses:
+    - queued
+    - processing
+    - completed
+    - failed
+    - cancelled
+  input:
+    per_address_fields:
+      address: verbatim client-held address (retained as original_address)
+      external_address_reference: >-
+        optional opaque client-supplied reference per address, separate from the job's
+        external_reference, letting the client map results to its own source records
+  internal_chunking:
+    required: true
+    recommended_chunk_size: 100_to_500
+  immutable_input:
+    - retain original submitted address
+    - never silently rewrite an address
+    - preserve import/job provenance
+  pipeline:
+    - order: 1
+      stage: normalization
+      actions:
+        - trim surrounding whitespace
+        - normalise domain case
+        - preserve original input separately
+      prohibition: do_not_guess_or_replace_local_part
+    - order: 2
+      stage: syntax
+      purpose: RFC-aware syntax validation without network access
+    - order: 3
+      stage: typo_analysis
+      purpose: suggest likely domain corrections without mutating source data
+      signals:
+        - known large mailbox-provider domains
+        - edit distance
+        - common transpositions
+        - malformed/common TLD errors
+        - known legacy domain aliases where maintained
+      output:
+        - suggested_address
+        - suggestion_reason_code
+        - suggestion_confidence
+    - order: 4
+      stage: dns_domain
+      requirements:
+        - distinguish NXDOMAIN from temporary DNS failure
+        - distinguish MX present from Null MX
+        - support SMTP address-record fallback where standards permit when no MX exists
+        - retain DNS evidence/diagnostic codes
+    - order: 5
+      stage: disposable_domain
+      output: boolean_flag_plus_source
+    - order: 6
+      stage: role_account
+      examples:
+        - info
+        - admin
+        - sales
+        - support
+        - abuse
+        - postmaster
+      output: boolean_flag_not_automatic_rejection
+    - order: 7
+      stage: smtp_probe
+      protocol:
+        - connect to selected MX/fallback host
+        - EHLO/HELO
+        - MAIL FROM using configured validator envelope
+        - RCPT TO target
+        - never issue DATA
+        - QUIT/disconnect
+      concurrency:
+        global_limit: configurable
+        per_domain_limit: configurable
+        per_mx_limit: configurable
+      retries:
+        4xx: retry_with_backoff
+        timeout: limited_retry
+      anti_abuse:
+        - avoid high-rate sequential mailbox probing at a single provider
+        - cache domain-level capabilities and temporary failures
+        - stop probing a domain when provider behaviour indicates blocking/tarpitting
+    - order: 8
+      stage: classification
+  typo_suggestions:
+    # D-04
+    rule: a typo result is a suggestion only and never silently modifies an address
+    reason_codes:
+      - provider_domain_edit_distance
+      - transposition
+      - tld_typo
+      - legacy_domain_alias
+      - other_domain_typo_rule
+    confidence_levels:
+      - low
+      - medium
+      - high
+    confidence_rule: confidence is categorical and never presented as a fabricated probability
+  result_model:
+    fields:
+      - external_address_reference
+      - syntax_status
+      - domain_status
+      - smtp_status
+      - is_role
+      - is_disposable
+      - is_catch_all_or_accept_all
+      - is_domain_typo_suspected
+      - suggested_address
+      - suggestion_reason_code
+      - suggestion_confidence
+      - overall_classification
+      - confidence
+      - diagnostic_code
+      - diagnostic_text
+      - checked_at
+    overall_classifications:
+      - deliverable
+      - probably_deliverable
+      - undeliverable
+      - temporarily_unverifiable
+      - unknown
+      - risky
+    certainty_policy:
+      - SMTP acceptance is evidence, not proof that a human mailbox exists.
+      - accept-all behaviour must not be reported as definitely valid.
+      - temporary failures must not be converted into permanent invalid verdicts on first occurrence.
+      - no system claim may imply reliable spam-trap detection.
+
+sending:
+  tracked_send_rule: All tracked bulk and campaign sends are executed by the Go delivery service.
+  symfony_mailer_rule: >-
+    Symfony Mailer may be used for Smarthost's own low-volume application transactional messages,
+    but not as an alternate path for tracked bulk/campaign mail.
+  content_ownership: >-
+    Smarthost performs no mail merge, template rendering, variable substitution or template
+    management and stores no merge-data contract. The client application submits fully rendered,
+    recipient-specific subject, HTML and plain-text content. Smarthost must not become a second
+    campaign/template engine.
+  send_job_statuses:
+    - collecting
+    - queued
+    - processing
+    - dispatched
+    - completed
+    - failed
+    - cancelled
+  status_semantics:
+    collecting: job created with job-level metadata; recipient batches may be added; the only editable state
+    queued: recipient set sealed and immutable; awaiting Go
+    processing: Go is creating recipient messages and submitting them to Postfix
+    dispatched: >-
+      recipient creation/submission work is finished; each recipient was accepted into Postfix,
+      deliberately suppressed, or reached an immediate submission failure (dispatch_completed_at)
+    completed: >-
+      no automated SMTP transport resolution remains outstanding; every recipient has a terminal
+      knowledge state, including outcome_unknown (completed_at)
+    failed: the job as a whole could not be executed
+    cancelled: operator emergency stop before dispatch finished, or abandoned collecting job cleanup
+  throttling_and_suspension: >-
+    Operator throttling and suspension act at client level (clients.status); workers do not
+    claim or continue work for suspended clients. The per-job emergency stop is cancellation.
+  post_completion_events: >-
+    Open, click, complaint and late or recovered transport events may update message state and
+    statistics but never reopen a completed send job.
+  ingestion:
+    # D-24: staged/batched recipient upload
+    create: POST /send-jobs creates the job in collecting state with job-level metadata only
+    add_recipients: POST /send-jobs/{id}/recipients adds a batch of fully rendered recipients
+    submit: POST /send-jobs/{id}/submit atomically seals the recipient set
+    max_recipients_per_batch: 500
+    max_recipients_per_job:
+      default: 10000
+      configuration: APP_SEND_JOB_MAX_RECIPIENTS (may lower, not raise, the contract ceiling of 10000)
+      independent_of: internal processing chunk size and Postfix/domain pacing
+    max_request_bytes: 10 MiB (unchanged; compression is a possible later transport optimisation, never required)
+    batch_rules:
+      - each batch request requires an Idempotency-Key
+      - a batch is accepted or rejected as a whole
+      - the running total across batches may not exceed the configured job limit
+      - duplicate-address rules apply within and across all batches of the job
+      - batches are accepted only while the job is collecting
+    submit_rules:
+      - reject an empty job
+      - reject a job exceeding the configured recipient ceiling
+      - validate all required subscription/transactional metadata
+      - reject an unverified or DKIM-inactive sending domain (except explicitly controlled local/test modes)
+      - make the staged recipient set immutable
+      - change the job to queued
+  send_job_input:
+    client_identity: derived from the authenticated API credential; never accepted in the request body
+    job_level:
+      required:
+        - external_reference
+        - message_class
+        - sender_identity
+      conditional:
+        - list_id (mandatory for subscription; not accepted for transactional in v1)
+      optional:
+        - reply_to
+        - tracking.opens
+        - tracking.clicks
+    recipient_level:
+      required:
+        - external_recipient_reference
+        - email_address
+        - subject (rendered)
+        - html_body and/or text_body (rendered; at least one)
+      conditional:
+        - unsubscribe_url (mandatory for subscription; not accepted for transactional in v1)
+    prohibited:
+      - client_id
+      - template_reference
+      - merge_data
+      - any Smarthost template syntax
+      - arbitrary caller-supplied MIME headers
+  duplicate_recipients:
+    rule: >-
+      within one send job, recipients are compared after address normalisation (trim surrounding
+      whitespace, lowercase/canonicalise the domain, preserve the local-part case); an exact
+      duplicate after normalisation is rejected so an accidental duplicate cannot cause two
+      deliveries
+    example: John@example.com and john@example.com are distinct; " John@Example.COM" duplicates "John@example.com"
+  message_classes:
+    - transactional
+    - subscription
+  header_contract:
+    # D-25
+    From: approved sender identity on a verified sending domain of the client
+    Reply-To: optional job-level reply_to
+    To: the recipient address
+    Subject: the fully rendered recipient subject
+    Message-ID: generated by the delivery system
+    Date: generated by the delivery system
+    transport_headers: generated by the delivery system (e.g. X-Smarthost-Message-ID, MIME structure)
+    List-Unsubscribe_List-Unsubscribe-Post_List-Id: subscription messages only, per list_unsubscribe
+    arbitrary_headers: not accepted in v1; require an explicit future API change
+  list_unsubscribe:
+    applies_to: subscription
+    standard: RFC 8058 one-click unsubscribe
+    url_owner: the client application generates the opaque per-recipient HTTPS unsubscribe URL and hosts the endpoint
+    smarthost_role: Go writes the supplied URL into outgoing MIME headers
+    headers:
+      - "List-Unsubscribe: <https://...>"
+      - "List-Unsubscribe-Post: List-Unsubscribe=One-Click"
+      - "List-Id: from the job's mandatory list_id"
+    rules:
+      - the visible unsubscribe link in the body is client-owned content
+      - the one-click unsubscribe URL is never passed through click tracking
+      - Smarthost keeps no unsubscribe database and produces no unsubscribe events
+  tracking_instrumentation:
+    default: disabled unless explicitly enabled for the send job
+    performed_by: go_delivery, after receiving rendered content
+    open_tracking: insert a pixel into the HTML part only; messages without HTML receive no open tracking
+    click_tracking: rewrite only eligible absolute HTTP/HTTPS links in the HTML part via message_links
+    never_rewrite:
+      - plain-text URLs
+      - mailto URLs
+      - fragment-only URLs
+      - non-HTTP/HTTPS URLs
+      - unsubscribe URLs
+    always:
+      - allocate the message identifier
+      - add delivery/tracking headers
+      - create the VERP envelope return path
+      - submit to Postfix
+  sending_domains:
+    # D-13
+    model: sending_domains table; a client may have multiple domains
+    verification:
+      - Smarthost generates a cryptographically random DNS verification token
+      - the client publishes a TXT record at _smarthost-verification.<domain> with value smarthost-verification=<token>
+      - Symfony checks the TXT value
+      - the domain becomes verified only after the challenge matches; verified_at is recorded
+    token_handling: the verification token is published in DNS, is not an authentication secret and is not hashed
+    statuses:
+      - pending
+      - verified
+      - disabled
+    dkim_statuses:
+      - not_configured
+      - pending_dns
+      - active
+      - disabled
+    dkim_fields: the domain model carries the DKIM selector and DKIM configuration status
+    live_sending_rule: >-
+      live sending rejects an unverified From/sending domain (and, in production, a domain
+      without active DKIM) except in explicitly controlled local/test modes
+      (SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS, never permitted in production)
+  rendered_content_retention:
+    # D-14
+    principle: rendered recipient content is transient transport material, not a campaign archive
+    purge_on_submission: >-
+      once Postfix has accepted the message and the queue id is recorded, Go nulls the
+      recipient's rendered subject, HTML and text in the same transaction
+    cleanup: >-
+      content of abandoned (collecting), cancelled, suppressed or permanently failed recipients
+      is purged after a configurable period (APP_RETENTION_STAGED_CONTENT_DAYS, default 7);
+      abandoned collecting jobs are cancelled
+    retained:
+      - recipient/message identifiers
+      - external references
+      - envelope/transport metadata
+      - content byte counts
+      - content hashes
+      - event history
+  per_recipient:
+    - allocate immutable internal message id
+    - allocate unique VERP token
+    - set envelope return-path under configured bounce domain
+    - allocate an opaque random tracking token when tracking is enabled
+    - skip and record message_suppressed when an active transport suppression matches
+    - submit to Postfix
+    - record Postfix queue id
+    - append submission event
+    - purge the rendered content
+  DSN:
+    preferred_parameters:
+      notify: FAILURE,DELAY
+      return: HDRS
+      original_recipient: use_when_supported
+      envelope_id: Smarthost message id (ENVID)
+  pacing:
+    - configurable global concurrency
+    - configurable per-domain concurrency
+    - configurable per-domain rate
+    - provider-specific temporary backoff
+    - honour Postfix queue/retry state rather than fighting it
+
+inbound_bounce_handling:
+  production_requirement: true
+  bounce_domain: dedicated_configurable_domain
+  network_requirement: TCP 25 reachable to receiving Postfix for the bounce domain
+  flow:
+    - receiving Postfix accepts DSN/bounce mail for VERP, postmaster and feedback-loop recipients of the bounce domain only
+    - Postfix delivers it into the dedicated shared DSN Maildir spool (never DKIM-signed)
+    - Go claims each spool file atomically and parses it
+    - resolve VERP token, envelope id, X-Smarthost-Message-ID, queue identifier or original recipient
+    - append message event (source dsn_spool, keyed by the Maildir unique file name)
+    - update message current state
+    - create/update suppression signal where policy requires
+  unmatched_dsns:
+    storage: unmatched_dsns table (operator-facing diagnostic state, not tenant-owned)
+    retention: keep raw and parsed information sufficient to investigate and later resolve
+    statuses:
+      - open
+      - match_requested
+      - matched
+      - dismissed
+    resolution_workflow:
+      - the operator identifies the candidate Smarthost message
+      - the resolution is queued for Go (status match_requested)
+      - Go interprets the DSN and creates the appropriate message transport event
+      - the original unmatched record is retained, recording who resolved it, when, and the matched message
+  classifications:
+    - hard_bounce
+    - soft_bounce
+    - deferred
+    - connection_failure
+    - complaint
+    - malformed_or_unmatched_dsn
+
+transport_reconciliation:
+  # D-27
+  purpose: lost log events must not leave messages or jobs unresolved forever
+  queue_snapshots: >-
+    the Postfix environment periodically writes an atomic JSON queue snapshot (postqueue -j or an
+    equivalent supported mechanism) into the shared observability volume, readable by Go
+  candidates: unresolved queued, submitted and deferred messages
+  evidence:
+    - recorded transport events
+    - the current and recent Postfix queue snapshots
+    - inbound DSNs where applicable
+  disappearance_rule:
+    - a queue id disappearing is never immediately assumed to be successful delivery
+    - recheck after a configurable grace interval and across more than one queue snapshot
+    - re-scan retained logs and DSNs for an authoritative outcome
+    - if none can be recovered, append transport_outcome_unknown and set current status outcome_unknown
+    - expose the condition to the operator
+  queued_without_queue_id: >-
+    after an ambiguous submission, Go searches the log for the message's Message-ID before
+    resubmitting, so a message is never submitted twice
+  stale_snapshots: reconciliation never concludes absence from stale snapshots; stale snapshots raise an operator alert
+  outcome_unknown_semantics: >-
+    outcome_unknown means Smarthost cannot determine the final SMTP result; it is not a
+    delivery-success state; a later authoritative transport event or DSN supersedes it
+  job_completion: >-
+    a dispatched job becomes completed once no automated transport work is outstanding and
+    every recipient has a terminal knowledge state, including outcome_unknown
+
+message_tracking:
+  terminology:
+    remote_accepted: receiving SMTP system accepted responsibility for the message
+    outcome_unknown: Smarthost cannot determine the final SMTP result; not a success state
+    delivered_prohibition: >-
+      Do not claim that SMTP acceptance proves inbox placement, human receipt or human reading.
+  current_statuses:
+    - created
+    - queued
+    - submitted
+    - deferred
+    - outcome_unknown
+    - remote_accepted
+    - hard_bounced
+    - soft_bounced
+    - complained
+    - failed
+    - suppressed
+  event_model:
+    append_only: true
+    vocabulary: docs/contracts/status-vocabulary.yaml documents every event type, its sources and status effect
+    event_types:
+      - message_created
+      - message_queued
+      - message_suppressed
+      - submission_failed
+      - submitted_to_postfix
+      - postfix_queued
+      - delivery_attempt
+      - deferred
+      - remote_accepted
+      - hard_bounce
+      - soft_bounce
+      - connection_failure
+      - complaint
+      - transport_outcome_unknown
+      - open_recorded
+      - click_recorded
+      - dsn_unmatched
+    deduplication:
+      # D-06
+      fields: [event_source, source_event_key]
+      rule: >-
+        uniqueness of (event_source, source_event_key) is enforced where a source provides a
+        stable source event identity; de-duplication is never derived purely from event content,
+        because legitimately repeated SMTP events may carry identical text and status values
+      postfix_log_key: derived from the log-record generation identity and position (exact derivation verified in Phase 1)
+      dsn_key: an ingestion identity stable across claim, retry and restart (the Maildir unique file name)
+    event_sources:
+      - delivery_daemon
+      - postfix_submission
+      - postfix_log
+      - dsn_spool
+      - unmatched_dsn_resolution
+      - queue_reconciliation
+      - tracking_endpoint
+  engagement_tracking:
+    tokens:
+      model: opaque cryptographically secure random token (at least 192 bits of CSPRNG entropy), stored per message
+      signing: tokens are not signed; no signing key is shared between Go and Symfony
+      endpoint_rules:
+        - validate token format
+        - look up the random token
+        - reject unknown, expired or inapplicable tokens
+        - map the token to the stored message/link
+        - never expose raw recipient email addresses
+    open_tracking:
+      method: random_token_tracking_pixel
+      route_example: /t/o/{token}.gif
+      applies_to: HTML messages with open tracking enabled
+      semantics: recorded_open_not_proven_read
+      caveats:
+        - image blocking
+        - image proxying
+        - privacy prefetching
+        - security scanners
+        - caching
+    click_tracking:
+      method: random_token_redirect
+      route_example: /t/c/{token}/{link_index}
+      semantics: recorded_click
+      requirements:
+        - validate the token and link index
+        - record event before redirect
+        - prevent open redirects
+        - preserve original target safely
+      link_mapping: message_links rows written by Go when rewriting; the redirect target is read only from this mapping
+      excluded_links: plain-text, mailto, fragment-only, non-HTTP/HTTPS and unsubscribe URLs
+    unsubscribe: handled entirely by the client application; Smarthost records no unsubscribe events
+
+suppression_and_reputation:
+  smarthost_suppression_reasons:
+    - hard_bounce
+    - complaint
+    - repeated_soft_bounce
+    - operator_block
+    - client_abuse_block
+  distinction: >-
+    Smarthost suppression is transport/reputation safety state. It is not the same as a client's
+    mailing-list membership, consent or unsubscribe business state.
+  address_matching:
+    normalisation: trim surrounding whitespace, preserve the local part exactly, lowercase/canonicalise the domain
+    example: "John@example.COM matches as John@example.com, not john@example.com"
+    case_insensitive_local_part: not adopted; adopting it later requires an explicit documented policy
+  repeated_soft_bounce:
+    # D-18
+    rule: >-
+      suppress after a configurable number (default 3) of consecutive recipient-specific soft
+      bounces within a configurable rolling window (default 30 days)
+    reset: a later remote_accepted outcome for the address resets the consecutive count
+    counts: soft_bounce events whose failure_scope is recipient
+    does_not_count:
+      - provider-wide rate limiting
+      - connection failures
+      - DNS failures
+      - temporary remote infrastructure failures
+      - general domain-level deferrals
+    failure_scopes:
+      - recipient
+      - domain
+      - provider_policy
+      - connection
+      - dns
+      - infrastructure
+      - unknown
+    configuration: [DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD, DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS]
+  automatic_suppression_scope: >-
+    whether automatically created suppressions (hard bounce, complaint, repeated soft bounce) are
+    client-scoped or global is to be decided before Phase 5; the schema supports both
+  provider_reputation:
+    future_metrics:
+      - rolling_bounce_rate
+      - rolling_complaint_rate
+      - deferral_rate
+      - delivery_acceptance_rate
+      - volume_by_domain
+      - volume_by_sending_identity
+
+list_hygiene_principles:
+  ownership: client applications own list business workflow; Smarthost performs validation and delivery tracking
+  restrictions:
+    - never silently correct addresses
+    - never treat SMTP acceptance as proof of consent
+    - never infer consent from mere possession of an address
+    - retain auditability of address provenance
+
+schema:
+  owner: Symfony Doctrine migrations only
+  identifier_strategy: UUIDv7_or_equivalent_time_ordered_UUID_consistently_across_services
+  timestamp_strategy: timestamptz_UTC
+  reference: docs/schema/reference-schema.sql
+  tables:
+    clients:
+      key_fields:
+        - id
+        - company_name
+        - contact_email
+        - status
+        - plan
+        - created_at
+    users:
+      purpose: human dashboard login accounts; never API keys
+      key_fields:
+        - id
+        - email
+        - password_hash
+        - global_role
+        - status
+        - created_at
+        - last_login_at
+    client_memberships:
+      key_fields:
+        - id
+        - user_id
+        - client_id
+        - role
+        - created_at
+    sending_domains:
+      purpose: client sending domains with DNS TXT verification and DKIM configuration status
+      key_fields:
+        - id
+        - client_id
+        - domain
+        - status
+        - verification_token
+        - verified_at
+        - last_checked_at
+        - dkim_selector
+        - dkim_status
+        - created_at
+    api_keys:
+      key_fields:
+        - id
+        - client_id
+        - key_hash
+        - created_at
+        - last_used_at
+        - revoked_at
+    validation_jobs:
+      key_fields:
+        - id
+        - client_id
+        - external_reference
+        - idempotency_key
+        - status
+        - submitted_at
+        - started_at
+        - completed_at
+        - total_addresses
+        - processed_count
+        - classification_counts_json
+    validation_addresses:
+      key_fields:
+        - id
+        - job_id
+        - external_address_reference
+        - original_address
+        - normalized_address
+        - syntax_status
+        - domain_status
+        - smtp_status
+        - is_role
+        - is_disposable
+        - is_catch_all_or_accept_all
+        - is_domain_typo_suspected
+        - suggested_address
+        - suggestion_reason_code
+        - suggestion_confidence
+        - overall_classification
+        - confidence
+        - diagnostic_code
+        - diagnostic_text
+        - checked_at
+        - claimed_by
+        - lease_expires_at
+        - attempt_count
+        - next_attempt_at
+        - last_error
+    validation_evidence:
+      purpose: optional append-only detailed DNS/SMTP evidence for diagnostics and future classifier improvement
+      key_fields:
+        - id
+        - validation_address_id
+        - evidence_type
+        - provider_host
+        - response_code
+        - enhanced_status_code
+        - detail_json
+        - occurred_at
+    send_jobs:
+      key_fields:
+        - id
+        - client_id
+        - external_reference
+        - idempotency_key
+        - message_class
+        - list_id
+        - sending_domain_id
+        - sender_email
+        - sender_name
+        - reply_to_email
+        - reply_to_name
+        - track_opens
+        - track_clicks
+        - status
+        - created_at
+        - queued_at
+        - started_at
+        - dispatch_completed_at
+        - completed_at
+        - total_recipients
+        - summary_counts_json
+        - claimed_by
+        - lease_expires_at
+        - attempt_count
+        - last_error
+    send_job_recipient_batches:
+      purpose: one row per accepted recipient-upload request; carries the batch idempotency key
+      key_fields:
+        - id
+        - send_job_id
+        - idempotency_key
+        - recipient_count
+        - created_at
+    send_job_recipients:
+      purpose: >-
+        staged recipient input persisted by Symfony; immutable once the job is sealed except
+        for the purge of rendered content; holds no SMTP transport state
+      key_fields:
+        - id
+        - send_job_id
+        - batch_id
+        - external_recipient_reference
+        - email_address
+        - normalized_address
+        - subject
+        - html_body
+        - text_body
+        - unsubscribe_url
+        - content_bytes
+        - content_sha256
+        - content_purged_at
+        - created_at
+    messages:
+      purpose: one row per recipient message, holding current state; created by Go
+      key_fields:
+        - id
+        - send_job_id
+        - send_job_recipient_id
+        - external_recipient_reference
+        - recipient_address
+        - verp_token
+        - return_path
+        - tracking_token
+        - postfix_queue_id
+        - current_status
+        - created_at
+        - resolved_at
+    message_links:
+      purpose: server-side click-tracking link mapping written by Go
+      key_fields:
+        - id
+        - message_id
+        - link_index
+        - target_url
+        - created_at
+    message_events:
+      purpose: append-only event history
+      key_fields:
+        - id
+        - message_id
+        - event_type
+        - event_source
+        - source_event_key
+        - failure_scope
+        - smtp_code
+        - enhanced_status_code
+        - remote_host
+        - diagnostic
+        - metadata_json
+        - occurred_at
+        - recorded_at
+    unmatched_dsns:
+      purpose: operator-facing DSNs that could not be associated with a message
+      key_fields:
+        - id
+        - received_at
+        - spool_ingest_key
+        - classification
+        - status
+        - verp_token
+        - original_recipient
+        - postfix_queue_id
+        - raw_message
+        - detail_json
+        - matched_message_id
+        - resolution_requested_by
+        - resolution_requested_at
+        - resolution_event_id
+        - resolved_at
+    delivery_ingest_cursors:
+      purpose: persistent Go ingestion position per source, identified by log generation and position
+      key_fields:
+        - source
+        - generation_id
+        - position
+        - updated_at
+    suppressions:
+      key_fields:
+        - id
+        - client_id_nullable_for_global
+        - address_or_domain
+        - scope_type
+        - reason
+        - source_message_id
+        - created_at
+        - expires_at_nullable
+        - lifted_at_nullable
+    disposable_domains:
+      key_fields:
+        - domain
+        - source
+        - added_at
+        - last_verified_at
+    domain_reputation:
+      optional_initially: true
+      key_fields:
+        - id
+        - client_id_nullable
+        - destination_domain
+        - metrics_json
+        - last_updated_at
+    usage_records:
+      key_fields:
+        - id
+        - client_id
+        - usage_type
+        - quantity
+        - reference_type
+        - reference_id
+        - occurred_at
+    webhook_endpoints:
+      purpose: client webhook registration
+      key_fields:
+        - id
+        - client_id
+        - url
+        - status
+        - subscribed_event_types
+        - signing_secret_ciphertext
+        - previous_signing_secret_ciphertext
+        - previous_signing_secret_expires_at
+        - created_at
+        - updated_at
+    webhook_events:
+      purpose: transactional outbox of client-visible events, written in the producer's state-change transaction
+      key_fields:
+        - id
+        - client_id
+        - event_type
+        - subject_type
+        - subject_id
+        - created_at
+        - fanned_out_at
+    webhook_deliveries:
+      key_fields:
+        - id
+        - client_id
+        - webhook_event_id
+        - webhook_endpoint_id
+        - event_type
+        - payload_hash
+        - status
+        - attempt_count
+        - next_attempt_at
+        - claimed_by
+        - lease_expires_at
+        - last_error
+        - delivered_at
+    audit_log:
+      key_fields:
+        - id
+        - actor_type
+        - actor_id
+        - action
+        - target_type
+        - target_id
+        - detail_json
+        - occurred_at
+  indexes_required:
+    - validation_addresses.job_id
+    - validation_addresses.normalized_address
+    - messages.send_job_id
+    - messages.verp_token_unique
+    - messages.postfix_queue_id
+    - message_events.message_id_occurred_at
+    - suppressions.address_or_domain_scope
+    - api_keys.key_hash_unique
+    - send_jobs.client_id_status
+    - validation_jobs.client_id_status
+    - send_job_recipients.send_job_id
+    - send_job_recipients.send_job_id_normalized_address_unique
+    - send_job_recipient_batches.send_job_id_idempotency_key_unique
+    - messages.send_job_recipient_id_unique
+    - messages.tracking_token_unique
+    - message_links.message_id_link_index_unique
+    - message_events.event_source_source_event_key_unique
+    - unmatched_dsns.status_received_at
+    - unmatched_dsns.spool_ingest_key_unique
+    - sending_domains.client_id_domain_unique
+    - users.email_unique
+    - client_memberships.user_id_client_id_unique
+    - webhook_endpoints.client_id
+    - webhook_deliveries.status_next_attempt_at
+  integrity_rules:
+    - raw API keys are never stored
+    - VERP tokens are unique
+    - tracking tokens are unique opaque random values of at least 192 bits
+    - message_events are append-only through application policy and database privileges
+    - send_job_recipients are immutable once the job leaves collecting, except purging rendered content
+    - webhook signing secrets are stored encrypted, never in plaintext
+    - external references are client-scoped
+    - every tenant-owned row is scoped by client directly or through an enforced parent relation
+    - users.email is unique case-insensitively as a login-identity rule; it is never the SMTP mailbox-normalisation rule
+
+security:
+  baseline:
+    - rootless Podman
+    - least-privilege containers
+    - least-privilege database roles; no schema-altering privileges for Python or Go
+    - secrets outside images and repositories
+    - TLS for public API
+    - authenticated submission on port 587
+    - PostgreSQL not publicly exposed
+    - Python and Go not publicly exposed
+    - PHP-FPM and OpenDKIM reachable only on the internal network
+    - parameterised database access in Go/Python
+    - Symfony CSRF protection for browser forms
+    - output escaping in dashboard views
+    - strict upload limits and file parsing
+    - rate limiting per API key/client/IP where appropriate
+  email_abuse_controls:
+    - manual approval gate before meaningful production volume
+    - account suspension and throttling
+    - per-client usage limits
+    - bounce-rate monitoring
+    - complaint-rate monitoring
+    - global suppression capability
+    - sending-domain verification (DNS TXT challenge)
+  dkim:
+    - private keys available to OpenDKIM only
+    - signing based on verified sending domain and active DKIM configuration
+  webhook_security:
+    - sign payloads
+    - timestamp signatures
+    - allow clients to rotate webhook secrets
+    - store signing secrets encrypted at rest with application-managed keys
+  dashboard_authentication:
+    - human users authenticate as users through Symfony Security, never with API keys
+    - client access comes from client_memberships with a client role
+    - operators hold a global operator role independent of any client membership
+  tracking_security:
+    - no raw recipient email in URLs
+    - opaque random tokens of at least 192 bits, validated by format and server-side lookup
+    - redirect target must come from server-side stored link mapping
+  future_public_saas:
+    - acceptable use policy
+    - abuse reporting
+    - plan/rate enforcement
+    - verified sending identities
+    - client isolation review
+
+compliance:
+  scope:
+    - applicable_data_protection_law
+  design_requirements:
+    - provenance of imported addresses
+    - auditable suppression/unsubscribe events
+    - configurable retention
+    - client data isolation
+    - export/delete workflows when required
+    - purpose limitation in stored metadata
+  retention:
+    # D-14
+    rendered_content: transient; purged on Postfix acceptance; staged-content cleanup default 7 days (configurable)
+    configurable_periods:
+      - validation history
+      - suppressions
+      - message metadata and events
+      - tracking tokens and link mappings
+      - unmatched DSNs
+      - audit logs
+      - usage records
+    rule: >-
+      Phase 0 hard-codes no final long-term retention period for these categories; each is
+      configurable and the operator's compliance specification sets the production policy.
+  explicit_note: >-
+    Technical validation does not establish lawful consent. Consent-dependent sending requires the
+    operator's own legal/compliance review.
+  live_sending_compliance_gate:
+    rule: >-
+      Consent-dependent campaign mail is not sent to the public Internet until the operator's
+      legal/compliance specification for that sending has been reviewed and approved.
+    not_blocked: technical development, validation and Mailpit/local testing
+
+testing:
+  principles:
+    - no real Internet email in normal automated tests
+    - deterministic failure simulation
+    - test cross-language database contracts
+    - test migrations from an empty database
+  unit:
+    symfony:
+      - API authentication
+      - tenant scoping
+      - idempotency (job creation, recipient batches, submit)
+      - job validation, batch limits and duplicate detection across batches
+      - tracking token validation
+      - webhook signatures and secret rotation
+      - sending-domain TXT verification
+    python:
+      - syntax classification
+      - typo suggestions
+      - DNS state mapping
+      - Null MX handling
+      - temporary DNS errors
+      - SMTP response classification
+      - retry/backoff logic
+      - accept-all classification
+      - lease renewal and reclaim
+    go:
+      - VERP generation
+      - Postfix queue-id parsing/correlation
+      - SMTP/DSN status classification and failure scope
+      - bounce parsing
+      - event append logic and source-key de-duplication
+      - pacing/backoff
+      - tracking instrumentation and link-rewriting exclusions
+      - queue-snapshot reconciliation
+  integration:
+    - Symfony creates validation job and Python completes it through PostgreSQL
+    - Symfony collects recipient batches, submits the job and Go submits messages to Postfix
+    - Postfix routes to Mailpit in development
+    - outbound mail is DKIM-signed by OpenDKIM; milter failure causes tempfail and retry, never unsigned sending
+    - fake SMTP simulates 250, 421, 450, 451, 550, timeout and connection-refused cases
+    - inbound synthetic DSN maps to the correct VERP/message
+    - lost log events are recovered or produce outcome_unknown through reconciliation
+    - open pixel records one or more events safely
+    - click redirect records event then redirects to stored target
+    - webhook outbox rows are delivered only by the Symfony webhook worker
+    - a test API client can authenticate and use the API without DB access
+  load:
+    initial_targets:
+      - one 10000-address validation job completes without unbounded memory growth
+      - per-domain concurrency limits remain enforced under skewed domain distributions
+      - dashboard pagination does not aggregate entire job/message tables in memory
+  live_smoke_test:
+    conditions:
+      - only after local test suite passes
+      - only against addresses/domains owned or explicitly authorised for testing
+      - tiny volumes
+      - live sending explicitly enabled by configuration
+
+observability:
+  requirements:
+    - structured logs for Symfony, Python and Go
+    - correlation identifiers: client_id, job_id, message_id where applicable
+    - operator dashboard for queue depth and worker health
+    - Postfix queue visibility
+    - validation backlog visibility
+    - failed webhook visibility
+    - unmatched DSN visibility
+    - outcome_unknown messages, log gaps and stale queue snapshots visibility
+  metrics_initial:
+    - validation_jobs_pending
+    - validation_addresses_processed
+    - send_jobs_pending
+    - messages_by_current_status
+    - messages_outcome_unknown
+    - postfix_queue_depth
+    - postfix_queue_snapshot_age
+    - hard_bounce_rate
+    - soft_bounce_rate
+    - deferral_rate
+    - complaint_rate
+    - open_events
+    - click_events
+
+user_interfaces:
+  client_dashboard:
+    - validation upload/job history
+    - validation result table with evidence and suggested typo corrections
+    - downloadable cleaned/result files
+    - send-job history
+    - per-message event timeline
+    - delivery acceptance/bounce/deferral statistics
+    - recorded open/click statistics with caveat text
+    - API key management
+    - usage view
+    - sending-domain verification and DKIM status
+    - webhook endpoint management
+  operator_dashboard:
+    - client approval queue
+    - account suspension/throttling
+    - cross-client bounce/complaint monitoring
+    - Postfix queue health and queue-snapshot freshness
+    - validation backlog
+    - Go/Python/webhook-worker health
+    - unmatched DSNs and match requests
+    - outcome_unknown messages
+    - failed webhooks
+    - audit history
+  UI_technology:
+    - Twig
+    - Symfony UX
+    - LiveComponent where it reduces hand-written table/AJAX complexity
+    - Stimulus for focused client-side interactions
+  UI_requirements:
+    - server-side pagination for large tables
+    - sortable/filterable tables
+    - clear distinction between validation certainty and delivery certainty
+    - no claim that recorded open equals proven human read
+    - outcome_unknown is never presented as delivered
+
+smtp_reputation_and_deliverability:
+  production_prerequisites:
+    - dedicated Smarthost VPS/IP
+    - forward DNS
+    - PTR/reverse DNS aligned with sending identity
+    - SPF
+    - DKIM (OpenDKIM with per-domain selectors)
+    - DMARC policy appropriate to rollout stage
+    - TLS
+    - bounce domain routing
+  rollout:
+    - start with owned seed addresses
+    - small controlled volumes
+    - gradual IP/domain warm-up
+    - observe deferrals/bounces/complaints before increasing volume
+  prohibitions:
+    - never use a large unproven address list as an IP warm-up method
+    - never claim to detect spam traps reliably
+
+non_goals_initial:
+  - Kubernetes
+  - custom SMTP server replacing Postfix
+  - direct client-application-to-Smarthost database sharing
+  - real-time microservice RPC between Symfony, Python and Go
+  - machine-learning mailbox-validity classifier in the first release
+  - public self-service high-volume sending without operator review
+  - multiple sending-IP pools in the first release
+  - complex billing provider integration before the core pipeline is proven
+  - mail merge or template rendering inside Smarthost
+
+implementation_phases:
+  - phase: 0
+    name: canonical_architecture_and_contracts
+    objective: freeze architecture, schemas, API contracts and development conventions before application logic
+    deliverables:
+      - canonical YAML specification
+      - human architecture/development specification
+      - repository skeleton
+      - environment-variable contract
+      - initial API contract/OpenAPI draft
+      - database ERD/schema proposal
+      - event/status vocabulary
+    acceptance:
+      - no unresolved ownership conflict between client applications and Smarthost
+      - send execution ownership explicitly assigned to Go
+      - message/event model agreed
+      - inbound bounce path represented
+  - phase: 1
+    name: podman_development_environment
+    objective: create deterministic rootless local environment with no real mail leaving the development machine
+    deliverables:
+      - Podman networks
+      - Quadlet units and timers
+      - PostgreSQL with infrastructure role bootstrap
+      - nginx reverse proxy
+      - Symfony PHP-FPM container and webhook-worker unit
+      - Python container
+      - Go container
+      - Postfix with shared observability volume and DSN spool
+      - OpenDKIM milter with development test key
+      - Mailpit
+      - fake SMTP server
+      - health checks
+      - verification of Postfix logging, rotation, queue-snapshot and shared-volume ownership behaviour
+    acceptance:
+      - all services start/restart through systemd user units
+      - no PostgreSQL/Python/Go/PHP-FPM/OpenDKIM public exposure
+      - Postfix test mail reaches Mailpit only
+  - phase: 2
+    name: database_and_symfony_foundation
+    objective: establish schema ownership, tenant model, API auth and job primitives
+    deliverables:
+      - Doctrine entities/migrations
+      - clients/api_keys/users/client_memberships
+      - sending domains and TXT verification
+      - validation job tables
+      - send/recipient-batch/message/event tables
+      - webhook outbox and endpoint tables
+      - audit log
+      - API key authentication
+      - idempotent job creation, batched recipient ingestion and submit primitives
+    acceptance:
+      - clean database migration succeeds
+      - tenant isolation tests pass
+      - raw API keys never persist
+  - phase: 3
+    name: python_validation_engine
+    objective: implement evidence-based batch validation without sending email
+    deliverables:
+      - leased job claiming
+      - syntax checks
+      - typo suggestions
+      - DNS/MX/Null-MX handling
+      - disposable/role flags
+      - SMTP probing
+      - per-domain throttling
+      - retry/backoff
+      - classification and job summaries
+    acceptance:
+      - deterministic fake-DNS/fake-SMTP tests pass
+      - no DATA command is emitted
+      - 10000-address synthetic job completes within configured resource bounds
+  - phase: 4
+    name: go_postfix_delivery_pipeline
+    objective: create reliable tracked submission and transport-event recording
+    deliverables:
+      - leased send-job claiming
+      - message creation from sealed recipients
+      - VERP
+      - MIME assembly and header contract
+      - Postfix submission
+      - queue-id correlation and rendered-content purge
+      - Postfix event/log processing with persistent cursors
+      - queue-snapshot reconciliation
+      - append-only message events
+      - per-domain pacing
+      - DKIM signing through OpenDKIM
+    acceptance:
+      - Mailpit receives expected test messages
+      - queue IDs map back to messages
+      - synthetic 4xx/5xx scenarios create correct event history
+      - messages are DKIM-signed; milter failure causes tempfail and retry
+      - lost log events are reconciled or become outcome_unknown
+  - phase: 5
+    name: inbound_dsn_and_suppression
+    objective: process real-format bounces and create safe transport suppression signals
+    deliverables:
+      - bounce-domain configuration
+      - inbound Postfix path
+      - DSN parser
+      - VERP resolution
+      - hard/soft bounce policy including repeated-soft-bounce rule
+      - suppression records
+      - unmatched DSN handling and operator resolution
+    acceptance:
+      - synthetic DSNs resolve exact messages
+      - hard bounces create suppression
+      - temporary failures do not immediately create permanent suppression
+  - phase: 6
+    name: tracking_and_dashboards
+    objective: expose useful operational and client visibility
+    deliverables:
+      - validation result UI
+      - send/message event UI
+      - operator health UI
+      - open tracking pixel
+      - click redirect tracking
+      - recorded-open/click metrics
+    acceptance:
+      - tables are server-side paginated
+      - tracking URLs do not expose raw email addresses
+      - click redirects cannot be abused as open redirects
+  - phase: 7
+    name: first_client_api_integration
+    objective: make the first client application a real external Smarthost client
+    deliverables:
+      - client-side Smarthost API client
+      - API-key configuration
+      - validation job submission/polling
+      - batched send-job submission with rendered content
+      - webhook receiver
+      - external-reference mapping
+    acceptance:
+      - the client performs the full workflow without direct Smarthost DB access
+      - Smarthost can be restarted/deployed independently of the client
+  - phase: 8
+    name: controlled_production_launch
+    objective: move from captured mail to live Internet delivery with reputation safeguards
+    deliverables:
+      - production VPS deployment
+      - DNS/PTR/SPF/DKIM/DMARC with production OpenDKIM keys
+      - live bounce routing
+      - owned seed-list testing
+      - warm-up controls
+      - operational runbook
+    acceptance:
+      - production smoke tests pass
+      - bounce routing verified
+      - metrics and emergency throttle/suspension controls verified
+  - phase: 9
+    name: public_saas_hardening
+    objective: prepare Smarthost for external paying clients after internal production use proves stable
+    deliverables:
+      - account approval workflow
+      - stronger rate/volume enforcement
+      - webhook hardening
+      - usage/billing integration
+      - acceptable use policy hooks
+      - client-facing API documentation
+      - abuse monitoring
+    acceptance:
+      - tenant isolation security review complete
+      - operator kill switch tested
+      - per-client usage metering reconciles against jobs/messages
+
+first_implementation_priority:
+  order:
+    - canonical specifications
+    - Podman environment
+    - database foundation
+    - Python validation worker
+    - Go/Postfix delivery
+    - bounce processing
+    - tracking/dashboard
+    - client integration
+    - production rollout
+    - public SaaS
+
+completion_definition:
+  core_internal_product_complete_when:
+    - a client application can authenticate to the Smarthost API
+    - a client application can submit a validation job of up to 10000 addresses
+    - Python records evidence-based validation results
+    - a client application can submit a tracked send job with fully rendered recipient content
+    - Go submits per-recipient messages to Postfix
+    - Postfix outcomes are represented as append-only events
+    - inbound hard/soft bounces map to exact messages
+    - transport suppressions are enforced
+    - recorded opens and clicks are available with correct semantics
+    - operator can inspect queue/worker health and stop abusive sending
+    - the entire workflow is tested locally without public Internet mail
+
+revision_history:
+  - version: "2.0"
+    date: "2026-09-08"
+    summary: Canonical architecture and development plan.
+  - version: "2.1"
+    date: "2026-10-02"
+    summary: >-
+      Incorporates the Phase 0 architecture decisions and resolves the mail-merge, tracking,
+      unsubscribe, send-ingestion, webhook, DKIM and transport-reconciliation contracts:
+      fully rendered recipient content from client applications; staged recipient batches with
+      collecting/queued/processing/dispatched/completed send jobs; opaque random tracking
+      tokens; RFC 8058 List-Unsubscribe for subscription messages; webhook transactional outbox
+      with a dedicated Symfony worker; nginx with PHP-FPM; OpenDKIM milter; sending-domain
+      verification; transient rendered-content retention; Postfix queue-snapshot
+      reconciliation with outcome_unknown; unmatched-DSN resolution; leased work claiming;
+      origin-aware event de-duplication; database role bootstrap; and the live-sending
+      compliance gate. Removes unsubscribe_signal and the signed-token wording.
+    decisions_incorporated:
+      - D-01
+      - D-02
+      - D-03
+      - D-04
+      - D-05
+      - D-06
+      - D-07
+      - D-08
+      - D-09
+      - D-10
+      - D-11
+      - D-12
+      - D-13
+      - D-14
+      - D-15
+      - D-16
+      - D-17
+      - D-18
+      - D-19
+      - D-20
+      - D-21
+      - D-22
+      - D-23
+      - D-24
+      - D-25
+      - D-26
+      - D-27
+      - D-28
+      - D-29
+    decision_log: docs/architecture/open-decisions.md

@@ -1,0 +1,18 @@
+# Smarthost Postfix (Phase 1 development topology).
+# Contract: docs/architecture/postfix-integration.md
+FROM docker.io/library/debian:trixie-slim
+
+RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      postfix sasl2-bin libsasl2-modules ca-certificates openssl netcat-openbsd \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh       /usr/local/bin/smarthost-postfix-entrypoint
+COPY healthcheck.sh      /usr/local/bin/smarthost-postfix-healthcheck
+COPY queue-snapshot.sh   /usr/local/bin/smarthost-queue-snapshot
+COPY logrotate.sh        /usr/local/bin/smarthost-postfix-logrotate
+RUN chmod 0755 /usr/local/bin/smarthost-*
+
+EXPOSE 25 587
+ENTRYPOINT ["/usr/local/bin/smarthost-postfix-entrypoint"]

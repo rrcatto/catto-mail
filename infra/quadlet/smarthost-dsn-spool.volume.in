@@ -1,0 +1,4 @@
+# Inbound DSN Maildir spool (Go: claim by rename)
+[Volume]
+VolumeName=smarthost-dsn-spool
+Label=project=smarthost

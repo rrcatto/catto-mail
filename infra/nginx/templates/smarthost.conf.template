@@ -1,0 +1,41 @@
+# Rendered by the official nginx entrypoint (envsubst of ${VAR}s present in the
+# environment). Variables: PROXY_SERVER_NAME, PROXY_FASTCGI_ADDRESS,
+# PROXY_TLS_CERT_FILE, PROXY_TLS_KEY_FILE (docs/contracts/environment.md) and
+# NGINX_LOCAL_RESOLVERS (set by the image when NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1).
+server_tokens off;
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${PROXY_SERVER_NAME};
+
+    ssl_certificate     ${PROXY_TLS_CERT_FILE};
+    ssl_certificate_key ${PROXY_TLS_KEY_FILE};
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # Resolve the PHP-FPM container at request time so a restarted container
+    # (new IP) is picked up without restarting nginx.
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+    set $smarthost_fpm ${PROXY_FASTCGI_ADDRESS};
+
+    # Phase 1 infrastructure probe: proves nginx -> FastCGI -> PHP-FPM.
+    location = /healthz {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /srv/probe/healthz.php;
+        fastcgi_pass $smarthost_fpm;
+    }
+
+    # The Symfony front controller is added in Phase 2.
+    location / {
+        return 404;
+    }
+}
+
+# Container-local readiness endpoint for the health check. It binds to the
+# container's loopback only and is never published.
+server {
+    listen 127.0.0.1:8080;
+    access_log off;
+    location = /nginx-health { return 200 "ok\n"; }
+    location / { return 404; }
+}

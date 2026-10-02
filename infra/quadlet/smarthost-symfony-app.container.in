@@ -1,0 +1,25 @@
+[Unit]
+Description=Smarthost Symfony PHP-FPM (internal; reached only by nginx via FastCGI)
+PartOf=smarthost.target
+Wants=smarthost-db-bootstrap.service
+After=smarthost-db-bootstrap.service
+
+[Container]
+ContainerName=smarthost-symfony-app
+Image=localhost/smarthost-app:dev
+Pull=never
+Network=smarthost-internal.network
+NetworkAlias=symfony-app
+EnvironmentFile=@GENERATED@/env/app.env
+HealthCmd=smarthost-fpm-healthcheck
+HealthInterval=15s
+HealthStartPeriod=10s
+HealthRetries=4
+Notify=healthy
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=180
+
+[Install]
+WantedBy=smarthost.target

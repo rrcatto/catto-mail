@@ -1,0 +1,11 @@
+# Smarthost OpenDKIM milter (spec service_topology.opendkim).
+# Private keys are mounted from a volume visible to this container only.
+FROM docker.io/library/debian:trixie-slim
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      opendkim opendkim-tools openssl busybox netcat-openbsd \
+ && rm -rf /var/lib/apt/lists/*
+COPY entrypoint.sh  /usr/local/bin/smarthost-opendkim-entrypoint
+COPY dev-key.sh     /usr/local/bin/smarthost-dkim-dev-key
+RUN chmod 0755 /usr/local/bin/smarthost-*
+ENTRYPOINT ["/usr/local/bin/smarthost-opendkim-entrypoint"]

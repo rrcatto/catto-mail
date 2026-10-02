@@ -1,0 +1,10 @@
+[Unit]
+Description=Smarthost daily Postfix log rotation
+PartOf=smarthost.target
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=smarthost.target

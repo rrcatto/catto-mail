@@ -1,0 +1,29 @@
+[Unit]
+Description=Smarthost nginx reverse proxy (only HTTP entry)
+PartOf=smarthost.target
+Wants=smarthost-symfony-app.service
+After=smarthost-symfony-app.service
+
+[Container]
+ContainerName=smarthost-nginx
+Image=localhost/smarthost-nginx:dev
+Pull=never
+Network=smarthost-internal.network
+EnvironmentFile=@GENERATED@/env/proxy.env
+# Image feature flag: exposes the container's resolvers as NGINX_LOCAL_RESOLVERS.
+Environment=NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+Secret=smarthost-proxy-tls-cert,type=mount,target=${PROXY_TLS_CERT_FILE}
+Secret=smarthost-proxy-tls-key,type=mount,target=${PROXY_TLS_KEY_FILE}
+PublishPort=${PROXY_HTTPS_BIND}:443
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:8080/nginx-health
+HealthInterval=15s
+HealthStartPeriod=5s
+HealthRetries=4
+Notify=healthy
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=smarthost.target

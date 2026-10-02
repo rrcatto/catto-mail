@@ -1,0 +1,24 @@
+[Unit]
+Description=Smarthost PostgreSQL 16
+PartOf=smarthost.target
+
+[Container]
+ContainerName=smarthost-postgres
+Image=docker.io/library/postgres:16.15-trixie
+Pull=never
+Network=smarthost-internal.network
+NetworkAlias=postgres
+EnvironmentFile=@GENERATED@/env/postgres.env
+Volume=smarthost-postgres-data.volume:/var/lib/postgresql/data
+HealthCmd=pg_isready -h 127.0.0.1 -U ${POSTGRES_USER} -d ${POSTGRES_DB} -q
+HealthInterval=10s
+HealthStartPeriod=30s
+HealthRetries=6
+Notify=healthy
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=smarthost.target
