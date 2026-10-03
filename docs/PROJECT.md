@@ -22,14 +22,43 @@ Both are gitignored.
 ├── CHANGELOG.md                   Version history
 ├── LICENSE                        MIT licence
 ├── .gitignore                     Excludes secrets and generated files
-├── app/                           Symfony runtime image (PHP-FPM)
-│   ├── Containerfile
+├── .containerignore               Build context filter for the app image (repository root)
+├── app/                           Symfony 8.1 application (PHP-FPM)
+│   ├── Containerfile              Multi-stage: base, tools, test, vendor, runtime
 │   ├── README.md
+│   ├── composer.json, composer.lock, symfony.lock
+│   ├── phpunit.dist.xml
+│   ├── bin/console, bin/phpunit
+│   ├── public/index.php           The only front controller (nginx → FastCGI)
+│   ├── config/                    Framework, Doctrine, security, monolog, routes, services
+│   ├── migrations/                5 Doctrine migrations (the schema authority)
+│   ├── src/
+│   │   ├── Api/                   Problems, OpenAPI validation, idempotency key, cursors, representations
+│   │   ├── Audit/                 Audit log writer
+│   │   ├── Client/                Client, user and membership administration
+│   │   ├── Command/               Console commands (administration and dev bootstrap)
+│   │   ├── Config/                Fail-closed configuration, `_FILE` secrets, limits
+│   │   ├── Controller/            /v1 API, /healthz, minimal dashboard login
+│   │   ├── Crypto/                Encryption keyring (webhook signing secrets)
+│   │   ├── Doctrine/Type/         timestamptz and jsonb_map types
+│   │   ├── Domain/                Sending domains and DNS TXT verification
+│   │   ├── Entity/                24 entities, one per table
+│   │   ├── Enum/                  32 vocabulary enums
+│   │   ├── Idempotency/           In-flight lock
+│   │   ├── Logging/               Contract log format
+│   │   ├── Security/              API-key and dashboard authentication, voter
+│   │   ├── Sending/               Send-job lifecycle, D-18 normalisation, content fingerprint
+│   │   ├── Tenant/                Tenant scope and Doctrine tenant filter
+│   │   ├── Validation/            Validation-job creation
+│   │   ├── Webhook/               Endpoint/secret model and transactional outbox
+│   │   ├── Util/Clock.php
+│   │   └── Kernel.php
+│   ├── tests/                     PHPUnit: Unit, Contract, Schema, Integration, Support, bin
 │   ├── docker/
 │   │   ├── fpm-healthcheck.sh
+│   │   ├── php.ini
 │   │   └── zz-smarthost-fpm.conf
 │   └── phase1-probe/
-│       ├── healthz.php
 │       ├── db-check.php
 │       └── webhook-worker.php
 ├── validator/                     Python validator image
@@ -64,14 +93,18 @@ Both are gitignored.
 │   ├── nginx/
 │   │   ├── Containerfile
 │   │   └── templates/smarthost.conf.template
-│   ├── postgres/bootstrap.sh
-│   ├── quadlet/*.in               19 Quadlet templates (pod, network, volumes, containers)
+│   ├── postgres/
+│   │   ├── bootstrap.sh           Role bootstrap
+│   │   ├── grants.sh              Applies grants.sql after migrations
+│   │   └── grants.sql             The schema.md §6 privilege matrix
+│   ├── quadlet/*.in               21 Quadlet templates (pod, network, volumes, containers)
 │   ├── systemd/*.in               target + timers
 │   └── tests/
 │       ├── Containerfile          Verification tool image
 │       ├── requirements.txt
 │       ├── phase1_client.py
-│       └── phase1-verify.sh       Phase 1 verification suite
+│       ├── phase1-verify.sh       Phase 1 verification suite
+│       └── phase2-test.sh         Phase 2 test harness (throwaway network-less pod)
 ├── tests/fake-smtp/               Deterministic SMTP test server
 │   ├── Containerfile
 │   ├── README.md
@@ -110,9 +143,10 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, current phase, WSL Podman-machine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete) and 0.1.1 (Phase 1 complete, `smarthost` pod). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod) and 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
+| `.containerignore` | The app image builds from the repository root so that it can copy the normative OpenAPI and vocabulary contracts; this admits only `app/` (without `vendor/`, `var/`) and those contract files. |
 
 ### `docs/`: specifications and contracts
 
@@ -122,7 +156,7 @@ Both are gitignored.
 | `20260908-1644-smarthost-human-specification.md` | Human-readable companion that mirrors the YAML. |
 | `README.md` | Index of the documentation. |
 | `PROJECT.md` | This guide. |
-| `development-environment.md` | How to run the Phase 1 Podman environment: topology, ports, volumes, mail safety, facts established in Phase 1, and the verification suite. |
+| `development-environment.md` | How to run the Podman environment: topology, ports, volumes, mail safety, facts established in Phase 1, the verification suite, and the Phase 2 application (migrations, console, tests). |
 | `api/openapi.v1.yaml` | OpenAPI 3.1 contract for `/v1`: validation jobs, batched send jobs (create → recipients → submit), messages, events and webhooks. |
 | `contracts/status-vocabulary.yaml` | Every allowed status, event, event source, failure scope and classification value, with transitions and ranks. |
 | `contracts/environment.md` | The only list of permitted environment variables, with consumers, secrecy and phase. |
@@ -139,19 +173,23 @@ Both are gitignored.
 |---|---|
 | `.env.example` | Safe template of every contract variable, with secrets empty. Generated from `docs/contracts/environment.md`. |
 | `README.md` | What lives in `infra/`. |
-| `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install, dkim-dev-key, start/stop/restart, status, logs, systemctl pass-through, uninstall, destroy-volumes, verify. |
+| `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install, dkim-dev-key, start/stop/restart, status, logs, systemctl pass-through, uninstall, destroy-volumes, verify, test (Phase 2 suite), console (Symfony console in the app container), migrate (re-run migrations and grants). |
 | `bin/smarthost-machine-helper.sh` | Runs inside the Podman engine's systemd namespace. It installs and uninstalls units and passes commands through to `systemctl --user` and `journalctl --user`. |
 | `lib/smarthost_render.py` | Regenerates `.env.example` and creates `infra/.env` with random development secrets. It renders per-consumer env files and Quadlet/systemd templates, and refuses non-contract variables. |
 | `nginx/Containerfile` | nginx 1.28 image without the default site. |
-| `nginx/templates/smarthost.conf.template` | HTTPS server. `/healthz` goes to PHP-FPM over FastCGI, with request-time DNS resolution. Also a loopback-only health server. |
+| `nginx/templates/smarthost.conf.template` | HTTPS server. Every request goes to the Symfony front controller over FastCGI, with request-time DNS resolution. Bodies above 12 MiB get a JSON 413 from nginx; the application enforces the 10 MiB API limit itself. Also a loopback-only health server. |
 | `postgres/bootstrap.sh` | Idempotent role bootstrap: five least-privilege roles; owner of the database and schema; runtime roles get CONNECT and USAGE only. |
+| `postgres/grants.sql` | The table and column privileges of `docs/schema/schema.md` §6, exactly: revoke everything from the runtime roles, then grant the matrix, in one transaction. |
+| `postgres/grants.sh` | Runs `grants.sql` with the administrative connection. Idempotent; re-run after every migration run. |
 | `quadlet/smarthost.pod.in` | The `smarthost` pod. Every container joins it. It owns the network attachment, the service aliases and the two published loopback ports. |
 | `quadlet/smarthost-internal.network.in` | `Internal=true` network `10.89.20.0/24`, with no Internet route. The pod is its only member. |
 | `quadlet/smarthost-*.volume.in` (6) | Named volumes: postgres-data, postfix-queue, postfix-observability, dsn-spool, opendkim-keys, opendkim-tables. |
 | `quadlet/smarthost-postgres.container.in` | PostgreSQL 16.15, with readiness via `pg_isready`. |
 | `quadlet/smarthost-db-bootstrap.container.in` | Oneshot that runs `infra/postgres/bootstrap.sh` after PostgreSQL. |
-| `quadlet/smarthost-symfony-app.container.in` | PHP-FPM (alias `symfony-app`), with an FPM-ping health check. |
-| `quadlet/smarthost-webhook-worker.container.in` | Webhook-worker unit from the same image (a Phase 1 placeholder process). |
+| `quadlet/smarthost-db-migrate.container.in` | Oneshot after the bootstrap: `doctrine:migrations:migrate` as `smarthost_owner` (app image, `www-data`). |
+| `quadlet/smarthost-db-grants.container.in` | Oneshot after the migrations: `infra/postgres/grants.sh` with the administrative connection. The PHP, Python and Go services start after it. |
+| `quadlet/smarthost-symfony-app.container.in` | PHP-FPM (alias `symfony-app`) running the Symfony application, with an FPM-ping health check. |
+| `quadlet/smarthost-webhook-worker.container.in` | Webhook-worker unit from the same image. Still the placeholder process until Phase 7. |
 | `quadlet/smarthost-nginx.container.in` | nginx (pod member). Its HTTPS port is published by the pod as `PROXY_HTTPS_BIND`. TLS comes from Podman secrets. |
 | `quadlet/smarthost-validator.container.in` | Python validator probe as uid 10001 (pod member). |
 | `quadlet/smarthost-delivery.container.in` | Go probe as `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID`. Observability is read-only; the spool is read-write. |
@@ -163,6 +201,7 @@ Both are gitignored.
 | `systemd/smarthost-postfix-queue-snapshot.{service,timer}.in` | Periodic `podman exec … smarthost-queue-snapshot`. |
 | `systemd/smarthost-postfix-logrotate.{service,timer}.in` | Daily `podman exec … smarthost-postfix-logrotate`. |
 | `tests/phase1-verify.sh` | Phase 1 verification suite behind `smarthostctl verify [--clean]`. It runs 22 test groups and writes an evidence log to `infra/.generated/verify/`. The groups cover images, units, clean start, readiness, ports, network isolation, the live-mode guard, nginx→FPM, PostgreSQL roles, mail capture, DKIM, the milter-failure policy, V-1…V-7, the DSN spool, fake SMTP, persistence, stop/start and untouched neighbours. |
+| `tests/phase2-test.sh` | Phase 2 test harness behind `smarthostctl test`. It builds the app `test` image and starts a throwaway pod **without any network** (`--network none`, label `project=smarthost`) with PostgreSQL 16.15. In it, it runs the real role bootstrap, the Doctrine migrations on the empty database, the grants and the reference schema (into a separate database for comparison), then PHPUnit as the application role. Random credentials; the pod is removed afterwards. |
 | `tests/phase1_client.py` | Test client run inside the tool image on the internal network: submission (with queue ID), port-25 DSN injection, Mailpit lookup, cryptographic DKIM verification, fake-SMTP scenarios, PostgreSQL role/privilege probes and inotify watching. |
 | `tests/Containerfile`, `tests/requirements.txt` | Verification tool image (`localhost/smarthost-testtools:dev`): Python with dkimpy, psycopg and inotify_simple. Test-only; never a service. |
 
@@ -178,12 +217,12 @@ Both are gitignored.
 | `opendkim/Containerfile` | Debian trixie with OpenDKIM, opendkim-tools, openssl and busybox. |
 | `opendkim/entrypoint.sh` | Writes `opendkim.conf`: sign-only, signs for `MTA ORIGINATING` (Postfix submission) using KeyTable/SigningTable. Logs through busybox syslogd to stdout. |
 | `opendkim/dev-key.sh` | Generates a **disposable** development key inside the keys volume, registers it, and prints the public TXT record. Refuses outside development/test. |
-| `app/Containerfile` | PHP 8.5-FPM with `pdo_pgsql`, `pcntl` and `cgi-fcgi`. No PHP HTTP server. |
+| `app/Containerfile` | PHP 8.5-FPM with `pdo_pgsql`, `intl`, `pcntl` and `cgi-fcgi`. Stages: `tools` (Composer), `test` (dev dependencies and test-only contract copies), `runtime` (default; no dev dependencies, no tests). Built from the repository root so that the normative OpenAPI and vocabulary files are copied into `config/contracts/`. No PHP HTTP server. |
+| `app/docker/php.ini` | UTC, no `expose_php`, `post_max_size` 12M (the application decides the 10 MiB limit), memory and OPcache settings. |
 | `app/docker/zz-smarthost-fpm.conf` | Pool overrides: listen 9000, ping path, `clear_env = no`. |
 | `app/docker/fpm-healthcheck.sh` | FastCGI ping readiness check. |
-| `app/phase1-probe/healthz.php` | JSON probe served through nginx. |
-| `app/phase1-probe/db-check.php` | CLI check: connect as the app, webhook or owner role and verify the CREATE privilege boundary. |
-| `app/phase1-probe/webhook-worker.php` | Placeholder long-running worker with a heartbeat and database check. Delivers no webhooks. |
+| `app/phase1-probe/db-check.php` | CLI check: connect as the app, webhook or owner role and verify the CREATE privilege boundary (used by the Phase 1 suite). |
+| `app/phase1-probe/webhook-worker.php` | Placeholder long-running worker with a heartbeat and database check. Delivers no webhooks (Phase 7). |
 | `validator/Containerfile` | Python 3.14 slim, unprivileged uid 10001. |
 | `validator/phase1_probe.py` | Heartbeat loop, and `check-db` (the validator role must not be able to create tables). |
 | `validator/requirements-phase1.txt` | Pinned `psycopg[binary]` for the probe. |
@@ -192,6 +231,43 @@ Both are gitignored.
 | `delivery/go.mod`, `go.sum` | Module definition; the only dependency is pgx v5. |
 | `tests/fake-smtp/fake_smtp.py` | Stdlib asyncio SMTP server whose reply is chosen by the recipient prefix (`reject-550`, `tempfail-450/451`, `unavailable-421`, `timeout`, otherwise accept). DATA is discarded. |
 | `tests/fake-smtp/Containerfile` | Python 3.14 slim, uid 10003. |
+
+### `app/`: the Symfony application (Phase 2)
+
+| Path | Purpose |
+|---|---|
+| `composer.json`, `composer.lock`, `symfony.lock` | Symfony 8.1, Doctrine ORM 3 / DBAL 4 / Migrations, Security, Validator, Serializer, Rate Limiter, Lock, Monolog, Uid, opis/json-schema; PHPUnit 13 and Symfony test tools as dev dependencies. No Dotenv: configuration comes only from the contract variables. |
+| `config/packages/framework.yaml` | Secret, trusted proxies, session (dashboard only), rate limiters (per API key, per IP for failed API authentication). |
+| `config/packages/doctrine.yaml` | Two lazy connections: `default` as `smarthost_app` (runtime) and `owner` as `smarthost_owner` (migrations only); custom types; the tenant filter. |
+| `config/packages/doctrine_migrations.yaml` | Migrations run on the `owner` connection, transactional. |
+| `config/packages/security.yaml` | Stateless `/v1` firewall (API keys only) and a separate `/dashboard` form-login firewall (users only). |
+| `config/packages/monolog.yaml` | JSON lines to stderr in the contract format; Doctrine only at warning. |
+| `config/services.yaml` | Parameters from the environment contract; the test DNS stub. |
+| `migrations/Version20261003000100…000500.php` | Tenancy; validation; sending; suppression/reputation; metering, webhooks and audit. Together they reproduce `docs/schema/reference-schema.sql`; each has a `down()`. |
+| `src/Kernel.php` | Runs the fail-closed safety guard on every boot. |
+| `src/Config/` | `SafetyGuard` (SMARTHOST_ENV values; unverified domains forbidden in production), `SecretEnvVarProcessor` (`X` or `X_FILE`, never both), `Limits` (configuration may lower, never raise, the contract ceilings). |
+| `src/Doctrine/Type/` | `timestamptz` (microseconds, UTC) and `jsonb_map` (`{}` stays an object). |
+| `src/Entity/` | One entity per table (24). Tables written only by Python or Go are mapped read-only. |
+| `src/Enum/` | The 32 vocabularies of `status-vocabulary.yaml` as PHP enums. |
+| `src/Security/` | `ApiKeyManager` (raw key `shk_…`, 256 bits, shown once; SHA-256 stored), `ApiKeyAuthenticator` (Bearer; revoked keys and closed clients rejected; last-used tracking; failure rate limit), `ApiClientUser`, dashboard user provider and checker, login listener, `ClientVoter`. |
+| `src/Tenant/` | `TenantScope` (the only way API code loads tenant resources; foreign = missing), `TenantFilter` (Doctrine SQL filter, deny-by-default per table), and the listener that enables it for the authenticated client. |
+| `src/Api/` | RFC 9457 problems and their renderer, exception mapping for `/v1`, body-size and per-key rate limits, `OpenApiContract` (validates requests against the normative OpenAPI), `JsonRequest`, `RequestHasher` (canonical idempotency hash), `IdempotencyKey`, `Cursor`, `Presenter`. |
+| `src/Idempotency/IdempotencyLock.php` | Transaction-scoped advisory lock that turns a concurrent retry into 409. |
+| `src/Validation/ValidationJobService.php` | Creates the job and its pending address rows; validates nothing. |
+| `src/Sending/` | `SendJobService` (create, batch, submit with row locking), `AddressNormalizer` (D-18), `RecipientContent` (size and SHA-256 fingerprint kept after purge). |
+| `src/Domain/` | `SendingDomainService` (registration, TXT verification, re-checks, enable/disable, DKIM status) and the DNS TXT resolver boundary. |
+| `src/Crypto/Keyring.php` | `APP_ENCRYPTION_KEYS` keyring (libsodium secretbox, purpose-bound). |
+| `src/Webhook/` | `WebhookEndpointService` (encrypted secrets, rotation with overlap) and `WebhookOutbox` (transactional outbox writer). |
+| `src/Audit/` | `AuditLogger` and `AuditActor`. |
+| `src/Client/AccountAdministration.php` | Clients, users (case-insensitive login), passwords, operator role, memberships. |
+| `src/Command/` | `smarthost:client:*`, `smarthost:api-key:*`, `smarthost:user:*`, `smarthost:membership:set`, `smarthost:domain:*`, `smarthost:webhook:*`, `smarthost:dev:bootstrap`. |
+| `src/Controller/` | `/v1` controllers (validation jobs, send jobs, messages, `webhooks/test` = 501), `/healthz`, minimal `/dashboard` login. |
+| `src/Logging/ContractFormatter.php` | `ts`, `level`, `service`, `msg` plus context. |
+| `tests/Unit/` | D-18 normalisation, request hashing, keyring, configuration rules, log format. |
+| `tests/Contract/` | `/v1` routes equal the OpenAPI operations; OpenAPI enums equal the PHP enums. |
+| `tests/Schema/` | Reference-schema equivalence, migration up/down/up, ORM mapping vs database, vocabulary CHECKs, the grant matrix parsed from `schema.md`, least privilege, critical constraints. |
+| `tests/Integration/` | Authentication, tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit. Every response is validated against the OpenAPI contract. |
+| `tests/Support/`, `tests/bin/request.php` | Test base class, direct database connections, catalog comparison, DNS stub, and the concurrent-request worker. |
 
 ### `scripts/`
 
@@ -222,7 +298,7 @@ flowchart LR
             pf -- "milter :8891" --> dk["opendkim"]
             pf -- "capture relay :1025" --> mp["mailpit"]
             val -. "dev probes" .-> fs["fake-smtp"]
-            boot["db-bootstrap (oneshot)"] --> pg
+            boot["db-bootstrap → db-migrate → db-grants (oneshots)"] --> pg
         end
         obs[("observability vol<br/>log/ + queue/")]
         spool[("dsn-spool vol<br/>Maildir")]
@@ -310,6 +386,34 @@ flowchart LR
     D -. "recorded in" .-> LOG["open-decisions.md (log only)"]
 ```
 
-### 3.6 Development environment lifecycle
+### 3.6 API request pipeline (Phase 2)
+
+```mermaid
+flowchart TD
+    R["HTTPS request"] --> N["nginx (≤ 12 MiB)"] --> F["PHP-FPM → Symfony front controller"]
+    F --> S{"body > APP_API_MAX_REQUEST_BYTES?"}
+    S -- yes --> P413["413 problem"]
+    S -- no --> A["/v1 firewall: Bearer API key<br/>sha256 lookup, revoked/closed → 401"]
+    A --> T["tenant = key's client<br/>Doctrine tenant filter on"]
+    T --> L{"per-key rate limit"}
+    L -- exceeded --> P429["429 + Retry-After"]
+    L -- ok --> C["controller"]
+    C --> V["OpenAPI schema validation → 422 with JSON pointers"]
+    V --> I["transaction: advisory lock on (scope, Idempotency-Key)<br/>busy → 409; stored key → replay or 422"]
+    I --> W["write job / batch (job row locked) / seal"]
+    W --> J["JSON or RFC 9457 problem"]
+```
+
+### 3.7 Schema and grants at start-up
+
+```mermaid
+flowchart LR
+    PG["postgres (healthy)"] --> B["db-bootstrap<br/>roles, owner, CONNECT/USAGE"]
+    B --> M["db-migrate<br/>Doctrine migrations as smarthost_owner"]
+    M --> G["db-grants<br/>schema.md §6 matrix (admin)"]
+    G --> APP["symfony-app · webhook-worker · validator · delivery"]
+```
+
+### 3.8 Development environment lifecycle
 
 See `docs/development-environment.md` §2.

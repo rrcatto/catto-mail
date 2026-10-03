@@ -4,7 +4,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 **bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
 start, so it can later serve third-party clients as a SaaS.
 
-**Version:** 0.1.1 · **Status:** Phases 0 and 1 complete
+**Version:** 0.1.2 · **Status:** Phases 0, 1 and 2 complete
 
 ---
 
@@ -48,7 +48,7 @@ Kubernetes and no message broker: PostgreSQL is the only coordination medium.
 ## Repository layout
 
 ```
-app/              Symfony PHP-FPM image (Phase 1 probes; Symfony arrives in Phase 2)
+app/              Symfony 8.1 application (PHP-FPM): /v1 API, entities, migrations, auth
 validator/        Python validator image (Phase 1 probe)
 delivery/         Go delivery image (Phase 1 probe)
 postfix/          Postfix image: capture/live safety switch, DSN spool, snapshots
@@ -69,10 +69,10 @@ The full file-by-file description and workflow diagrams are in
 | [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.1) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
-| [docs/development-environment.md](docs/development-environment.md) | Running the Phase 1 Podman environment |
+| [docs/development-environment.md](docs/development-environment.md) | Running the Podman environment, the application and the test suites |
 | [docs/README.md](docs/README.md) | Index of all contracts and architecture documents |
 
-## Quick start (development, Phase 1)
+## Quick start (development)
 
 Requirements: rootless Podman 5.1 or later with Quadlet, either on a Linux host or in a Podman
 machine (WSL is supported), plus Python 3.10 or later.
@@ -86,7 +86,12 @@ infra/bin/smarthostctl dkim-dev-key # disposable dev DKIM key (OpenDKIM volume o
 infra/bin/smarthostctl start        # start the whole topology
 infra/bin/smarthostctl status
 infra/bin/smarthostctl verify       # Phase 1 verification suite
+infra/bin/smarthostctl test         # Phase 2 test suite (throwaway, network-less pod)
+infra/bin/smarthostctl console smarthost:dev:bootstrap   # dev client + API key (shown once)
 ```
+
+The API is then at `https://127.0.0.1:8443/v1` (disposable self-signed certificate). Submitted send
+jobs stay `queued`: the Go delivery daemon arrives in Phase 4.
 
 Development mail never leaves the machine. Postfix runs in capture mode, relaying everything to
 Mailpit, and every Smarthost container sits on an `Internal=true` Podman network with no route
@@ -103,8 +108,9 @@ python3 scripts/check-contracts.py
 | Phase | Status |
 |---|---|
 | 0: Architecture and contracts | **Complete** (specification 2.1) |
-| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 162/162 checks. |
-| 2–10 | Not started |
+| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 166/166 checks. |
+| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test`: 156/156 tests pass. |
+| 3–10 | Not started |
 
 See [CHANGELOG.md](CHANGELOG.md).
 

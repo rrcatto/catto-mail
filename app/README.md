@@ -1,24 +1,33 @@
 # app/ — Symfony application
 
-Runs as **PHP-FPM** behind nginx (FastCGI, internal network only). It provides:
-- the public `/v1` API, including batched send-job ingestion (create → recipient batches →
-  submit);
-- client and operator dashboards (users and client memberships, never API keys);
-- sending-domain TXT verification;
-- tracking endpoints using opaque random tokens;
-- usage metering and retention commands;
-- Doctrine entities and migrations, as the only owner of schema objects.
+Symfony 8.1 on PHP 8.5, running as **PHP-FPM** behind nginx (FastCGI inside the `smarthost` pod;
+never host-published). There is no separate PHP HTTP server.
 
-The same image runs the **webhook worker**: a long-running console process that consumes the
-`webhook_events` outbox, signs, delivers, retries and records outcomes. It is the only component
-that sends webhooks.
+**Phase 2 (implemented):**
+- the `/v1` API of `docs/api/openapi.v1.yaml`: validation-job creation and reads, the staged send-job
+  lifecycle (create → recipient batches → submit), message and event reads, and
+  `POST /v1/webhooks/test` (501 until Phase 7);
+- API-key authentication (Bearer, stored only as SHA-256), tenant isolation, idempotency and rate
+  limiting; RFC 9457 problem responses;
+- Doctrine entities and the migrations, which are the only authority for schema objects;
+- sending-domain registration and DNS TXT verification, DKIM selector/status records;
+- the dashboard user foundation (users, client memberships, operator role, form login);
+- the webhook endpoint/secret model and the transactional outbox (no HTTP delivery yet);
+- the audit log and the administrative console commands (`smarthost:*`).
 
-Empty until Phase 1 (container) and Phase 2 (entities, migrations, auth). Contracts:
-`docs/api/openapi.v1.yaml`, `docs/schema/`, `docs/contracts/`.
+**Later phases:** client and operator dashboards, tracking endpoints, usage metering, retention
+commands, and the **webhook worker**, a long-running console process from this image that
+consumes the `webhook_events` outbox and is the only component that sends webhooks. Until Phase 7
+the worker unit runs the placeholder in `phase1-probe/`.
+
+Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
+`.env` file). Run console commands in the development pod with
+`infra/bin/smarthostctl console <command>` and the test suite with `infra/bin/smarthostctl test`.
+See `docs/PROJECT.md` for every file.
 
 Must not:
 - probe mailboxes;
-- send tracked mail;
+- send tracked mail or talk to Postfix;
 - render templates or merge data;
-- hold DKIM keys;
+- hold or generate DKIM keys;
 - call Python or Go over RPC.

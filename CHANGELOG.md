@@ -4,6 +4,55 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.1.
 
+## [0.1.2] - 2026-10-03
+
+Phase 2 complete: database and Symfony foundation.
+
+### Added
+- Symfony 8.1 application in `app/` (PHP 8.5-FPM behind the existing nginx; no PHP HTTP server),
+  replacing the Phase 1 `/healthz` probe with the real front controller.
+- Doctrine ORM entities for all 24 tables and five Doctrine migrations that reproduce
+  `docs/schema/reference-schema.sql` exactly; they run as `smarthost_owner` in the new
+  `smarthost-db-migrate` oneshot. The new `smarthost-db-grants` oneshot then applies the
+  `schema.md` §6 grant matrix (`infra/postgres/grants.sql`) with the administrative connection.
+- `/v1` API: validation-job creation and reads, staged send jobs (create, recipient batches,
+  submit/seal), message and event reads, `POST /v1/webhooks/test` (501 until Phase 7). Requests
+  are validated against the OpenAPI contract; errors are RFC 9457 problems.
+- API-key authentication (Bearer; SHA-256 only; revocation; last-used tracking; rate limits),
+  tenant isolation (tenant scope plus a deny-by-default Doctrine filter), durable idempotency with
+  in-flight 409.
+- Dashboard user foundation (users, memberships, operator role, CSRF-protected form login that
+  never accepts API keys), sending-domain registration and TXT verification, DKIM status records,
+  webhook endpoints with encrypted rotating secrets, the transactional outbox writer, and the
+  audit log.
+- Console commands `smarthost:*` for administration and `smarthost:dev:bootstrap` for development
+  data; `smarthostctl test`, `console` and `migrate`.
+- Phase 2 test harness (`infra/tests/phase2-test.sh`): a throwaway, network-less pod with
+  PostgreSQL 16; 156 tests and 1,471 assertions, all passing (unit 36, contract 2, schema 33, integration 85).
+
+### Changed
+- The app image builds from the repository root (`.containerignore`) so the normative OpenAPI and
+  vocabulary files are part of it; nginx forwards every request to Symfony and answers oversize
+  bodies with a JSON 413.
+- `APP_ENCRYPTION_KEYS` and `APP_WEBHOOK_SECRET_OVERLAP_HOURS` are first used in Phase 2.
+- The D-18 IDNA rule, content fingerprint and API-key format are now defined in
+  `docs/architecture/conventions.md`; Phase 2 implementation choices and new questions (D-31…D-34)
+  are logged in `docs/architecture/open-decisions.md`.
+
+### Fixed
+- `status-vocabulary.yaml`: 12 `meaning` texts with unquoted commas in YAML flow mappings were
+  silently truncated by YAML parsers; they are now quoted (no value changed).
+- The Phase 1 check "no private key material in the repository" matched its own search pattern
+  once the suite was committed; it now uses a pattern that cannot match itself and also scans
+  untracked files.
+
+### Verified
+- `smarthostctl verify --clean`: 166/166 checks on the Phase 2 topology.
+- `smarthostctl test`: 156 tests and 1,471 assertions pass (unit 36, contract 2, schema 33, integration 85),
+  including reference-schema equivalence, migration rollback, grants, tenant isolation and
+  concurrent idempotent retries.
+- Contract checks 1691/1691; OpenAPI 3.1 valid; shellcheck clean.
+
 ## [0.1.1] - 2026-10-03
 
 Phase 1 complete: verified rootless Podman development environment, with all services in one pod.

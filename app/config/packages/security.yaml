@@ -1,0 +1,60 @@
+# Two authentication worlds that never mix (D-12, spec api.authentication):
+#   * /v1        - machine clients, `Authorization: Bearer <api key>`, stateless;
+#   * /dashboard - human users (users + client_memberships), form login with a session.
+# An API key is never accepted by the dashboard firewall, and a dashboard session is
+# never accepted by the API firewall.
+security:
+    password_hashers:
+        App\Entity\User: 'auto'
+
+    providers:
+        api_keys:
+            id: App\Security\ApiKeyUserProvider
+        dashboard_users:
+            id: App\Security\DashboardUserProvider
+
+    role_hierarchy:
+        ROLE_OPERATOR: [ROLE_USER]
+
+    firewalls:
+        api:
+            pattern: ^/v1(/|$)
+            stateless: true
+            provider: api_keys
+            custom_authenticators:
+                - App\Security\ApiKeyAuthenticator
+            entry_point: App\Security\ApiKeyAuthenticator
+        dashboard:
+            pattern: ^/dashboard(/|$)
+            lazy: true
+            provider: dashboard_users
+            user_checker: App\Security\DashboardUserChecker
+            form_login:
+                login_path: dashboard_login
+                check_path: dashboard_login
+                username_parameter: email
+                password_parameter: password
+                enable_csrf: true
+                default_target_path: dashboard_home
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
+            logout:
+                path: dashboard_logout
+                target: dashboard_login
+        main:
+            security: false
+
+    access_control:
+        - { path: ^/dashboard/login$, roles: PUBLIC_ACCESS }
+        - { path: ^/dashboard, roles: ROLE_USER }
+        - { path: ^/v1(/|$), roles: ROLE_API_CLIENT }
+
+when@test:
+    security:
+        password_hashers:
+            App\Entity\User:
+                algorithm: auto
+                cost: 4
+                time_cost: 3
+                memory_cost: 10

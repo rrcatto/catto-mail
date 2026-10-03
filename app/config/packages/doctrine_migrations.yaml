@@ -1,0 +1,10 @@
+# Migrations are the only authority for schema objects and run as the schema
+# owner (smarthost_owner). They reproduce docs/schema/reference-schema.sql;
+# grants are applied afterwards by infra/postgres/grants.sh (infrastructure).
+doctrine_migrations:
+    connection: owner
+    migrations_paths:
+        'DoctrineMigrations': '%kernel.project_dir%/migrations'
+    enable_profiler: false
+    transactional: true
+    all_or_nothing: true

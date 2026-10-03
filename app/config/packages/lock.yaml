@@ -1,0 +1,3 @@
+framework:
+    # Local file locks (rate-limiter bookkeeping inside one PHP-FPM container).
+    lock: 'flock'

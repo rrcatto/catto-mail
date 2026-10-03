@@ -1,0 +1,28 @@
+# Structured logs to stderr (journald via Quadlet). Level and format come from the
+# contract variables SMARTHOST_LOG_LEVEL and SMARTHOST_LOG_FORMAT.
+monolog:
+    channels: ['deprecation']
+    handlers:
+        main:
+            type: stream
+            path: 'php://stderr'
+            level: '%env(SMARTHOST_LOG_LEVEL)%'
+            formatter: App\Logging\ContractFormatter
+            channels: ['!event', '!deprecation', '!doctrine']
+        # Doctrine logs connection details and every query at info/debug; keep only problems.
+        doctrine:
+            type: stream
+            path: 'php://stderr'
+            level: warning
+            formatter: App\Logging\ContractFormatter
+            channels: ['doctrine']
+
+when@test:
+    monolog:
+        handlers:
+            main:
+                type: stream
+                path: '%kernel.logs_dir%/%kernel.environment%.log'
+                level: debug
+                formatter: App\Logging\ContractFormatter
+                channels: ['!event']

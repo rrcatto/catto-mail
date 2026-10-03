@@ -1,8 +1,8 @@
 [Unit]
 Description=Smarthost Python validator (Phase 1 probe process; unprivileged)
 PartOf=smarthost.target
-Wants=smarthost-db-bootstrap.service
-After=smarthost-db-bootstrap.service
+Wants=smarthost-db-grants.service
+After=smarthost-db-grants.service
 
 [Container]
 ContainerName=smarthost-validator

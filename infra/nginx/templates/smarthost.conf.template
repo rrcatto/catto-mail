@@ -18,16 +18,25 @@ server {
     resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
     set $smarthost_fpm ${PROXY_FASTCGI_ADDRESS};
 
-    # Phase 1 infrastructure probe: proves nginx -> FastCGI -> PHP-FPM.
-    location = /healthz {
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME /srv/probe/healthz.php;
-        fastcgi_pass $smarthost_fpm;
+    # The application enforces the API body limit (APP_API_MAX_REQUEST_BYTES,
+    # 10 MiB, RFC 9457 413). nginx admits a little more so that the application
+    # answers, and refuses anything beyond with the same problem shape.
+    client_max_body_size 12m;
+    error_page 413 = @payload_too_large;
+    location @payload_too_large {
+        default_type application/problem+json;
+        return 413 '{"type":"about:blank","title":"Payload too large","status":413}';
     }
 
-    # The Symfony front controller is added in Phase 2.
+    # Every request goes to the Symfony front controller (API, health, dashboard
+    # and, later, tracking endpoints). There is no separate PHP HTTP server.
     location / {
-        return 404;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /srv/app/public/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT /srv/app/public;
+        fastcgi_pass $smarthost_fpm;
+        fastcgi_read_timeout 120s;
     }
 }
 

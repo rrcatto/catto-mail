@@ -1,8 +1,8 @@
 [Unit]
 Description=Smarthost Go delivery daemon (Phase 1 probe process; unprivileged)
 PartOf=smarthost.target
-Wants=smarthost-db-bootstrap.service smarthost-postfix.service
-After=smarthost-db-bootstrap.service smarthost-postfix.service
+Wants=smarthost-db-grants.service smarthost-postfix.service
+After=smarthost-db-grants.service smarthost-postfix.service
 
 [Container]
 ContainerName=smarthost-delivery

@@ -64,6 +64,28 @@ are listed here so they are visible for review.
 | Processed DSN spool files are kept for a transient 7 days. Unmatched DSNs are kept in the database. | environment |
 | An `opendkim/` directory is added to the repository layout. | spec `repository_strategy` |
 
+### Phase 2 implementation choices
+
+Made while implementing Phase 2 within the contracts. None changes the architecture; they are
+listed for review.
+
+| Choice | Where |
+|---|---|
+| D-18 IDNA detail: ASCII domains are lower-cased; non-ASCII domains become A-labels via UTS #46 non-transitional processing; trimming covers ASCII whitespace only. Python (Phase 3) and Go must match. | conventions "Email addresses" |
+| `content_bytes` / `content_sha256` definitions (what survives the D-14 purge). | conventions "Content and tracking" |
+| API key format `shk_` + 256-bit base64url; `key_prefix` = first 12 characters; `last_used_at` is updated at most once a minute. | conventions "API" |
+| Idempotency in-flight detection uses a transaction-scoped PostgreSQL advisory lock on (endpoint, client or job, key); the unique indexes stay the final guarantee. The request hash is SHA-256 of the canonically re-encoded JSON body (sorted keys), so whitespace and key order do not matter but adding a field with its default value does. | `app/src/Idempotency`, `app/src/Api/RequestHasher.php` |
+| A replay returns the original status code and headers with the resource's **current** representation (no response bodies are stored). A recipient-batch replay reproduces the original body exactly (running total at that time). | `app/src/Validation`, `app/src/Sending` |
+| Request bodies are validated against the normative OpenAPI document itself (copied into the image), so the API cannot drift from the contract; unknown fields such as `client_id`, `headers`, `merge_data` or `template_reference` are 422 with a JSON pointer. A non-JSON media type is 400; a malformed resource id is 404, like a foreign one. | `app/src/Api/OpenApiContract.php` |
+| Recipient addresses must be structurally usable in an SMTP envelope (host-name domain with at least two labels; local part ≤ 64 octets without whitespace or control characters); subjects, names, list ids and references must not contain control characters (header injection). Deliverability is still never judged. | `app/src/Sending` |
+| Client status: keys of a `closed` client are rejected (401); send-job **creation** is 403 for `pending_approval`, `suspended` and `closed` (OpenAPI Forbidden). Batches, submit and validation jobs are not blocked by client status, because the contract declares no 403 for them (see D-31). | `app/src/Security`, `app/src/Sending` |
+| Failed API authentication is limited to 30 per minute per client IP (a code constant; there is no contract variable for it). The per-key limit uses `APP_API_RATE_LIMIT_PER_MINUTE`. Limiter state is local to the PHP-FPM container. | `app/config/packages/framework.yaml` |
+| `smarthost:dev:bootstrap` marks the development domain verified without DNS and DKIM active (selector `phase1`); it refuses unless `SMARTHOST_ENV` is `development` or `test`. | `app/src/Command/DevBootstrapCommand.php` |
+| Memberships can be added and re-roled but not removed: the grant matrix gives `smarthost_app` no DELETE on `client_memberships`. | `docs/schema/schema.md` §6 |
+| Webhook endpoint URLs must be https (http only in development/test); `webhook.test` is not subscribable. Signing secrets are `whsec_` + 256-bit base64url, sealed with libsodium secretbox bound to the endpoint id. | `app/src/Webhook` |
+| `APP_ENCRYPTION_KEYS` and `APP_WEBHOOK_SECRET_OVERLAP_HOURS` are first needed in Phase 2 (endpoint/secret model), not Phase 7. | environment contract |
+| 12 `meaning` texts in `status-vocabulary.yaml` contained unquoted commas inside YAML flow mappings, which silently truncated them (and Symfony's YAML parser rejects them). They are now quoted; no value changed. | vocabulary |
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are
@@ -86,5 +108,9 @@ None of them required an architectural change.
 | ID | Topic | Blocks |
 |---|---|---|
 | D-30 | Whether automatically created suppressions (hard bounce, complaint, repeated soft bounce) are client-scoped or global. The schema supports both. | Phase 5 only |
+| D-31 | Whether client status (`pending_approval`, `suspended`) should also block validation-job creation, recipient batches and submit. The OpenAPI contract declares 403 only for send-job creation; workers already must not claim work of suspended clients. | Phase 3 (validation jobs of suspended clients) |
+| D-32 | Confirm the D-18 IDNA rule above (UTS #46 non-transitional A-labels) before Python implements normalisation, ideally with a shared cross-language test-vector file. | Phase 3 |
+| D-33 | When `usage_records(validation_address)` is written: at job creation (Symfony) or per processed address (Python). Both roles hold INSERT. | Phase 3 |
+| D-34 | Whether an idempotent replay must return the byte-identical original response (requires storing response bodies, a schema change) or the current representation as implemented. | Not blocking |
 
-None blocks Phase 1 or Phase 2.
+None blocks Phase 2.

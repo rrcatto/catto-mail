@@ -1,8 +1,8 @@
 [Unit]
-Description=Smarthost Symfony webhook worker (Phase 1 placeholder process)
+Description=Smarthost Symfony webhook worker (placeholder process until Phase 7)
 PartOf=smarthost.target
-Wants=smarthost-db-bootstrap.service
-After=smarthost-db-bootstrap.service
+Wants=smarthost-db-grants.service
+After=smarthost-db-grants.service
 
 [Container]
 ContainerName=smarthost-webhook-worker

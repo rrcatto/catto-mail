@@ -18,7 +18,9 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
 - **Phase 0:** complete.
 - **Phase 1** (rootless Podman development environment): complete. `infra/bin/smarthostctl verify`
   (optionally `--clean`) re-proves it. See `docs/development-environment.md`.
-- Do not start Phase 2 or later work unless the user explicitly asks for it.
+- **Phase 2** (database and Symfony foundation): complete (v0.1.2). The Symfony 8.1
+  application is in `app/`; `infra/bin/smarthostctl test` runs its suite in a throwaway pod.
+- Do not start Phase 3 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -39,6 +41,13 @@ This is a public repository. Documentation, comments, examples, tests, configura
 - **Other projects' containers may run on the same Podman machine.** Never stop, modify or
   remove any container, volume or network that is not Smarthost's (`smarthost-*`, label
   `project=smarthost`). Smarthost avoids common host ports such as 80, 443, 5433 and 8025.
+- **Schema changes only through Doctrine migrations** in `app/migrations/`, run as
+  `smarthost_owner`. They must keep `docs/schema/reference-schema.sql` structurally identical (the
+  schema test suite compares the catalogs), and any new table needs a row in the `schema.md` §6
+  grant matrix, `infra/postgres/grants.sql` and the tenant filter (`app/src/Tenant/TenantFilter.php`,
+  which denies unknown tables).
+- **API code loads tenant resources only through `TenantScope`**; `client_id` never comes from a
+  request. Request bodies are validated against the OpenAPI contract itself.
 - **No undocumented environment variables.** Every variable must appear in
   `docs/contracts/environment.md`. Regenerate the template with
   `python3 infra/lib/smarthost_render.py env-example`, then run
@@ -59,5 +68,6 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - `infra/bin/smarthostctl install` must succeed (the Quadlet dry-run validates units);
   - `infra/bin/smarthostctl status` must show the services healthy;
   - `infra/bin/smarthostctl verify` must pass.
+- For application changes: `infra/bin/smarthostctl test` must pass.
 - Report the files changed, the checks run and their results, anything unverified, and any
   specification ambiguity (see `AGENTS.md`).

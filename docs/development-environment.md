@@ -1,7 +1,8 @@
-# Development Environment (Phase 1)
+# Development Environment
 
-**Status:** Phase 1 complete. `smarthostctl verify --clean` passes all 162 checks, starting from
-destroyed volumes (§6).
+**Status:** Phases 1 and 2 (database and Symfony foundation) complete.
+`smarthostctl verify --clean` passes all 166 checks starting from destroyed volumes (§6), and
+`smarthostctl test` passes the Phase 2 suite (§7).
 
 ## 1. Requirements
 
@@ -32,8 +33,10 @@ flowchart TD
     B --> C[secrets<br/>dev TLS certs as Podman secrets]
     C --> D[install<br/>render env files + units, Quadlet dry-run, daemon-reload]
     D --> E[dkim-dev-key<br/>disposable key in OpenDKIM volume]
-    E --> F[start<br/>smarthost.target]
+    E --> F[start<br/>smarthost.target<br/>bootstrap → migrate → grants → services]
     F --> V[verify<br/>Phase 1 suite]
+    F --> K[console smarthost:dev:bootstrap<br/>dev client, domain, API key]
+    D --> T[test<br/>Phase 2 suite, throwaway pod]
     F --> G{status / logs}
     G --> H[restart / stop]
     H --> F
@@ -56,6 +59,9 @@ flowchart TD
 | `smarthostctl uninstall` | Stops the services and removes the units. Volumes are kept. |
 | `smarthostctl destroy-volumes --yes` | Deletes the six Smarthost volumes by name. Nothing else is touched. |
 | `smarthostctl verify [--clean]` | Runs the Phase 1 verification suite (§6). `--clean` first destroys the Smarthost volumes and network to prove a clean-state start. |
+| `smarthostctl test [phpunit args]` | Runs the Phase 2 test suite in a throwaway, network-less pod (§7). Does not touch the running environment. |
+| `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
+| `smarthostctl migrate` | Re-runs the migration oneshot and then the grants oneshot (after pulling new migrations into a rebuilt image). |
 
 ## 3. Topology
 
@@ -78,7 +84,9 @@ All Smarthost containers run in one Podman **pod**, `smarthost`, defined in
 | pod (`smarthost-pod.service`) | infra (`smarthost-infra`) | — | — | — |
 | postgres | postgres:16.15-trixie | `postgres` | image default | `pg_isready -U … -d …` |
 | db-bootstrap (oneshot) | postgres:16.15-trixie | — | admin connection | exit status |
-| symfony-app | smarthost-app | `symfony-app` | FPM master root, workers www-data | FastCGI `/fpm-ping` |
+| db-migrate (oneshot) | smarthost-app | — | www-data; database role `smarthost_owner` | exit status |
+| db-grants (oneshot) | postgres:16.15-trixie | — | admin connection | exit status |
+| symfony-app | smarthost-app | `symfony-app` | FPM master root, workers www-data; database role `smarthost_app` | FastCGI `/fpm-ping` |
 | webhook-worker | smarthost-app | — | www-data | heartbeat file |
 | nginx | smarthost-nginx | — | image default | loopback `/nginx-health` |
 | validator | smarthost-validator | — | uid 10001 | database probe |
@@ -163,10 +171,10 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 | Group | Proves |
 |---|---|
 | T01–T02 | All images build; render/install passes the Quadlet dry-run; every unit loads |
-| T03–T04 | Clean-state start; all 10 services healthy; bootstrap oneshot succeeded; timers active |
+| T03–T04 | Clean-state start; all 10 services healthy; bootstrap, migration and grant oneshots succeeded; timers active |
 | T05–T06 | Every service is a pod member sharing the pod network namespace; only the pod publishes ports (nginx HTTPS and the Mailpit UI, both on loopback); the pod sits only on the `Internal=true` network; no Internet egress |
 | T07 | The live-mode guard refuses every unsafe combination; a pod member cannot relay through port 25 via `127.0.0.1` |
-| T08 | nginx → FastCGI → PHP-FPM, including after a PHP-FPM restart |
+| T08 | nginx → FastCGI → PHP-FPM (`/healthz`, now served by the Symfony front controller), including after a PHP-FPM restart |
 | T09 | PostgreSQL 16 version, role privileges and isolation from other networks |
 | T10–T11 | Submission on 587 → Mailpit only, with a cryptographically valid DKIM signature |
 | T12 | The DKIM private key is visible only to OpenDKIM |
@@ -178,4 +186,60 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 | T21 | Contract checks pass |
 | T22 | Containers of other Podman projects are unchanged |
 
-The latest clean-state run passed all 162 checks.
+The latest clean-state run (after Phase 2) passed all 166 checks.
+
+## 7. Phase 2: the Symfony application
+
+### Start-up order
+
+`db-bootstrap` (roles) → `db-migrate` (Doctrine migrations as `smarthost_owner`) → `db-grants`
+(`infra/postgres/grants.sh`, the `schema.md` §6 matrix) → `symfony-app`, `webhook-worker`,
+`validator`, `delivery`. Migrations are idempotent, so every start re-checks them; the grants are
+re-applied every time.
+
+### Development data
+
+```sh
+infra/bin/smarthostctl console smarthost:dev:bootstrap [--operator-email you@smarthost-dev.test]
+```
+
+This creates (or reuses) an active development client and the sending domain
+`smarthost-dev.test` and **marks it verified without DNS**, with DKIM active and selector
+`phase1`, matching the disposable key from `smarthostctl dkim-dev-key`. It refuses to run unless
+`SMARTHOST_ENV` is `development` or `test`. A new API key (and, optionally, an operator with a
+random password) is printed **once**; only its SHA-256 hash is stored.
+
+```sh
+K=shk_...   # the printed key
+curl -sk https://127.0.0.1:8443/v1/send-jobs -H "Authorization: Bearer $K" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"external_reference":"demo","message_class":"transactional","sender_identity":{"email":"dev@smarthost-dev.test"}}'
+```
+
+Other administration (clients, keys, users, memberships, sending domains, webhook endpoints) is
+done with the `smarthost:*` console commands (`console list smarthost`), never through undocumented
+API endpoints. Submitted jobs stay `queued` until the Go delivery daemon exists (Phase 4); Phase 2
+never creates messages or talks to Postfix.
+
+### Test suite
+
+```sh
+infra/bin/smarthostctl test                        # everything
+infra/bin/smarthostctl test --testsuite schema     # one suite (unit, contract, schema, integration)
+```
+
+`infra/tests/phase2-test.sh` builds the `test` stage of the app image and starts a throwaway pod
+with **no network at all** (members share only loopback): PostgreSQL 16.15, the real role
+bootstrap, the Doctrine migrations on an **empty** database, the grants, and the reference schema
+loaded into a separate `<db>_reference` database used only for comparison. PHPUnit then runs as the
+least-privilege application role; DNS is stubbed and nothing reaches the Internet. The pod is
+labelled `project=smarthost` and removed afterwards.
+
+| Suite | Proves |
+|---|---|
+| unit | D-18 normalisation (including IDNA), canonical request hashing, the keyring, fail-closed configuration, log format |
+| contract | `/v1` routes are exactly the OpenAPI operations; OpenAPI enums equal the PHP enums |
+| schema | The migrated catalog equals `reference-schema.sql` (tables, columns, defaults, constraints, indexes); migrations up/down/up and per-migration rollback; ORM mapping equals the database; CHECKs equal the vocabulary; grants equal `schema.md` §6; least-privilege behaviour; critical CHECK/UNIQUE/FK behaviour |
+| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit; every response is validated against the OpenAPI contract |
+
+Latest run: 156 tests and 1,471 assertions, all passing (unit 36, contract 2, schema 33, integration 85).

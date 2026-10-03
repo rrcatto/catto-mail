@@ -139,7 +139,7 @@ domain_status:
   values:
     mx: {origin: contract, meaning: One or more usable MX records.}
     null_mx: {origin: contract, meaning: 'RFC 7505 Null MX ("MX 0 ."); the domain accepts no mail.'}
-    address_fallback: {origin: contract, meaning: No MX, but A/AAAA records permit RFC 5321 implicit-MX delivery.}
+    address_fallback: {origin: contract, meaning: "No MX, but A/AAAA records permit RFC 5321 implicit-MX delivery."}
     no_mail_host: {origin: contract, meaning: Domain exists but has neither MX nor usable A/AAAA records.}
     nxdomain: {origin: contract, meaning: Authoritative NXDOMAIN.}
     temporary_failure: {origin: contract, meaning: SERVFAIL/timeout/refused. Never a permanent verdict on first occurrence.}
@@ -148,14 +148,14 @@ domain_status:
 
 smtp_status:
   values:
-    accepted: {origin: contract, meaning: RCPT TO answered 2xx. Evidence, not proof of a human mailbox.}
-    rejected: {origin: contract, meaning: Mailbox-level permanent rejection (5xx on RCPT, e.g. 5.1.1).}
-    temporary_failure: {origin: contract, meaning: 4xx at any stage, including suspected greylisting.}
+    accepted: {origin: contract, meaning: "RCPT TO answered 2xx. Evidence, not proof of a human mailbox."}
+    rejected: {origin: contract, meaning: "Mailbox-level permanent rejection (5xx on RCPT, e.g. 5.1.1)."}
+    temporary_failure: {origin: contract, meaning: "4xx at any stage, including suspected greylisting."}
     blocked: {origin: contract, meaning: The probe itself was refused by policy; says nothing about the mailbox.}
     timeout: {origin: contract, meaning: Connection or command timeout.}
     connection_failed: {origin: contract, meaning: Connection refused/unreachable on all candidate hosts.}
     inconclusive: {origin: contract, meaning: Unexpected or ambiguous protocol behaviour.}
-    skipped: {origin: contract, meaning: Not probed (earlier stage decisive, probing disabled, or domain policy).}
+    skipped: {origin: contract, meaning: "Not probed (earlier stage decisive, probing disabled, or domain policy)."}
 
 overall_classification:
   values:
@@ -180,9 +180,9 @@ typo_reason_code:
   values:
     provider_domain_edit_distance: {origin: spec, meaning: Small edit distance from a known mailbox-provider domain.}
     transposition: {origin: spec, meaning: Adjacent-character transposition of a known domain.}
-    tld_typo: {origin: spec, meaning: Likely top-level-domain error (e.g. .con, .cmo).}
-    legacy_domain_alias: {origin: spec, meaning: Known, explicitly maintained legacy alias.}
-    other_domain_typo_rule: {origin: spec, meaning: Another recognised, documented domain typo rule.}
+    tld_typo: {origin: spec, meaning: "Likely top-level-domain error (e.g. .con, .cmo)."}
+    legacy_domain_alias: {origin: spec, meaning: "Known, explicitly maintained legacy alias."}
+    other_domain_typo_rule: {origin: spec, meaning: "Another recognised, documented domain typo rule."}
 
 validation_evidence_type:
   values:
@@ -231,7 +231,7 @@ message_status:
       rank: 60
       terminal: true
       meaning: Final failure of a temporary nature (expiry or 4.x.x failed DSN).
-    hard_bounced: {origin: spec, rank: 70, terminal: true, meaning: Permanent failure (5.x.x), synchronous or by DSN.}
+    hard_bounced: {origin: spec, rank: 70, terminal: true, meaning: "Permanent failure (5.x.x), synchronous or by DSN."}
     complained: {origin: spec, rank: 80, terminal: true, meaning: A complaint was attributed to this message.}
     failed: {origin: spec, rank: 90, terminal: true, meaning: Immediate submission failure; never handed to Postfix.}
     suppressed:
@@ -343,7 +343,7 @@ failure_scope:
     connection_failure, soft_bounce and hard_bounce events (D-18). Only
     `recipient` soft bounces count towards repeated_soft_bounce suppression.
   values:
-    recipient: {origin: spec, meaning: Mailbox-specific condition (e.g. 4.2.2 mailbox full, 4.2.1 mailbox disabled).}
+    recipient: {origin: spec, meaning: "Mailbox-specific condition (e.g. 4.2.2 mailbox full, 4.2.1 mailbox disabled)."}
     domain: {origin: spec, meaning: General domain-level deferral.}
     provider_policy: {origin: spec, meaning: Provider-wide rate limiting or policy/reputation deferral.}
     connection: {origin: spec, meaning: TCP/TLS connection failure.}
@@ -411,7 +411,7 @@ global_role:
 client_membership_role:
   description: client_memberships.role (D-12), enforced with Symfony voters per client.
   values:
-    admin: {origin: contract, meaning: Manages API keys, sending domains, webhook endpoints and members.}
+    admin: {origin: contract, meaning: "Manages API keys, sending domains, webhook endpoints and members."}
     member: {origin: contract, meaning: Creates and inspects validation and send jobs.}
     viewer: {origin: contract, meaning: Read-only access.}
 
@@ -429,7 +429,7 @@ suppression_reason:
 
 suppression_scope_type:
   values:
-    address: {origin: contract, meaning: Matches the D-18 normalised address (local part preserved, domain lower-cased).}
+    address: {origin: contract, meaning: "Matches the D-18 normalised address (local part preserved, domain lower-cased)."}
     domain: {origin: contract, meaning: Matches every address at the lower-cased domain.}
 
 usage_type:

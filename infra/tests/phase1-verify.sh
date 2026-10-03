@@ -78,7 +78,7 @@ done
 
 section "T02 Quadlet render/install"
 expect "render + install (Quadlet dry-run validates every unit)" "$CTL" install
-for u in smarthost.target smarthost-{postgres,db-bootstrap,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service \
+for u in smarthost.target smarthost-{postgres,db-bootstrap,db-migrate,db-grants,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service \
          smarthost-pod.service smarthost-internal-network.service smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer; do
   st="$("$CTL" systemctl show -p LoadState --value "$u")"
   [[ "$st" == loaded ]] && pass "unit loaded: $u" || fail "unit loaded: $u ($st)"
@@ -101,8 +101,10 @@ fi
 section "T04 start + readiness"
 expect "smarthost.target starts" "$CTL" start
 expect "all 10 long-running services healthy" wait_healthy 300
-st="$(unit_state smarthost-db-bootstrap.service)"
-[[ "$st" == "active exited success "* ]] && pass "db-bootstrap oneshot succeeded ($st)" || fail "db-bootstrap oneshot ($st)"
+for oneshot in db-bootstrap db-migrate db-grants; do
+  st="$(unit_state "smarthost-$oneshot.service")"
+  [[ "$st" == "active exited success "* ]] && pass "$oneshot oneshot succeeded ($st)" || fail "$oneshot oneshot ($st)"
+done
 for t in smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer; do
   st="$(unit_state "$t")"; [[ "$st" == active* ]] && pass "timer active: $t" || fail "timer active: $t ($st)"
 done
@@ -229,7 +231,8 @@ expect "Symfony cannot see $kd" bash -c "! podman exec smarthost-symfony-app tes
 expect "Go delivery cannot see $kd" bash -c "! podman exec smarthost-delivery ls '$kd'"
 expect "Python validator cannot see $kd" bash -c "! podman exec smarthost-validator test -e '$kd'"
 expect "private key is 0600 opendkim inside OpenDKIM" bash -c "podman exec smarthost-opendkim stat -c '%a %U' '$kd/smarthost-dev.test/phase1.private' | grep -qx '600 opendkim'"
-expect "no private key material in the repository" bash -c "! git -C '$REPO' grep -q 'BEGIN .*PRIVATE KEY' -- ."
+# Tracked and untracked (not ignored) files. The character class keeps this line from matching itself.
+expect "no private key material in the repository" bash -c "! git -C '$REPO' grep -q --untracked -E -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' ."
 
 section "T13 OpenDKIM unavailable -> temporary failure, never unsigned mail (V-6)"
 "$CTL" systemctl stop smarthost-opendkim.service >>"$LOG" 2>&1
@@ -350,7 +353,7 @@ section "T20 stop / start cycle"
 expect "smarthost.target stop" "$CTL" stop
 left="$(podman ps --format '{{.Names}}' | grep '^smarthost-' | tr '\n' ' ')"
 [[ -z "$left" ]] && pass "no Smarthost container running when stop returns" || fail "Smarthost containers still running after stop: $left"
-units_up="$("$CTL" systemctl list-units --no-legend --state=active,activating,deactivating 'smarthost-*.service' | grep -v -E 'volume|network|db-bootstrap' | wc -l)"
+units_up="$("$CTL" systemctl list-units --no-legend --state=active,activating,deactivating 'smarthost-*.service' | grep -v -E 'volume|network|db-bootstrap|db-migrate|db-grants' | wc -l)"
 [[ "$units_up" == 0 ]] && pass "no Smarthost service unit active after stop" || fail "$units_up service units still active after stop"
 expect "smarthost.target start" "$CTL" start
 expect "all services healthy after start" wait_healthy 300

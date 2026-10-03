@@ -1,14 +1,55 @@
-# Smarthost Symfony runtime: PHP-FPM only (no PHP HTTP server; nginx is the
-# HTTP entry via FastCGI). Phase 1 ships infrastructure probes only; the
-# Symfony application is added in Phase 2. The same image runs the webhook
-# worker as a separate unit.
-FROM docker.io/library/php:8.5-fpm-trixie
+# Smarthost Symfony application image (PHP-FPM only; nginx is the HTTP entry
+# via FastCGI). Build context: the repository root, so the normative OpenAPI
+# contract can be copied in as the single source for request validation.
+#
+# Stages:
+#   base     PHP 8.5 FPM + extensions
+#   tools    base + Composer/git/unzip (dependency management, used by smarthostctl)
+#   test     application with dev dependencies (PHPUnit); used by the Phase 2 test harness
+#   runtime  application without dev dependencies (default, last stage; used by the pod)
+FROM docker.io/library/php:8.5-fpm-trixie AS base
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libpq-dev libfcgi-bin \
- && docker-php-ext-install pdo_pgsql pcntl \
- && apt-get purge -y --auto-remove libpq-dev && apt-get install -y --no-install-recommends libpq5 \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libpq-dev libicu-dev libfcgi-bin \
+ && docker-php-ext-install pdo_pgsql pcntl intl \
+ && apt-get purge -y --auto-remove libpq-dev libicu-dev \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libpq5 libicu76 \
  && rm -rf /var/lib/apt/lists/*
-COPY docker/zz-smarthost-fpm.conf /usr/local/etc/php-fpm.d/zz-smarthost.conf
-COPY phase1-probe/ /srv/probe/
-COPY docker/fpm-healthcheck.sh /usr/local/bin/smarthost-fpm-healthcheck
-RUN chmod 0755 /usr/local/bin/smarthost-fpm-healthcheck && chmod -R a+rX /srv/probe
+COPY app/docker/zz-smarthost-fpm.conf /usr/local/etc/php-fpm.d/zz-smarthost.conf
+COPY app/docker/php.ini /usr/local/etc/php/conf.d/zz-smarthost.ini
+COPY app/docker/fpm-healthcheck.sh /usr/local/bin/smarthost-fpm-healthcheck
+RUN chmod 0755 /usr/local/bin/smarthost-fpm-healthcheck
+WORKDIR /srv/app
+
+FROM base AS tools
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git unzip \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=docker.io/library/composer:2 /usr/bin/composer /usr/local/bin/composer
+ENV COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
+
+FROM tools AS test
+COPY app/composer.json app/composer.lock app/symfony.lock /srv/app/
+RUN composer install --no-scripts --no-autoloader --prefer-dist
+COPY app/ /srv/app/
+COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
+COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
+# Test-only copies of the schema contracts (structural-equivalence and grant tests).
+COPY docs/schema/reference-schema.sql docs/schema/schema.md /srv/app/tests/contracts/
+RUN composer dump-autoload --optimize && mkdir -p var && chown -R www-data:www-data var
+
+FROM tools AS vendor
+COPY app/composer.json app/composer.lock app/symfony.lock /srv/app/
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+COPY app/ /srv/app/
+RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
+
+FROM base AS runtime
+COPY --from=vendor /srv/app /srv/app
+COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
+COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
+# Phase 1 infrastructure probes still used by the verification suite and the
+# webhook-worker placeholder (the worker itself is Phase 7).
+COPY app/phase1-probe/ /srv/probe/
+RUN rm -rf /srv/app/tests /srv/app/phpunit.dist.xml && chmod -R a+rX /srv/probe \
+ && mkdir -p var && chown -R www-data:www-data var

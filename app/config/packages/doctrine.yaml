@@ -1,0 +1,74 @@
+# Two identities (spec postgres.roles_and_privileges, D-15):
+#   default - smarthost_app: the web process and console commands (DML only);
+#   owner   - smarthost_owner: Doctrine migrations only (config/packages/doctrine_migrations.yaml).
+# Connections are lazy, so a process only resolves the credentials it actually uses.
+doctrine:
+    dbal:
+        default_connection: default
+        types:
+            timestamptz: App\Doctrine\Type\TimestamptzType
+            jsonb_map: App\Doctrine\Type\JsonbMapType
+        connections:
+            default:
+                driver: pdo_pgsql
+                host: '%env(SMARTHOST_DB_HOST)%'
+                port: '%env(int:SMARTHOST_DB_PORT)%'
+                dbname: '%env(SMARTHOST_DB_NAME)%'
+                user: '%env(APP_DB_USER)%'
+                password: '%env(secret:APP_DB_PASSWORD)%'
+                sslmode: '%env(SMARTHOST_DB_SSLMODE)%'
+                server_version: '16'
+                charset: utf8
+                schema_filter: '~^(?!doctrine_migration_versions$)~'
+                profiling_collect_backtrace: '%kernel.debug%'
+            owner:
+                driver: pdo_pgsql
+                host: '%env(SMARTHOST_DB_HOST)%'
+                port: '%env(int:SMARTHOST_DB_PORT)%'
+                dbname: '%env(SMARTHOST_DB_NAME)%'
+                user: '%env(SMARTHOST_DB_OWNER_USER)%'
+                password: '%env(secret:SMARTHOST_DB_OWNER_PASSWORD)%'
+                sslmode: '%env(SMARTHOST_DB_SSLMODE)%'
+                server_version: '16'
+                charset: utf8
+    orm:
+        default_entity_manager: default
+        controller_resolver:
+            auto_mapping: false
+        entity_managers:
+            default:
+                connection: default
+                validate_xml_mapping: true
+                naming_strategy: doctrine.orm.naming_strategy.underscore
+                mappings:
+                    App:
+                        type: attribute
+                        is_bundle: false
+                        dir: '%kernel.project_dir%/src/Entity'
+                        prefix: 'App\Entity'
+                        alias: App
+                filters:
+                    # Defence in depth for tenant isolation (App\Tenant\TenantFilter);
+                    # enabled for authenticated API requests by App\Tenant\TenantFilterSubscriber.
+                    tenant:
+                        class: App\Tenant\TenantFilter
+                        enabled: false
+
+when@prod:
+    doctrine:
+        orm:
+            entity_managers:
+                default:
+                    query_cache_driver:
+                        type: pool
+                        pool: doctrine.system_cache_pool
+                    result_cache_driver:
+                        type: pool
+                        pool: doctrine.result_cache_pool
+    framework:
+        cache:
+            pools:
+                doctrine.result_cache_pool:
+                    adapter: cache.app
+                doctrine.system_cache_pool:
+                    adapter: cache.system

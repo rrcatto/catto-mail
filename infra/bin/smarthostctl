@@ -14,7 +14,7 @@ RENDER="python3 $REPO/infra/lib/smarthost_render.py"
 IMAGES=(
   "localhost/smarthost-postfix:dev|postfix"
   "localhost/smarthost-opendkim:dev|opendkim"
-  "localhost/smarthost-app:dev|app"
+  "localhost/smarthost-app:dev|.|app/Containerfile|runtime"
   "localhost/smarthost-nginx:dev|infra/nginx"
   "localhost/smarthost-validator:dev|validator"
   "localhost/smarthost-delivery:dev|delivery"
@@ -40,7 +40,7 @@ machine() {
   "$wsl" -d "$name" -u "$user" --cd / -- /usr/local/bin/enterns "$HELPER" "$@"
 }
 
-units() { echo smarthost-{postgres,db-bootstrap,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service; }
+units() { echo smarthost-{postgres,db-bootstrap,db-migrate,db-grants,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service; }
 
 # `systemctl stop smarthost.target` returns once the target's own job is done,
 # while PartOf-propagated stops may still be running (observed in Phase 1). Naming
@@ -52,9 +52,15 @@ stop_all() {
     "${members[@]}" smarthost-pod.service
 }
 
+# IMAGES entries: tag|context[|containerfile|target] (paths relative to the repository).
 cmd_build() {
+  local tag ctx file target args
   for entry in "${IMAGES[@]}"; do
-    podman build -q -t "${entry%%|*}" "$REPO/${entry#*|}" >/dev/null && echo "built ${entry%%|*}"
+    IFS='|' read -r tag ctx file target <<<"$entry"
+    args=(-q -t "$tag")
+    [[ -n "$file" ]] && args+=(-f "$REPO/$file")
+    [[ -n "$target" ]] && args+=(--target "$target")
+    podman build "${args[@]}" "$REPO/$ctx" >/dev/null && echo "built $tag"
   done
 }
 
@@ -99,7 +105,11 @@ usage: smarthostctl <command>
   logs <unit> [n]   journal of one unit (default 100 lines)
   uninstall         stop and remove the installed units (volumes are kept)
   destroy-volumes --yes            delete all Smarthost volumes (DATA LOSS)
-  verify            run the Phase 1 verification suite
+  verify [--clean]  run the Phase 1 verification suite
+  test [args]       run the Phase 2 test suite in a throwaway, network-less pod (PHPUnit args)
+  console <args>    run a Symfony console command in the running app container (as www-data),
+                    e.g. console smarthost:dev:bootstrap
+  migrate           re-run Doctrine migrations and then the infrastructure grants
 USAGE
 }
 
@@ -123,5 +133,8 @@ case "${1:-}" in
     [[ "${2:-}" == "--yes" ]] || die "refusing without --yes (deletes PostgreSQL, Postfix queue, spool and DKIM volumes)"
     for v in "${VOLUMES[@]}"; do podman volume rm --force "$v" >/dev/null 2>&1 && echo "removed $v" || true; done ;;
   verify) shift; exec "$REPO/infra/tests/phase1-verify.sh" "$@" ;;
+  test) shift; exec "$REPO/infra/tests/phase2-test.sh" "$@" ;;
+  console) shift; exec podman exec -i -u www-data smarthost-symfony-app php bin/console "$@" ;;
+  migrate) machine systemctl restart smarthost-db-migrate.service && machine systemctl restart smarthost-db-grants.service ;;
   *) usage; exit 64 ;;
 esac

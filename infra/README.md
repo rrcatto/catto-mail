@@ -3,17 +3,19 @@
 - `.env.example` is the safe environment template (no secrets). The normative contract is
   `docs/contracts/environment.md`. Never commit a filled-in copy.
 
-Phase 1 will add:
-- **nginx** (the only public HTTP entry), which reaches Symfony PHP-FPM via FastCGI. The topology
-  is the same in development and production.
-- Networks and Quadlet units, including the separate Symfony webhook-worker unit and the OpenDKIM
-  unit.
-- Systemd timers for Postfix log rotation, Postfix queue snapshots and Symfony scheduled
-  commands.
+Contents (see `docs/PROJECT.md` for every file):
+- **nginx** (the only public HTTP entry), which hands every request to the Symfony front
+  controller via FastCGI. The topology is the same in development and production.
+- The `smarthost` pod, the internal network, volumes and Quadlet units, including the separate
+  Symfony webhook-worker unit and the OpenDKIM unit.
+- Systemd timers for Postfix log rotation and Postfix queue snapshots.
 - Shared volumes `smarthost-postfix-observability` and `smarthost-dsn-spool`.
-- **Database role bootstrap.** It creates `smarthost_owner`, `smarthost_app`,
-  `smarthost_webhook`, `smarthost_validator` and `smarthost_delivery` over the administrative
-  connection, and idempotently applies the grant matrix in `docs/schema/schema.md` §6 after each
-  migration. Roles are infrastructure, not Doctrine schema.
+- **Database role bootstrap and grants.** `postgres/bootstrap.sh` creates `smarthost_owner`,
+  `smarthost_app`, `smarthost_webhook`, `smarthost_validator` and `smarthost_delivery` over the
+  administrative connection. After the Doctrine migrations (`smarthost-db-migrate`, as the owner),
+  `postgres/grants.sh` applies the grant matrix of `docs/schema/schema.md` §6 exactly
+  (`smarthost-db-grants`). Roles and grants are infrastructure, not Doctrine schema.
+- The Phase 1 verification suite (`tests/phase1-verify.sh`) and the Phase 2 test harness
+  (`tests/phase2-test.sh`).
 
 Rootless Podman with Quadlet/systemd user units only. No Docker and no Kubernetes.

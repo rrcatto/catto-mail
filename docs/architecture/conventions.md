@@ -36,7 +36,8 @@ specification 2.1; where they touch architecture, the spec is authoritative.
 * Base path `/v1`. JSON with `snake_case` fields. Errors are RFC 9457 `application/problem+json`.
 * Authentication is `Authorization: Bearer <key>`. A key is ≥ 256 bits of CSPRNG output, shown
   once at creation. Smarthost stores `sha256(key)` as lower-case hex. A fast hash is sufficient for
-  high-entropy keys, and it allows indexed lookup.
+  high-entropy keys, and it allows indexed lookup. Phase 2 format: `shk_` + base64url(32 bytes);
+  the first 12 characters are the non-secret `key_prefix`.
 * The tenant comes from the key and never from the request body. Cross-tenant access returns 404.
 * Job creation and recipient-batch upload require `Idempotency-Key`, scoped to (client, endpoint),
   and for batches also to the send job. Same key and same body replays the response. Same key and a
@@ -49,8 +50,15 @@ specification 2.1; where they touch architecture, the spec is authoritative.
 
 ## Email addresses
 * Normalisation is one function, implemented identically in PHP, Python and Go: trim surrounding
-  whitespace, preserve the local part byte-for-byte, and lower-case the domain (IDNA/A-label
-  handling is a Phase 2/3 implementation detail and must also be identical across languages).
+  whitespace, preserve the local part byte-for-byte, and lower-case the domain. The exact rule,
+  implemented in Phase 2 (`app/src/Sending/AddressNormalizer.php`) and to be matched by Python and Go:
+  1. trim surrounding ASCII whitespace (SP, HT, LF, VT, FF, CR);
+  2. split at the **last** `@`; both parts must be non-empty, otherwise there is no normalised form;
+  3. keep the local part byte-for-byte;
+  4. an all-ASCII domain is lower-cased (ASCII only); a domain with non-ASCII characters is
+     converted to its A-label form with UTS #46 **non-transitional** processing (which also
+     lower-cases); if that conversion fails there is no normalised form.
+  Example: `" Jöhn@Bücher.Example "` → `Jöhn@xn--bcher-kva.example`.
 * Original input is always retained alongside the normalised form.
 * Suppression matching and duplicate-recipient detection compare normalised forms. The local part
   is never case-folded. Case-insensitive local-part matching would need a new, explicitly
@@ -74,7 +82,10 @@ specification 2.1; where they touch architecture, the spec is authoritative.
   only for `subscription` messages, using client-supplied values. Arbitrary caller headers are
   never accepted. The only optional extra is the job-level `Reply-To`.
 * Rendered content is purged as soon as Postfix has accepted the message and the queue id is
-  recorded.
+  recorded. What survives the purge is defined in Phase 2:
+  `content_bytes` = octets of subject + html_body + text_body (an absent part counts 0), and
+  `content_sha256` = lower-case hex SHA-256 of the JSON array `[subject, html_body|null, text_body|null]`
+  encoded without escaped slashes or Unicode.
 
 ## Webhooks
 * Delivered only by the Symfony webhook worker. Delivery is at-least-once, and

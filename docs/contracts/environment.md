@@ -106,14 +106,14 @@ secret has a value in the template, and that safety switches default to safe val
 | `APP_API_MAX_REQUEST_BYTES` | app | no | 2 | `10485760` | Request body limit (10 MiB, 413 above it). It is not raised to fit large send jobs. |
 | `APP_SEND_JOB_MAX_RECIPIENTS` | app | no | 2 | `10000` | Maximum recipients per send job. It may lower, but not raise, the contract ceiling of 10000. |
 | `APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH` | app | no | 2 | `500` | Maximum recipients per upload request. It may lower, but not raise, the contract ceiling of 500. |
-| `APP_ENCRYPTION_KEYS` | app, webhook-worker | **yes** | 7 | | Application keyring for webhook signing secrets, in the form `key_id:base64key[,…]`. The first key encrypts; any listed key decrypts. |
+| `APP_ENCRYPTION_KEYS` | app, webhook-worker | **yes** | 2 | | Application keyring for webhook signing secrets, in the form `key_id:base64key[,…]`. The first key encrypts; any listed key decrypts. |
 | `APP_WEBHOOK_MAX_ATTEMPTS` | webhook-worker | no | 7 | `8` | Retry limit before a delivery becomes `failed`. |
 | `APP_WEBHOOK_TIMEOUT_SECONDS` | webhook-worker | no | 7 | `10` | Per-attempt HTTP timeout. |
 | `APP_WEBHOOK_POLL_INTERVAL_SECONDS` | webhook-worker | no | 7 | `5` | Polling fallback when no NOTIFY arrives. |
 | `APP_WEBHOOK_LEASE_SECONDS` | webhook-worker | no | 7 | `60` | Delivery lease. It must exceed the HTTP timeout, and long attempts renew it. |
 | `APP_WEBHOOK_RETRY_BASE_SECONDS` | webhook-worker | no | 7 | `60` | Base for exponential backoff. |
 | `APP_WEBHOOK_RETRY_MAX_SECONDS` | webhook-worker | no | 7 | `21600` | Backoff ceiling. |
-| `APP_WEBHOOK_SECRET_OVERLAP_HOURS` | app, webhook-worker | no | 7 | `24` | How long a rotated-out signing secret keeps producing a second signature. |
+| `APP_WEBHOOK_SECRET_OVERLAP_HOURS` | app, webhook-worker | no | 2 | `24` | How long a rotated-out signing secret keeps producing a second signature. |
 | `APP_DOMAIN_VERIFICATION_RECHECK_HOURS` | app | no | 2 | `24` | How often pending sending domains are re-checked in DNS. |
 | `APP_RETENTION_STAGED_CONTENT_DAYS` | app | no | 2 | `7` | Purge period for rendered content of abandoned, cancelled, suppressed or permanently failed recipients. Abandoned collecting jobs are cancelled. |
 | `APP_RETENTION_VALIDATION_DAYS` | app | no | 2 | | Validation history. Empty means no automatic deletion until the compliance policy sets it. |

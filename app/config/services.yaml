@@ -1,0 +1,66 @@
+# Application parameters come from the environment contract
+# (docs/contracts/environment.md); the contract ceilings are enforced in code
+# (App\Config\Limits), so configuration can only lower them.
+parameters:
+    app.public_base_url: '%env(SMARTHOST_PUBLIC_BASE_URL)%'
+    app.smarthost_env: '%env(SMARTHOST_ENV)%'
+    app.allow_unverified_sending_domains: '%env(bool:SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS)%'
+    app.api.max_request_bytes: '%env(int:APP_API_MAX_REQUEST_BYTES)%'
+    app.send_job.max_recipients: '%env(int:APP_SEND_JOB_MAX_RECIPIENTS)%'
+    app.send_job.max_recipients_per_batch: '%env(int:APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH)%'
+    app.domain_verification.recheck_hours: '%env(int:APP_DOMAIN_VERIFICATION_RECHECK_HOURS)%'
+    app.webhook.secret_overlap_hours: '%env(int:APP_WEBHOOK_SECRET_OVERLAP_HOURS)%'
+    app.log_format: '%env(default:app.default_log_format:SMARTHOST_LOG_FORMAT)%'
+    app.default_log_format: 'json'
+    app.openapi_contract: '%kernel.project_dir%/config/contracts/openapi.v1.yaml'
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        bind:
+            string $publicBaseUrl: '%app.public_base_url%'
+            string $smarthostEnv: '%app.smarthost_env%'
+            bool $allowUnverifiedSendingDomains: '%app.allow_unverified_sending_domains%'
+            int $maxRequestBytes: '%app.api.max_request_bytes%'
+            int $configuredMaxRecipients: '%app.send_job.max_recipients%'
+            int $configuredMaxRecipientsPerBatch: '%app.send_job.max_recipients_per_batch%'
+            int $recheckHours: '%app.domain_verification.recheck_hours%'
+            int $secretOverlapHours: '%app.webhook.secret_overlap_hours%'
+            string $openApiContractPath: '%app.openapi_contract%'
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Entity/'
+            - '../src/Enum/'
+            - '../src/Kernel.php'
+
+    App\Controller\:
+        resource: '../src/Controller/'
+        tags: ['controller.service_arguments']
+
+    App\Logging\ContractFormatter:
+        arguments:
+            $format: '%app.log_format%'
+
+    # Encryption keyring for webhook signing secrets; resolved lazily so that processes
+    # that never touch webhook secrets do not need APP_ENCRYPTION_KEYS.
+    App\Crypto\Keyring:
+        lazy: true
+        arguments:
+            $keyring: '%env(secret:APP_ENCRYPTION_KEYS)%'
+
+    # Real DNS in every environment except tests (tests replace it with a stub).
+    App\Domain\Dns\TxtResolver: '@App\Domain\Dns\SystemTxtResolver'
+
+when@test:
+    services:
+        App\Domain\Dns\TxtResolver:
+            class: App\Tests\Support\StubTxtResolver
+            public: true
+        # The outbox has no Phase 2 producer yet (validation/sending events come from
+        # Python and Go); keep it reachable for its tests.
+        App\Webhook\WebhookOutbox:
+            autowire: true
+            public: true
