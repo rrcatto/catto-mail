@@ -15,14 +15,20 @@ never host-published). There is no separate PHP HTTP server.
 - the webhook endpoint/secret model and the transactional outbox (no HTTP delivery yet);
 - the audit log and the administrative console commands (`smarthost:*`).
 
-**Later phases:** client and operator dashboards, tracking endpoints, usage metering, retention
+**Phase 3 (implemented):** work-creating operations answer 403 for `pending_approval` and
+`suspended` clients (D-31, `App\Api\WorkPermission`); validation-job creation wakes the Python
+validator with `pg_notify`; the D-32 normaliser is tested against the shared vectors; `ext-intl` is
+a declared requirement checked by `composer check-platform-reqs`. Validation usage is metered by
+the validator (D-33), not by Symfony.
+
+**Later phases:** client and operator dashboards, tracking endpoints, send usage metering, retention
 commands, and the **webhook worker**, a long-running console process from this image that
 consumes the `webhook_events` outbox and is the only component that sends webhooks. Until Phase 7
 the worker unit runs the placeholder in `phase1-probe/`.
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
 `.env` file). Run console commands in the development pod with
-`infra/bin/smarthostctl console <command>` and the test suite with `infra/bin/smarthostctl test`.
+`infra/bin/smarthostctl console <command>` and the test suite with `infra/bin/smarthostctl test phase2`.
 See `docs/PROJECT.md` for every file.
 
 Must not:

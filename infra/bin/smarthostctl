@@ -16,7 +16,7 @@ IMAGES=(
   "localhost/smarthost-opendkim:dev|opendkim"
   "localhost/smarthost-app:dev|.|app/Containerfile|runtime"
   "localhost/smarthost-nginx:dev|infra/nginx"
-  "localhost/smarthost-validator:dev|validator"
+  "localhost/smarthost-validator:dev|.|validator/Containerfile|runtime"
   "localhost/smarthost-delivery:dev|delivery"
   "localhost/smarthost-fake-smtp:dev|tests/fake-smtp"
 )
@@ -106,7 +106,8 @@ usage: smarthostctl <command>
   uninstall         stop and remove the installed units (volumes are kept)
   destroy-volumes --yes            delete all Smarthost volumes (DATA LOSS)
   verify [--clean]  run the Phase 1 verification suite
-  test [args]       run the Phase 2 test suite in a throwaway, network-less pod (PHPUnit args)
+  test [phase2|phase3] [args]      run the Phase 2 (PHPUnit) and/or Phase 3 (pytest + end-to-end)
+                    suites in a throwaway, network-less pod (default: both)
   console <args>    run a Symfony console command in the running app container (as www-data),
                     e.g. console smarthost:dev:bootstrap
   migrate           re-run Doctrine migrations and then the infrastructure grants
@@ -133,7 +134,14 @@ case "${1:-}" in
     [[ "${2:-}" == "--yes" ]] || die "refusing without --yes (deletes PostgreSQL, Postfix queue, spool and DKIM volumes)"
     for v in "${VOLUMES[@]}"; do podman volume rm --force "$v" >/dev/null 2>&1 && echo "removed $v" || true; done ;;
   verify) shift; exec "$REPO/infra/tests/phase1-verify.sh" "$@" ;;
-  test) shift; exec "$REPO/infra/tests/phase2-test.sh" "$@" ;;
+  test)
+    shift
+    case "${1:-all}" in
+      phase2) shift; exec "$REPO/infra/tests/phase2-test.sh" "$@" ;;
+      phase3) shift; exec "$REPO/infra/tests/phase3-test.sh" "$@" ;;
+      all) "$REPO/infra/tests/phase2-test.sh" && exec "$REPO/infra/tests/phase3-test.sh" ;;
+      *) die "test: expected phase2, phase3 or nothing" ;;
+    esac ;;
   console) shift; exec podman exec -i -u www-data smarthost-symfony-app php bin/console "$@" ;;
   migrate) machine systemctl restart smarthost-db-migrate.service && machine systemctl restart smarthost-db-grants.service ;;
   *) usage; exit 64 ;;

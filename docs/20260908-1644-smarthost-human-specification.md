@@ -1,7 +1,7 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.1. This is a documentation revision, not a software release version.
-**Revision date:** 2 October 2026 (original: 8 September 2026)
+**Specification version:** 2.2. This is a documentation revision, not a software release version.
+**Revision date:** 3 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
 The canonical, machine-readable specification is `docs/20260908-1644-smarthost-llm-spec.yaml`.
@@ -400,6 +400,8 @@ The rules are:
 
 The same rules apply to validation addresses (Python), send jobs (Go) and webhook deliveries (the Symfony worker).
 
+The validator claims only addresses of active or throttled clients, and renewals and result writes re-check that status, so a suspension stops work in progress without publishing results (D-31). It meters usage itself: one `validation_address` unit for each address that actually reaches its final state, written in the same transaction as the result, so retries, reclaims and crashes never double-count and unprocessed addresses are never metered (D-33).
+
 ---
 
 # 7. List Hygiene Principles
@@ -522,7 +524,7 @@ Compression is not required for correctness and may be added later as a transpor
 | `failed` | The job as a whole could not be executed |
 | `cancelled` | Operator emergency stop before dispatch finished, or an abandoned collecting job |
 
-Operator throttling and suspension act on the **client** (its status), and workers stop claiming or continuing a suspended client's work. Later opens, clicks, complaints or recovered transport information may update messages and statistics, but they never reopen a completed job.
+Operator throttling and suspension act on the **client** (its status), and workers stop claiming or continuing a suspended client's work. Only `active` and `throttled` clients may create or add work: for `pending_approval` and `suspended` clients the four work-creating operations (`POST /v1/validation-jobs`, `POST /v1/send-jobs`, recipient batches and submit) answer 403, while reads keep working. Keys of a `closed` client no longer authenticate (D-31). Later opens, clicks, complaints or recovered transport information may update messages and statistics, but they never reopen a completed job.
 
 ## 8.6 Per-recipient message generation
 
@@ -858,6 +860,8 @@ Suppression matching uses the same normalisation as duplicate detection:
 - preserve the local part exactly;
 - lower-case the domain.
 
+The exact rule (D-32): trim only ASCII whitespace (space, tab, LF, VT, FF, CR); split at the final `@`; keep the local part byte-for-byte; lower-case an ASCII domain; convert a domain with non-ASCII characters to A-labels using UTS #46 non-transitional processing and lower-case the result; if that conversion fails there is no normalised address. `docs/contracts/address-normalization-vectors.json` holds shared test vectors that the PHP, Python and Go implementations must all pass.
+
 `John@example.COM` therefore matches as `John@example.com`, not `john@example.com`. Adopting case-insensitive local-part matching later would require an explicit, documented policy.
 
 ## 13.2 Repeated soft bounces
@@ -970,6 +974,8 @@ Request bodies are limited to 10 MiB. The full contract is `docs/api/openapi.v1.
 ## Idempotency
 
 Creating a validation job, creating a send job, and uploading a recipient batch each require an idempotency key, so that a network retry cannot create duplicate jobs, duplicate recipients or duplicate sends. Submit is naturally idempotent: submitting a job that is already sealed returns its current state.
+
+A replay (same key, same body) has no repeated side effect and returns the same created resource with the same status code, the same `Location` where applicable, and `Idempotent-Replayed: true`. For resource creation the body may show the resource's current state rather than a byte-identical copy of the first response; Smarthost does not store response bodies. A recipient-batch replay reproduces the original batch result, including the running total at that time (D-34).
 
 ## Webhooks
 
@@ -1487,4 +1493,5 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.2 | 3 October 2026 | Incorporates D-31 (403 for work creation by pending-approval and suspended clients; workers claim only active or throttled clients' work), D-32 (exact address-normalisation rule with UTS #46 IDNA and shared test vectors), D-33 (validation usage metered by the validator on completion) and D-34 (idempotent-replay semantics). |
 | 2.1 | 2 October 2026 | Incorporates the Phase 0 architecture decisions and resolves the mail-merge, tracking, unsubscribe, send-ingestion, webhook, DKIM and transport-reconciliation contracts. Main changes: fully rendered recipient content from client applications; batched recipient ingestion with `collecting`/`dispatched`/`completed` semantics; random tracking tokens; RFC 8058 one-click unsubscribe for subscription messages; webhook outbox and Symfony worker; nginx with PHP-FPM; OpenDKIM; sending-domain verification; transient rendered content; Postfix reconciliation with `outcome_unknown`; unmatched-DSN resolution; work leasing; event de-duplication; database role bootstrap; the live-sending compliance gate. The unsubscribe-signal event was removed. |

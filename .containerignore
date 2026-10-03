@@ -1,12 +1,17 @@
-# Build context of the Symfony application image (repository root, so that the
-# normative contracts can be copied in). Every other image builds from its own
-# directory and is unaffected.
+# Build context of the Symfony application and Python validator images
+# (repository root, so that the normative contracts and shared test fixtures can
+# be copied in). Every other image builds from its own directory and is unaffected.
 **
 !app
 !docs/api/openapi.v1.yaml
 !docs/contracts/status-vocabulary.yaml
 !docs/schema/reference-schema.sql
 !docs/schema/schema.md
+!docs/contracts/address-normalization-vectors.json
+!validator
+!tests/fake-smtp/fake_smtp.py
 app/vendor
+validator/**/__pycache__
+validator/.pytest_cache
 app/var
 app/.phpunit.cache

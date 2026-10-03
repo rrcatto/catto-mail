@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.1) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.2) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -19,8 +19,11 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
 - **Phase 1** (rootless Podman development environment): complete. `infra/bin/smarthostctl verify`
   (optionally `--clean`) re-proves it. See `docs/development-environment.md`.
 - **Phase 2** (database and Symfony foundation): complete (v0.1.2). The Symfony 8.1
-  application is in `app/`; `infra/bin/smarthostctl test` runs its suite in a throwaway pod.
-- Do not start Phase 3 or later work unless the user explicitly asks for it.
+  application is in `app/`; `infra/bin/smarthostctl test phase2` runs its suite in a throwaway pod.
+- **Phase 3** (Python validation engine): complete (v0.1.3). The worker is in `validator/`;
+  `infra/bin/smarthostctl test phase3` runs pytest and the 10,000-address end-to-end
+  run in a throwaway pod; `smarthostctl test` runs Phases 2 and 3.
+- Do not start Phase 4 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.

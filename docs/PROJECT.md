@@ -22,7 +22,7 @@ Both are gitignored.
 ├── CHANGELOG.md                   Version history
 ├── LICENSE                        MIT licence
 ├── .gitignore                     Excludes secrets and generated files
-├── .containerignore               Build context filter for the app image (repository root)
+├── .containerignore               Build context filter for the app and validator images (repository root)
 ├── app/                           Symfony 8.1 application (PHP-FPM)
 │   ├── Containerfile              Multi-stage: base, tools, test, vendor, runtime
 │   ├── README.md
@@ -33,7 +33,7 @@ Both are gitignored.
 │   ├── config/                    Framework, Doctrine, security, monolog, routes, services
 │   ├── migrations/                5 Doctrine migrations (the schema authority)
 │   ├── src/
-│   │   ├── Api/                   Problems, OpenAPI validation, idempotency key, cursors, representations
+│   │   ├── Api/                   Problems, OpenAPI validation, idempotency key, cursors, representations, work permission (D-31)
 │   │   ├── Audit/                 Audit log writer
 │   │   ├── Client/                Client, user and membership administration
 │   │   ├── Command/               Console commands (administration and dev bootstrap)
@@ -61,11 +61,12 @@ Both are gitignored.
 │   └── phase1-probe/
 │       ├── db-check.php
 │       └── webhook-worker.php
-├── validator/                     Python validator image
-│   ├── Containerfile
+├── validator/                     Python validation worker (Phase 3)
+│   ├── Containerfile              Stages: base, test, runtime
 │   ├── README.md
-│   ├── phase1_probe.py
-│   └── requirements-phase1.txt
+│   ├── requirements.txt, requirements-test.txt, pytest.ini
+│   ├── smarthost_validator/       The worker package (pipeline stages, leases, limits, SQL)
+│   └── tests/                     pytest: unit, database, worker; fakes/ (fake DNS); e2e/zone.json
 ├── delivery/                      Go delivery image
 │   ├── Containerfile
 │   ├── README.md
@@ -104,7 +105,9 @@ Both are gitignored.
 │       ├── requirements.txt
 │       ├── phase1_client.py
 │       ├── phase1-verify.sh       Phase 1 verification suite
-│       └── phase2-test.sh         Phase 2 test harness (throwaway network-less pod)
+│       ├── testpod.sh             Shared throwaway network-less test pod (sourced)
+│       ├── phase2-test.sh         Phase 2 test harness (PHPUnit)
+│       └── phase3-test.sh         Phase 3 test harness (pytest + end to end)
 ├── tests/fake-smtp/               Deterministic SMTP test server
 │   ├── Containerfile
 │   ├── README.md
@@ -126,7 +129,8 @@ Both are gitignored.
     │   └── open-decisions.md
     ├── contracts/
     │   ├── environment.md
-    │   └── status-vocabulary.yaml
+    │   ├── status-vocabulary.yaml
+    │   └── address-normalization-vectors.json
     └── schema/
         ├── reference-schema.sql
         └── schema.md
@@ -143,16 +147,16 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, current phase, WSL Podman-machine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod) and 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) and 0.1.3 (Phase 3 complete: Python validation engine). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
-| `.containerignore` | The app image builds from the repository root so that it can copy the normative OpenAPI and vocabulary contracts; this admits only `app/` (without `vendor/`, `var/`) and those contract files. |
+| `.containerignore` | The app and validator images build from the repository root so that they can copy the normative contracts; this admits only `app/` (without `vendor/`, `var/`), `validator/` (without caches), those contract files, the D-32 vectors and the fake SMTP server (validator test stage). |
 
 ### `docs/`: specifications and contracts
 
 | File | Purpose |
 |---|---|
-| `20260908-1644-smarthost-llm-spec.yaml` | **Canonical specification 2.1.** It covers architecture, ownership, services, API, sending, tracking, schema, security, compliance and phases. |
+| `20260908-1644-smarthost-llm-spec.yaml` | **Canonical specification 2.2.** It covers architecture, ownership, services, API, sending, tracking, schema, security, compliance and phases. |
 | `20260908-1644-smarthost-human-specification.md` | Human-readable companion that mirrors the YAML. |
 | `README.md` | Index of the documentation. |
 | `PROJECT.md` | This guide. |
@@ -160,6 +164,7 @@ Both are gitignored.
 | `api/openapi.v1.yaml` | OpenAPI 3.1 contract for `/v1`: validation jobs, batched send jobs (create → recipients → submit), messages, events and webhooks. |
 | `contracts/status-vocabulary.yaml` | Every allowed status, event, event source, failure scope and classification value, with transitions and ranks. |
 | `contracts/environment.md` | The only list of permitted environment variables, with consumers, secrecy and phase. |
+| `contracts/address-normalization-vectors.json` | Shared D-32 address-normalisation test vectors (87). PHP and Python test against this file; Go must from Phase 4. |
 | `schema/reference-schema.sql` | Reference PostgreSQL 16 DDL (24 tables). This is not a migration. |
 | `schema/schema.md` | ERD, tenant ownership, required indexes, CHECK rules and the database grant matrix. |
 | `architecture/overview.md` | One-page map from the specification to the contracts and flows. |
@@ -174,7 +179,7 @@ Both are gitignored.
 | `.env.example` | Safe template of every contract variable, with secrets empty. Generated from `docs/contracts/environment.md`. |
 | `README.md` | What lives in `infra/`. |
 | `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install, dkim-dev-key, start/stop/restart, status, logs, systemctl pass-through, uninstall, destroy-volumes, verify, test (Phase 2 suite), console (Symfony console in the app container), migrate (re-run migrations and grants). |
-| `bin/smarthost-machine-helper.sh` | Runs inside the Podman engine's systemd namespace. It installs and uninstalls units and passes commands through to `systemctl --user` and `journalctl --user`. |
+| `bin/smarthost-machine-helper.sh` | Runs inside the Podman engine's systemd namespace. It installs and uninstalls units (including the `default.target.wants` boot link) and passes commands through to `systemctl --user` and `journalctl --user`. |
 | `lib/smarthost_render.py` | Regenerates `.env.example` and creates `infra/.env` with random development secrets. It renders per-consumer env files and Quadlet/systemd templates, and refuses non-contract variables. |
 | `nginx/Containerfile` | nginx 1.28 image without the default site. |
 | `nginx/templates/smarthost.conf.template` | HTTPS server. Every request goes to the Symfony front controller over FastCGI, with request-time DNS resolution. Bodies above 12 MiB get a JSON 413 from nginx; the application enforces the 10 MiB API limit itself. Also a loopback-only health server. |
@@ -191,17 +196,19 @@ Both are gitignored.
 | `quadlet/smarthost-symfony-app.container.in` | PHP-FPM (alias `symfony-app`) running the Symfony application, with an FPM-ping health check. |
 | `quadlet/smarthost-webhook-worker.container.in` | Webhook-worker unit from the same image. Still the placeholder process until Phase 7. |
 | `quadlet/smarthost-nginx.container.in` | nginx (pod member). Its HTTPS port is published by the pod as `PROXY_HTTPS_BIND`. TLS comes from Podman secrets. |
-| `quadlet/smarthost-validator.container.in` | Python validator probe as uid 10001 (pod member). |
+| `quadlet/smarthost-validator.container.in` | Python validation worker as uid 10001 (pod member, no ports); health check `python -m smarthost_validator health` (heartbeat age). |
 | `quadlet/smarthost-delivery.container.in` | Go probe as `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID`. Observability is read-only; the spool is read-write. |
 | `quadlet/smarthost-postfix.container.in` | Postfix with the queue, observability and spool volumes, and TLS secrets. |
 | `quadlet/smarthost-opendkim.container.in` | OpenDKIM, the only container that mounts the key volumes. |
 | `quadlet/smarthost-mailpit.container.in` | Mailpit v1.31.0 (pod member). Its UI is published by the pod at `MAILPIT_UI_BIND`. |
 | `quadlet/smarthost-fake-smtp.container.in` | Fake SMTP (alias `fake-smtp`), internal only. |
-| `systemd/smarthost.target.in` | Groups every unit (`PartOf`/`WantedBy`) so the topology starts and stops together. |
+| `systemd/smarthost.target.in` | Groups every unit (`PartOf`/`WantedBy`) so the topology starts and stops together. Wanted by `default.target`, so it starts when the Podman machine starts. |
 | `systemd/smarthost-postfix-queue-snapshot.{service,timer}.in` | Periodic `podman exec … smarthost-queue-snapshot`. |
 | `systemd/smarthost-postfix-logrotate.{service,timer}.in` | Daily `podman exec … smarthost-postfix-logrotate`. |
 | `tests/phase1-verify.sh` | Phase 1 verification suite behind `smarthostctl verify [--clean]`. It runs 22 test groups and writes an evidence log to `infra/.generated/verify/`. The groups cover images, units, clean start, readiness, ports, network isolation, the live-mode guard, nginx→FPM, PostgreSQL roles, mail capture, DKIM, the milter-failure policy, V-1…V-7, the DSN spool, fake SMTP, persistence, stop/start and untouched neighbours. |
-| `tests/phase2-test.sh` | Phase 2 test harness behind `smarthostctl test`. It builds the app `test` image and starts a throwaway pod **without any network** (`--network none`, label `project=smarthost`) with PostgreSQL 16.15. In it, it runs the real role bootstrap, the Doctrine migrations on the empty database, the grants and the reference schema (into a separate database for comparison), then PHPUnit as the application role. Random credentials; the pod is removed afterwards. |
+| `tests/testpod.sh` | Sourced by the Phase 2 and 3 harnesses. It builds the app `test` image and starts a throwaway pod **without any network** (`--network none`, label `project=smarthost`) with PostgreSQL 16.15, then runs the real role bootstrap, the Doctrine migrations on the empty database and the grants. Random credentials; the pod is removed afterwards. |
+| `tests/phase2-test.sh` | Phase 2 harness behind `smarthostctl test phase2`: the test pod, plus the reference schema loaded into a separate database for comparison, then PHPUnit as the application role. |
+| `tests/phase3-test.sh` | Phase 3 harness behind `smarthostctl test phase3`: in the test pod, pytest (unit, database and worker tests as the validator role), then an end-to-end run with the fake DNS and fake SMTP servers: Symfony creates jobs through `/v1` (including 10,000 addresses), the real worker is SIGKILLed mid-job and restarted, and Symfony verifies results, usage and the outbox. Fails if the fake SMTP server ever received `DATA`. `smarthostctl test` runs both harnesses. |
 | `tests/phase1_client.py` | Test client run inside the tool image on the internal network: submission (with queue ID), port-25 DSN injection, Mailpit lookup, cryptographic DKIM verification, fake-SMTP scenarios, PostgreSQL role/privilege probes and inotify watching. |
 | `tests/Containerfile`, `tests/requirements.txt` | Verification tool image (`localhost/smarthost-testtools:dev`): Python with dkimpy, psycopg and inotify_simple. Test-only; never a service. |
 
@@ -223,13 +230,14 @@ Both are gitignored.
 | `app/docker/fpm-healthcheck.sh` | FastCGI ping readiness check. |
 | `app/phase1-probe/db-check.php` | CLI check: connect as the app, webhook or owner role and verify the CREATE privilege boundary (used by the Phase 1 suite). |
 | `app/phase1-probe/webhook-worker.php` | Placeholder long-running worker with a heartbeat and database check. Delivers no webhooks (Phase 7). |
-| `validator/Containerfile` | Python 3.14 slim, unprivileged uid 10001. |
-| `validator/phase1_probe.py` | Heartbeat loop, and `check-db` (the validator role must not be able to create tables). |
-| `validator/requirements-phase1.txt` | Pinned `psycopg[binary]` for the probe. |
+| `validator/Containerfile` | Python 3.14 slim. Stages: `test` (pytest, tests, fake DNS/SMTP, shared vectors) and `runtime` (default; the worker as unprivileged uid 10001). Built from the repository root. |
+| `validator/requirements.txt` | Pinned runtime dependencies: psycopg 3, psycopg-pool, dnspython, idna. `requirements-test.txt`: pytest, pytest-asyncio. |
+| `validator/smarthost_validator/` | The worker (see `validator/README.md`): `__main__` (`run`, `health`, `check-db`, `normalize`), `config`, `worker` (claiming, renewal, chunks, LISTEN/poll), `pipeline`, `normalize` (D-32), `syntax`, `typo` + `typo_data`, `dns_check`, `roles`, `smtp_probe` (never DATA), `limits` (global/domain/MX slots, back-off, accept-all policy), `classify` (rule table), `db` (every SQL statement, fenced), `models`, `logs`. |
+| `validator/tests/` | pytest suites: normalisation vectors, syntax, typos, roles, config, DNS (with a fake DNS server), SMTP (with the fake SMTP server), limits, classification, pipeline, database leases/fencing/metering, worker end to end. `fakes/fake_dns.py` is a deterministic UDP/TCP DNS server driven by a zone file. |
 | `delivery/Containerfile` | Multi-stage Go 1.25 build, then a Debian slim runtime. |
 | `delivery/cmd/smarthost-delivery-probe/main.go` | Probe subcommands: `serve`, `identity`, `check-db`, `check-observability` (reads the log and snapshots; proves it cannot write), and `check-spool [--claim]` (atomic rename claim; proves a second claim fails). |
 | `delivery/go.mod`, `go.sum` | Module definition; the only dependency is pgx v5. |
-| `tests/fake-smtp/fake_smtp.py` | Stdlib asyncio SMTP server whose reply is chosen by the recipient prefix (`reject-550`, `tempfail-450/451`, `unavailable-421`, `timeout`, otherwise accept). DATA is discarded. |
+| `tests/fake-smtp/fake_smtp.py` | Stdlib asyncio SMTP server whose reply is chosen by the recipient prefix (`reject-550`, `tempfail-450/451`, `unavailable-421`, `timeout`, otherwise accept) plus the validator scenarios: `accept-all`/`block-all` domain labels and `throttle-421`, `block-554` and accept-all-probe local parts. It logs every command as JSON so tests can prove `DATA` never arrives; DATA is discarded. |
 | `tests/fake-smtp/Containerfile` | Python 3.14 slim, uid 10003. |
 
 ### `app/`: the Symfony application (Phase 2)
@@ -251,9 +259,9 @@ Both are gitignored.
 | `src/Enum/` | The 32 vocabularies of `status-vocabulary.yaml` as PHP enums. |
 | `src/Security/` | `ApiKeyManager` (raw key `shk_…`, 256 bits, shown once; SHA-256 stored), `ApiKeyAuthenticator` (Bearer; revoked keys and closed clients rejected; last-used tracking; failure rate limit), `ApiClientUser`, dashboard user provider and checker, login listener, `ClientVoter`. |
 | `src/Tenant/` | `TenantScope` (the only way API code loads tenant resources; foreign = missing), `TenantFilter` (Doctrine SQL filter, deny-by-default per table), and the listener that enables it for the authenticated client. |
-| `src/Api/` | RFC 9457 problems and their renderer, exception mapping for `/v1`, body-size and per-key rate limits, `OpenApiContract` (validates requests against the normative OpenAPI), `JsonRequest`, `RequestHasher` (canonical idempotency hash), `IdempotencyKey`, `Cursor`, `Presenter`. |
+| `src/Api/` | `WorkPermission` (D-31: 403 for work-creating operations of `pending_approval`/`suspended` clients), RFC 9457 problems and their renderer, exception mapping for `/v1`, body-size and per-key rate limits, `OpenApiContract` (validates requests against the normative OpenAPI), `JsonRequest`, `RequestHasher` (canonical idempotency hash), `IdempotencyKey`, `Cursor`, `Presenter`. |
 | `src/Idempotency/IdempotencyLock.php` | Transaction-scoped advisory lock that turns a concurrent retry into 409. |
-| `src/Validation/ValidationJobService.php` | Creates the job and its pending address rows; validates nothing. |
+| `src/Validation/ValidationJobService.php` | Creates the job and its pending address rows and wakes the validator with `pg_notify`; validates nothing. |
 | `src/Sending/` | `SendJobService` (create, batch, submit with row locking), `AddressNormalizer` (D-18), `RecipientContent` (size and SHA-256 fingerprint kept after purge). |
 | `src/Domain/` | `SendingDomainService` (registration, TXT verification, re-checks, enable/disable, DKIM status) and the DNS TXT resolver boundary. |
 | `src/Crypto/Keyring.php` | `APP_ENCRYPTION_KEYS` keyring (libsodium secretbox, purpose-bound). |
@@ -263,10 +271,11 @@ Both are gitignored.
 | `src/Command/` | `smarthost:client:*`, `smarthost:api-key:*`, `smarthost:user:*`, `smarthost:membership:set`, `smarthost:domain:*`, `smarthost:webhook:*`, `smarthost:dev:bootstrap`. |
 | `src/Controller/` | `/v1` controllers (validation jobs, send jobs, messages, `webhooks/test` = 501), `/healthz`, minimal `/dashboard` login. |
 | `src/Logging/ContractFormatter.php` | `ts`, `level`, `service`, `msg` plus context. |
-| `tests/Unit/` | D-18 normalisation, request hashing, keyring, configuration rules, log format. |
+| `tests/Unit/` | D-18 normalisation (including the shared D-32 vectors), request hashing, keyring, configuration rules, log format. |
 | `tests/Contract/` | `/v1` routes equal the OpenAPI operations; OpenAPI enums equal the PHP enums. |
 | `tests/Schema/` | Reference-schema equivalence, migration up/down/up, ORM mapping vs database, vocabulary CHECKs, the grant matrix parsed from `schema.md`, least privilege, critical constraints. |
-| `tests/Integration/` | Authentication, tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit. Every response is validated against the OpenAPI contract. |
+| `tests/Integration/` | Authentication, client status (D-31), tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit. Every response is validated against the OpenAPI contract. |
+| `tests/Phase3/e2e.php` | Phase 3 end-to-end driver (`prepare`, `verify`): creates jobs through `/v1` and checks results, counters, usage and the outbox after the worker run. |
 | `tests/Support/`, `tests/bin/request.php` | Test base class, direct database connections, catalog comparison, DNS stub, and the concurrent-request worker. |
 
 ### `scripts/`
@@ -345,7 +354,7 @@ sequenceDiagram
     W->>C: signed webhook send.completed
 ```
 
-### 3.3 Validation workflow (target behaviour, Phase 3)
+### 3.3 Validation workflow (Phase 3)
 
 ```mermaid
 flowchart LR

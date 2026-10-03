@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.1). Every enum value used in the database, the /v1 API,
+# (specification 2.2). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -16,7 +16,7 @@
 # Doctrine migration without ALTER TYPE.
 
 vocabulary_version: "2.1.0"
-specification_version: "2.1"
+specification_version: "2.2"
 
 # ---------------------------------------------------------------------------
 # Jobs

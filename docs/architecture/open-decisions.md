@@ -2,7 +2,7 @@
 
 **This file is a log, not a source of architectural authority.** Every approved decision has been
 incorporated into the canonical specification (`docs/20260908-1644-smarthost-llm-spec.yaml`,
-version 2.1, `revision_history`) and its normative contracts. If this log and the specification
+version 2.2, `revision_history`) and its normative contracts. If this log and the specification
 ever differ, the specification wins.
 
 ## 1. Decisions (all resolved, 2026-10-02)
@@ -41,6 +41,15 @@ ever differ, the specification wins.
 | Spec version | 2.1, dated 2026-10-02. This is a documentation revision, not a software version. | `project`, `revision_history` |
 | Compliance gate | Consent-dependent live sending is gated on the operator's approved compliance specification. Technical and Mailpit work may proceed. | `compliance.live_sending_compliance_gate` |
 
+### Decisions after Phase 2 (resolved 2026-10-03, incorporated in spec 2.2)
+
+| ID | Decision | Incorporated in spec 2.2 |
+|---|---|---|
+| D-31 | Only `active` and `throttled` clients may create or add work. `POST /v1/validation-jobs`, `POST /v1/send-jobs`, recipient batches and submit answer 403 for `pending_approval` and `suspended` clients, which can still authenticate and read. Closed clients fail authentication. Workers claim only active/throttled clients' work and stop when a suspension becomes effective during a lease. | `api.authentication.client_status_rule`, `sending.throttling_and_suspension`, `validation.work_claiming`, OpenAPI 403 responses |
+| D-32 | The D-18 normalisation rule is exact: ASCII-whitespace trim, split at the final `@`, local part byte-for-byte, ASCII domain lower-cased, non-ASCII domain to A-labels via UTS #46 non-transitional processing, no normalised form on failure. Shared vectors: `docs/contracts/address-normalization-vectors.json` (PHP, Python, and Go from Phase 4). | `suppression_and_reputation.address_matching.exact_rule`, `normative_contracts` |
+| D-33 | The Python validator meters validation usage: one `validation_address` unit per address that transitions to `done`, in the same transaction as the fenced result; aggregation per job and transaction is allowed; nothing is metered for unprocessed addresses, lost leases, reclaims or retries. | `validation.usage_metering` |
+| D-34 | An idempotent replay guarantees no repeated side effect, the same resource, status code and Location, and `Idempotent-Replayed: true`; resource-creation bodies may show the current representation (no stored responses); a recipient-batch replay reproduces its original result. | `api.idempotency.semantics`, OpenAPI `IdempotencyKey` |
+
 ## 2. Implementation choices made while incorporating the decisions
 
 These follow from the decisions above and are recorded in the specification or contracts. They
@@ -78,13 +87,37 @@ listed for review.
 | A replay returns the original status code and headers with the resource's **current** representation (no response bodies are stored). A recipient-batch replay reproduces the original body exactly (running total at that time). | `app/src/Validation`, `app/src/Sending` |
 | Request bodies are validated against the normative OpenAPI document itself (copied into the image), so the API cannot drift from the contract; unknown fields such as `client_id`, `headers`, `merge_data` or `template_reference` are 422 with a JSON pointer. A non-JSON media type is 400; a malformed resource id is 404, like a foreign one. | `app/src/Api/OpenApiContract.php` |
 | Recipient addresses must be structurally usable in an SMTP envelope (host-name domain with at least two labels; local part ≤ 64 octets without whitespace or control characters); subjects, names, list ids and references must not contain control characters (header injection). Deliverability is still never judged. | `app/src/Sending` |
-| Client status: keys of a `closed` client are rejected (401); send-job **creation** is 403 for `pending_approval`, `suspended` and `closed` (OpenAPI Forbidden). Batches, submit and validation jobs are not blocked by client status, because the contract declares no 403 for them (see D-31). | `app/src/Security`, `app/src/Sending` |
+| Client status (superseded by D-31 in 2.2): Phase 2 blocked only send-job creation; since D-31 all four work-creating operations answer 403 for `pending_approval` and `suspended` clients (`App\Api\WorkPermission`). | `app/src/Api/WorkPermission.php` |
 | Failed API authentication is limited to 30 per minute per client IP (a code constant; there is no contract variable for it). The per-key limit uses `APP_API_RATE_LIMIT_PER_MINUTE`. Limiter state is local to the PHP-FPM container. | `app/config/packages/framework.yaml` |
 | `smarthost:dev:bootstrap` marks the development domain verified without DNS and DKIM active (selector `phase1`); it refuses unless `SMARTHOST_ENV` is `development` or `test`. | `app/src/Command/DevBootstrapCommand.php` |
 | Memberships can be added and re-roled but not removed: the grant matrix gives `smarthost_app` no DELETE on `client_memberships`. | `docs/schema/schema.md` §6 |
 | Webhook endpoint URLs must be https (http only in development/test); `webhook.test` is not subscribable. Signing secrets are `whsec_` + 256-bit base64url, sealed with libsodium secretbox bound to the endpoint id. | `app/src/Webhook` |
 | `APP_ENCRYPTION_KEYS` and `APP_WEBHOOK_SECRET_OVERLAP_HOURS` are first needed in Phase 2 (endpoint/secret model), not Phase 7. | environment contract |
 | 12 `meaning` texts in `status-vocabulary.yaml` contained unquoted commas inside YAML flow mappings, which silently truncated them (and Symfony's YAML parser rejects them). They are now quoted; no value changed. | vocabulary |
+
+### Phase 3 implementation choices
+
+Made while implementing the Python validator within specification 2.2. None changes the
+architecture; they are listed for review. Details: `validator/README.md`.
+
+| Choice | Where |
+|---|---|
+| D-32 in Python implements UTS #46 non-transitional processing explicitly on the `idna` package's mapping table, because `idna.encode()` applies IDNA2008 rules that disagree with PHP/ICU. Both languages pass the same 87 vectors. | `validator/smarthost_validator/normalize.py` |
+| Internationalised local parts (RFC 6531) are valid syntax. They are probed only when the server offers SMTPUTF8; otherwise `smtp_status = inconclusive` (`smtp.smtputf8_unsupported`). | `syntax.py`, `smtp_probe.py` |
+| Address-literal domains (`user@[192.0.2.1]`) are valid syntax but are not looked up or probed; the result is `unknown`, low confidence. | `pipeline.py`, `classify.py` |
+| Probes do not negotiate STARTTLS. A server that insists on it yields a non-accepted result (`blocked`/`inconclusive`), never `rejected`. | `smtp_probe.py` |
+| No live probing outside production: with `SMARTHOST_ENV` other than `production`, `VALIDATOR_SMTP_PROBE_ENABLED=true` requires `VALIDATOR_SMTP_ROUTE_OVERRIDE`; in production the override must be empty. The worker refuses to start otherwise. | `config.py`, environment contract |
+| With probing disabled, an address with usable DNS is `probably_deliverable` with low confidence (`smtp.skipped`). | `classify.py` (rule table in the docstring) |
+| Accept-all detection: at most one probe per domain per 24 hours (verdict cached per worker) and at most one per second per worker; other addresses of the domain wait for the verdict. An accept-all domain is `risky`, never `deliverable`. | `limits.py`, `classify.py` |
+| Provider back-off: 421, 4.7.x, 5.7.x and policy wording put the MX into an exponential cool-down; affected addresses are rescheduled, and exhaustion during a cool-down is `temporarily_unverifiable`. | `limits.py`, `pipeline.py` |
+| A probe takes its domain slot, then its MX slot, then a global slot, so a skewed job waits on its provider without holding global slots. | `limits.py` |
+| Disposable detection matches the domain or any parent domain in `disposable_domains`. | `db.py` |
+| Typo edit-distance matching uses only provider domains of at least 9 characters (short ones such as `aol.com` are too close to unrelated real domains). | `typo.py` |
+| Symfony wakes the validator with `pg_notify('smarthost_validation_work', <job id>)` in the job-creation transaction; the validator `LISTEN`s and also polls, so a lost notification only delays work. | conventions, `ValidationJobService`, `worker.py` |
+| `claimed_by` is `<VALIDATOR_WORKER_ID>/<random instance id>`, so a restarted process never treats its predecessor's leases as its own. | `worker.py` |
+| The validator's outbox insert is a plain `INSERT` made after winning the job's status transition: `ON CONFLICT` would need SELECT on `webhook_events`, which the role lacks. Python inserts the `validation.completed`/`validation.failed` outbox row only; HTTP delivery remains the Symfony webhook worker's (Phase 7). | conventions, `db.py` |
+| A job that can never complete (fewer address rows than `total_addresses`) becomes `failed`, with `validation.failed` in the outbox and the reason in `audit_log`. | `db.py` |
+| Development pod DNS has no Internet route, so real domains classify as `undeliverable` (NXDOMAIN) in the development pod. Meaningful validation tests use the fake DNS server of `smarthostctl test phase3`. | `validator/README.md` |
 
 ## 3. Verification tasks (not architecture decisions)
 
@@ -108,9 +141,5 @@ None of them required an architectural change.
 | ID | Topic | Blocks |
 |---|---|---|
 | D-30 | Whether automatically created suppressions (hard bounce, complaint, repeated soft bounce) are client-scoped or global. The schema supports both. | Phase 5 only |
-| D-31 | Whether client status (`pending_approval`, `suspended`) should also block validation-job creation, recipient batches and submit. The OpenAPI contract declares 403 only for send-job creation; workers already must not claim work of suspended clients. | Phase 3 (validation jobs of suspended clients) |
-| D-32 | Confirm the D-18 IDNA rule above (UTS #46 non-transitional A-labels) before Python implements normalisation, ideally with a shared cross-language test-vector file. | Phase 3 |
-| D-33 | When `usage_records(validation_address)` is written: at job creation (Symfony) or per processed address (Python). Both roles hold INSERT. | Phase 3 |
-| D-34 | Whether an idempotent replay must return the byte-identical original response (requires storing response bodies, a schema change) or the current representation as implemented. | Not blocking |
 
-None blocks Phase 2.
+D-31 to D-34 were resolved on 2026-10-03 (see §1). No remaining decision blocks Phase 4.

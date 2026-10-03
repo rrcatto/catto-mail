@@ -1,17 +1,22 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.3
-  summary: Email validation and tracked delivery API (specification 2.1 contract).
+  version: 1.0.0-draft.4
+  summary: Email validation and tracked delivery API (specification 2.2 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.1), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.2), which wins on
     any conflict. Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
 
     ## Conventions
     * The client (tenant) is always derived from the API key. No request carries
       or overrides a `client_id`. Resources owned by another client return `404`.
+    * Only `active` and `throttled` clients may create or add work. The
+      work-creating operations (create validation job, create send job, add
+      recipients, submit) return `403` for `pending_approval` and `suspended`
+      clients, which can still read their resources. Keys of `closed` clients
+      fail authentication (`401`).
     * Identifiers are UUIDv7 strings. Timestamps are RFC 3339 in UTC (`Z`).
     * JSON field names are `snake_case`. Errors use RFC 9457
       `application/problem+json`.
@@ -90,6 +95,7 @@ paths:
               schema: {$ref: '#/components/schemas/ValidationJob'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/IdempotencyInProgress'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '422': {$ref: '#/components/responses/UnprocessableEntity'}
@@ -200,6 +206,7 @@ paths:
               schema: {$ref: '#/components/schemas/RecipientBatchResult'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
@@ -228,6 +235,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SendJob'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/UnprocessableEntity'}
@@ -388,7 +396,10 @@ components:
       description: URL of the created resource.
       schema: {type: string, format: uri-reference}
     IdempotentReplayed:
-      description: Present with value `true` when the response replays an earlier request with the same Idempotency-Key.
+      description: >-
+        Present with value `true` when the response replays an earlier request with
+        the same Idempotency-Key: no side effect was repeated, and the status code,
+        Location and resource identity are those of the original operation.
       schema: {type: string, enum: ['true']}
     RetryAfter:
       description: Seconds to wait before retrying.
@@ -402,9 +413,13 @@ components:
       description: >-
         Client-generated unique key (a UUID is recommended), scoped to the
         client and to the endpoint (and, for recipient batches, to the send
-        job). Same key + same body replays the original response. Same key +
-        different body returns 422. Same key while the first request is still
-        being processed returns 409.
+        job). Same key + same body is a replay: no repeated side effect, the same
+        resource, the same status code and Location, and `Idempotent-Replayed:
+        true`. For resource creation the body is the resource's current
+        representation (response bodies are not stored); a recipient-batch replay
+        reproduces its original result, including the running total at that time.
+        Same key + different body returns 422. Same key while the first request is
+        still being processed returns 409.
       schema: {type: string, minLength: 8, maxLength: 255, pattern: '^[\x21-\x7E]+$'}
     ResourceId:
       name: id
@@ -435,7 +450,10 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
     Forbidden:
-      description: Client is not permitted to perform this action (e.g. suspended or pending approval).
+      description: >-
+        The client may not create or add work in its current status
+        (`pending_approval` or `suspended`); only `active` and `throttled` clients
+        may. Reads remain available.
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}

@@ -1,2 +1,0 @@
-# Phase 1 probe dependency only; the Phase 3 validator defines its own requirements.
-psycopg[binary]==3.2.10

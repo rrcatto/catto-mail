@@ -1,5 +1,5 @@
 [Unit]
-Description=Smarthost Python validator (Phase 1 probe process; unprivileged)
+Description=Smarthost Python validation worker (unprivileged; no public API)
 PartOf=smarthost.target
 Wants=smarthost-db-grants.service
 After=smarthost-db-grants.service
@@ -10,8 +10,8 @@ Image=localhost/smarthost-validator:dev
 Pull=never
 Pod=smarthost.pod
 EnvironmentFile=@GENERATED@/env/validator.env
-HealthCmd=python /opt/smarthost/phase1_probe.py check-db
-HealthInterval=60s
+HealthCmd=python -m smarthost_validator health
+HealthInterval=30s
 HealthStartPeriod=20s
 HealthRetries=3
 

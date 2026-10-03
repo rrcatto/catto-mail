@@ -44,8 +44,13 @@ class Client
     public function setStatus(ClientStatus $status): void { $this->status = $status; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 
-    /** Clients that may create new sending work (OpenAPI Forbidden: "suspended or pending approval"). */
-    public function maySend(): bool
+    /**
+     * D-31: only active and throttled clients may create or add resource-consuming
+     * work (validation jobs, send jobs, recipient batches, submit). Pending-approval
+     * and suspended clients still authenticate and read; closed clients cannot
+     * authenticate at all.
+     */
+    public function mayCreateWork(): bool
     {
         return \in_array($this->status, [ClientStatus::Active, ClientStatus::Throttled], true);
     }

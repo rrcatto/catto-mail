@@ -83,6 +83,9 @@ for u in smarthost.target smarthost-{postgres,db-bootstrap,db-migrate,db-grants,
   st="$("$CTL" systemctl show -p LoadState --value "$u")"
   [[ "$st" == loaded ]] && pass "unit loaded: $u" || fail "unit loaded: $u ($st)"
 done
+wants="$("$CTL" systemctl show -p Wants --value default.target)"
+[[ " $wants " == *" smarthost.target "* ]] && pass "smarthost.target starts at boot (default.target wants it)" \
+  || fail "smarthost.target starts at boot (default.target wants: $wants)"
 
 if $CLEAN; then
   section "T03 clean state (disposable Smarthost data only)"
@@ -189,7 +192,7 @@ out="$(podman run --rm --network smarthost-internal --env-file "$GEN/env/bootstr
 expect "Symfony app role (in-container probe)" podman exec smarthost-symfony-app php /srv/probe/db-check.php app
 expect "Symfony webhook role (in-container probe)" podman exec smarthost-webhook-worker php /srv/probe/db-check.php webhook
 expect "owner role can create tables (migrations role)" podman exec smarthost-symfony-app php /srv/probe/db-check.php owner
-expect "validator role (in-container probe)" podman exec smarthost-validator python /opt/smarthost/phase1_probe.py check-db
+expect "validator role (in-container probe)" podman exec smarthost-validator python -m smarthost_validator check-db
 expect "delivery role (in-container probe)" podman exec smarthost-delivery smarthost-delivery-probe check-db
 pgip="$(podman inspect smarthost-infra --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
 out="$(podman run --rm --network podman --entrypoint python "$TOOLS" -c "import socket

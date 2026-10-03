@@ -6,6 +6,7 @@ namespace App\Validation;
 
 use App\Api\ApiProblem;
 use App\Api\IdempotencyKey;
+use App\Api\WorkPermission;
 use App\Entity\Client;
 use App\Entity\ValidationJob;
 use App\Idempotency\IdempotencyLock;
@@ -14,14 +15,17 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Creates validation jobs (POST /v1/validation-jobs). Phase 2 only creates the
+ * Creates validation jobs (POST /v1/validation-jobs). Symfony only creates the
  * work: one `queued` job and one `pending` validation_addresses row per submitted
- * address, in submission order (ids are monotonic UUIDv7). Nothing here validates
- * an address; the Python validator (Phase 3) claims the rows.
+ * address, in submission order (ids are monotonic UUIDv7), and wakes the Python
+ * validator with NOTIFY (delivered at commit; the validator also polls). Nothing
+ * here validates an address or meters usage (D-33: the validator meters on completion).
  */
 final class ValidationJobService
 {
     private const INSERT_CHUNK = 1000;
+    /** Wake-up channel of the validator (docs/architecture/conventions.md, Database access). */
+    public const NOTIFY_CHANNEL = 'smarthost_validation_work';
 
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -38,6 +42,8 @@ final class ValidationJobService
      */
     public function create(Client $client, IdempotencyKey $key, string $requestHash, array $data): array
     {
+        WorkPermission::assertMayCreateWork($client);
+
         return $this->em->wrapInTransaction(function () use ($client, $key, $requestHash, $data): array {
             if (!$this->lock->tryAcquire('validation-jobs|'.$client->getId()->toRfc4122().'|'.$key->value)) {
                 throw ApiProblem::idempotencyInProgress();
@@ -51,6 +57,8 @@ final class ValidationJobService
             $this->em->persist($job);
             $this->em->flush();
             $this->insertAddresses($job->getId(), $data['addresses']);
+            $this->connection->executeStatement('SELECT pg_notify(:channel, :job)',
+                ['channel' => self::NOTIFY_CHANNEL, 'job' => $job->getId()->toRfc4122()]);
 
             return [$job, false];
         });

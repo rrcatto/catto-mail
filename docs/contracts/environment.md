@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.1 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.2 · **Template:** [`infra/.env.example`](../../infra/.env.example)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -138,10 +138,10 @@ secret has a value in the template, and that safety switches default to safe val
 | `VALIDATOR_MAX_ATTEMPTS` | validator | no | 3 | `4` | Attempts allowed before an address is finalised as `temporarily_unverifiable`. |
 | `VALIDATOR_RETRY_BASE_SECONDS` | validator | no | 3 | `300` | Base for exponential backoff. |
 | `VALIDATOR_RETRY_MAX_SECONDS` | validator | no | 3 | `7200` | Backoff ceiling. |
-| `VALIDATOR_DNS_RESOLVERS` | validator | no | 3 | | Comma-separated resolver IPs. Empty means the system resolver. |
+| `VALIDATOR_DNS_RESOLVERS` | validator | no | 3 | | Comma-separated resolver IP addresses (port 53). Empty means the system resolver. |
 | `VALIDATOR_DNS_TIMEOUT_SECONDS` | validator | no | 3 | `5` | |
 | `VALIDATOR_SMTP_PROBE_ENABLED` | validator | no | 3 | `false` | Master switch for RCPT probing. |
-| `VALIDATOR_SMTP_ROUTE_OVERRIDE` | validator | no | 3 | `fake-smtp:2525` | Development/test only. When set, every probe connects here. Must be empty in production. |
+| `VALIDATOR_SMTP_ROUTE_OVERRIDE` | validator | no | 3 | `fake-smtp:2525` | Development/test only. When set, every probe connects here (`host:port`). Must be empty in production. Outside production, `VALIDATOR_SMTP_PROBE_ENABLED=true` requires it, so development and test never probe real mail servers. |
 | `VALIDATOR_SMTP_HELO_HOSTNAME` | validator | no | 3 | `validator.smarthost.localhost` | EHLO name. |
 | `VALIDATOR_SMTP_MAIL_FROM` | validator | no | 3 | `validator@bounce.smarthost.localhost` | Envelope sender for probes. |
 | `VALIDATOR_SMTP_CONNECT_TIMEOUT_SECONDS` | validator | no | 3 | `10` | |

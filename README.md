@@ -4,7 +4,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 **bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
 start, so it can later serve third-party clients as a SaaS.
 
-**Version:** 0.1.2 · **Status:** Phases 0, 1 and 2 complete
+**Version:** 0.1.3 · **Status:** Phases 0, 1, 2 and 3 complete
 
 ---
 
@@ -49,11 +49,11 @@ Kubernetes and no message broker: PostgreSQL is the only coordination medium.
 
 ```
 app/              Symfony 8.1 application (PHP-FPM): /v1 API, entities, migrations, auth
-validator/        Python validator image (Phase 1 probe)
+validator/        Python validation worker: leased claiming, DNS/SMTP evidence, classification (never DATA)
 delivery/         Go delivery image (Phase 1 probe)
 postfix/          Postfix image: capture/live safety switch, DSN spool, snapshots
 opendkim/         OpenDKIM milter image and disposable dev-key tool
-infra/            Quadlet templates (smarthost pod), systemd timers, nginx, DB bootstrap, smarthostctl, verification suite
+infra/            Quadlet templates (smarthost pod), systemd timers, nginx, DB bootstrap, smarthostctl, test suites
 tests/fake-smtp/  Deterministic fake SMTP server
 docs/             Specifications, contracts, architecture, schema, API
 scripts/          Contract consistency checker
@@ -66,7 +66,7 @@ The full file-by-file description and workflow diagrams are in
 
 | Start here | Purpose |
 |---|---|
-| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.1) |
+| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.2) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
 | [docs/development-environment.md](docs/development-environment.md) | Running the Podman environment, the application and the test suites |
@@ -86,7 +86,7 @@ infra/bin/smarthostctl dkim-dev-key # disposable dev DKIM key (OpenDKIM volume o
 infra/bin/smarthostctl start        # start the whole topology
 infra/bin/smarthostctl status
 infra/bin/smarthostctl verify       # Phase 1 verification suite
-infra/bin/smarthostctl test         # Phase 2 test suite (throwaway, network-less pod)
+infra/bin/smarthostctl test         # Phase 2 and 3 test suites (throwaway, network-less pods)
 infra/bin/smarthostctl console smarthost:dev:bootstrap   # dev client + API key (shown once)
 ```
 
@@ -107,10 +107,11 @@ python3 scripts/check-contracts.py
 
 | Phase | Status |
 |---|---|
-| 0: Architecture and contracts | **Complete** (specification 2.1) |
-| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 166/166 checks. |
-| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test`: 156/156 tests pass. |
-| 3–10 | Not started |
+| 0: Architecture and contracts | **Complete** (specification 2.2) |
+| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 167/167 checks. |
+| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 163/163 tests pass. |
+| 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 295 pytest tests and the 10,000-address end-to-end run pass. |
+| 4–10 | Not started |
 
 See [CHANGELOG.md](CHANGELOG.md).
 

@@ -2,7 +2,61 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.1.
+the *specification* version, which is 2.2.
+
+## [0.1.3] - 2026-10-04
+
+Phase 3 complete: Python validation engine.
+
+### Added
+- `validator/`: the asynchronous Python 3.14 validation worker replaces the Phase 1 probe. It claims
+  addresses under leases (`FOR UPDATE SKIP LOCKED`, renewal, fencing, reclaim), and runs D-32
+  normalisation, syntax analysis, typo suggestions, DNS/MX/Null-MX/fallback analysis, disposable and
+  role flags, SMTP RCPT probing (never `DATA`), accept-all detection and a deterministic classifier.
+  It records evidence, maintains job counters and status, writes `validation.completed` /
+  `validation.failed` to the transactional `webhook_events` outbox (no HTTP delivery), and meters
+  usage per D-33. Global, per-domain and per-MX concurrency limits, provider back-off and bounded
+  exponential retries are enforced. Runtime dependencies: psycopg 3.3.6, psycopg-pool 3.3.3,
+  dnspython 2.8.0, idna 3.20.
+- `docs/contracts/address-normalization-vectors.json`: 87 shared D-32 vectors, tested by PHP and
+  Python (and by Go from Phase 4).
+- `App\Api\WorkPermission` (D-31) and `ClientStatusTest`.
+- Phase 3 test harness (`infra/tests/phase3-test.sh`, `smarthostctl test phase3`) with a
+  deterministic fake DNS server, extended fake SMTP scenarios (accept-all, probe blocking,
+  throttling) and a command log; `infra/tests/testpod.sh` is the throwaway test pod shared with
+  Phase 2.
+- `smarthost.target` starts at boot (linked into `default.target.wants` by `smarthostctl install`),
+  so the `smarthost` pod comes up whenever the Podman machine starts.
+
+### Changed
+- Specification 2.2 incorporates D-31 (work-creating operations are 403 for `pending_approval` and
+  `suspended` clients; workers claim only active/throttled clients' work), D-32 (exact
+  normalisation rule and shared vectors), D-33 (validation usage metered by the validator per
+  address that reaches `done`) and D-34 (idempotent-replay semantics without stored response
+  bodies). OpenAPI `1.0.0-draft.4` declares the new 403 responses. The decisions are marked
+  resolved in the decision log, which also lists the Phase 3 implementation choices.
+- Validation-job creation wakes the validator with `pg_notify`; the validator also polls.
+- `app/composer.json` requires `ext-intl` (used by `AddressNormalizer`); both app image stages run
+  `composer check-platform-reqs`.
+- The validator image builds from the repository root (stages `test` and `runtime`); its unit's
+  health check reports the worker heartbeat.
+
+### Fixed
+- The Doctrine tenant filter is reset at the start of every main request, so a long-lived kernel
+  never carries one client's filter into the next request's authentication.
+
+### Verified
+- `smarthostctl test phase3`: 295 pytest tests pass. End to end: the 10,000-address job completed
+  (`processed_count` 10,000; classification counts total 10,000; usage quantity 10,000; exactly one
+  `validation.completed` outbox row per job). The worker was killed with SIGKILL after 3,710
+  addresses and a restarted worker finished after the leases expired, with no duplicate result or
+  usage. Limits held (per domain 2/2, per MX 2/2, global 7/20; claim size 250); peak worker RSS
+  about 52 MiB. The fake SMTP server received EHLO, MAIL, RCPT and QUIT, and no `DATA`.
+- `smarthostctl test phase2`: 163 tests and 1,578 assertions pass (unit 37, contract 2, schema 33,
+  integration 91).
+- `smarthostctl verify --clean`: 167/167 checks.
+- Contract checks 1873/1873; OpenAPI 3.1 valid; yamllint clean; shellcheck clean at warning
+  severity; `composer validate --strict` and `composer check-platform-reqs` pass.
 
 ## [0.1.2] - 2026-10-03
 

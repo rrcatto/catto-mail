@@ -30,17 +30,18 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
 
 FROM tools AS test
 COPY app/composer.json app/composer.lock app/symfony.lock /srv/app/
-RUN composer install --no-scripts --no-autoloader --prefer-dist
+RUN composer install --no-scripts --no-autoloader --prefer-dist && composer check-platform-reqs
 COPY app/ /srv/app/
 COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
 # Test-only copies of the schema contracts (structural-equivalence and grant tests).
-COPY docs/schema/reference-schema.sql docs/schema/schema.md /srv/app/tests/contracts/
+COPY docs/schema/reference-schema.sql docs/schema/schema.md docs/contracts/address-normalization-vectors.json /srv/app/tests/contracts/
 RUN composer dump-autoload --optimize && mkdir -p var && chown -R www-data:www-data var
 
 FROM tools AS vendor
 COPY app/composer.json app/composer.lock app/symfony.lock /srv/app/
-RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+# Fails the build if the runtime image lacks a required PHP extension (e.g. ext-intl).
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist && composer check-platform-reqs --no-dev
 COPY app/ /srv/app/
 RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 

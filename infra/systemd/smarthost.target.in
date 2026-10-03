@@ -1,5 +1,11 @@
 # Groups every Smarthost unit: start/stop/restart the whole topology at once.
 # Each Quadlet unit has PartOf=smarthost.target and WantedBy=smarthost.target.
+# `smarthostctl install` links this target into default.target.wants, so the
+# topology starts whenever the engine host's user manager starts (Podman machine
+# boot, with lingering). Quadlet removes containers and the pod when they stop.
 [Unit]
 Description=Smarthost development topology
 Wants=smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer
+
+[Install]
+WantedBy=default.target

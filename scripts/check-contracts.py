@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smarthost contract consistency check (specification 2.1).
+"""Smarthost contract consistency check (specification 2.2).
 
 Cross-checks the canonical YAML specification, the human specification and the
 normative contract files so they cannot drift silently:
@@ -22,6 +22,7 @@ Requires Python 3.10+ and PyYAML.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -48,8 +49,10 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.1"
-EXPECTED_SPEC_DATE = "2026-10-02"
+EXPECTED_SPEC_VERSION = "2.2"
+EXPECTED_SPEC_DATE = "2026-10-03"
+# Decisions that must be incorporated across the revision history (D-30 is still open).
+EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 35)} - {"D-30"}
 
 # vocabulary key -> path of the enumerating list in the spec
 SPEC_LISTS = {
@@ -192,11 +195,33 @@ def check_spec_metadata(spec: dict) -> None:
     history = spec.get("revision_history", [])
     latest = next((h for h in history if h.get("version") == EXPECTED_SPEC_VERSION), {})
     check(bool(latest), "spec: revision_history lacks the current version")
-    expected = {f"D-{n:02d}" for n in range(1, 30)}
-    missing = sorted(expected - set(latest.get("decisions_incorporated", [])))
-    check(not missing, f"spec: revision {EXPECTED_SPEC_VERSION} missing decisions {missing}")
+    incorporated = {d for h in history for d in h.get("decisions_incorporated", [])}
+    missing = sorted(EXPECTED_DECISIONS - incorporated)
+    check(not missing, f"spec: revision history missing decisions {missing}")
     for name, rel in spec["instruction_for_llm"]["normative_contracts"].items():
         check((ROOT / rel).is_file(), f"spec: normative contract '{name}' missing at {rel}")
+
+
+def check_normalization_vectors(spec: dict) -> None:
+    """D-32: the shared vector contract is well formed (implementations test the values)."""
+    rel = spec["instruction_for_llm"]["normative_contracts"].get("address_normalization_vectors")
+    check(rel is not None, "spec: address_normalization_vectors contract not listed")
+    if rel is None or not (ROOT / rel).is_file():
+        return
+    data = json.loads((ROOT / rel).read_text(encoding="utf-8"))
+    vectors = data.get("vectors", [])
+    check(len(vectors) >= 50, "vectors: fewer than 50 address-normalisation vectors")
+    inputs = [v.get("input") for v in vectors]
+    check(len(inputs) == len(set(inputs)), "vectors: duplicate inputs")
+    for v in vectors:
+        ok = isinstance(v.get("input"), str) and (v.get("normalized") is None or isinstance(v.get("normalized"), str)) \
+            and isinstance(v.get("note"), str) and set(v) == {"input", "normalized", "note"}
+        check(ok, f"vectors: malformed vector {v!r}")
+        n = v.get("normalized")
+        if isinstance(n, str) and "@" in n:
+            local, domain = n.rsplit("@", 1)
+            check(domain == domain.lower() and domain.isascii(), f"vectors: domain not lower-case ASCII in {n!r}")
+            check(local in v["input"], f"vectors: local part not preserved byte-for-byte in {n!r}")
 
 
 def check_vocabulary(spec: dict, vocab: dict) -> None:
@@ -404,8 +429,8 @@ def check_environment(spec: dict, api: dict, env_md: str, env_example: str) -> N
 
 # ---------------------------------------------------------------------------
 def check_human_spec(spec: dict, vocab: dict, human: str) -> None:
-    check(re.search(r"\*\*Specification version:\*\*\s*2\.1\b", human) is not None,
-          "human spec: version 2.1 not declared")
+    check(re.search(r"\*\*Specification version:\*\*\s*" + re.escape(EXPECTED_SPEC_VERSION) + r"\b", human) is not None,
+          f"human spec: version {EXPECTED_SPEC_VERSION} not declared")
     for topic in HUMAN_REQUIRED_TOPICS:
         check(topic.lower() in human.lower(), f"human spec: topic '{topic}' not covered")
     flat = re.sub(r" +", " ", human)
@@ -448,6 +473,7 @@ def main() -> int:
     human = HUMAN.read_text(encoding="utf-8")
 
     check_spec_metadata(spec)
+    check_normalization_vectors(spec)
     check_vocabulary(spec, vocab)
     check_openapi(spec, vocab, api)
     check_licence(api)

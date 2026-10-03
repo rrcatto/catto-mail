@@ -16,13 +16,19 @@ case "$action" in
         rm -f "$QUADLET_DIR"/smarthost-* "$UNIT_DIR"/smarthost.target "$UNIT_DIR"/smarthost-*
         cp "$GENERATED"/quadlet/* "$QUADLET_DIR"/
         cp "$GENERATED"/systemd/* "$UNIT_DIR"/
+        # Start the topology with the user manager (machine boot). This is what
+        # `systemctl --user enable` would do, but that writes to the root-owned
+        # ~/.config/systemd/user; .wants directories on any unit path count.
+        mkdir -p "$UNIT_DIR"/default.target.wants
+        ln -sfn ../smarthost.target "$UNIT_DIR"/default.target.wants/smarthost.target
         out="$(/usr/libexec/podman/quadlet -dryrun -user 2>&1 >/dev/null)" || { echo "$out" >&2; exit 1; }
         systemctl --user daemon-reload
-        echo "installed $(ls "$GENERATED"/quadlet | wc -l) Quadlet files and $(ls "$GENERATED"/systemd | wc -l) systemd units"
+        echo "installed $(ls "$GENERATED"/quadlet | wc -l) Quadlet files and $(ls "$GENERATED"/systemd | wc -l) systemd units (smarthost.target starts at boot)"
         ;;
     uninstall)
         systemctl --user stop smarthost.target 2>/dev/null || true
-        rm -f "$QUADLET_DIR"/smarthost-* "$UNIT_DIR"/smarthost.target "$UNIT_DIR"/smarthost-*
+        rm -f "$QUADLET_DIR"/smarthost-* "$UNIT_DIR"/smarthost.target "$UNIT_DIR"/smarthost-* \
+            "$UNIT_DIR"/default.target.wants/smarthost.target
         systemctl --user daemon-reload
         ;;
     quadlet-dryrun) /usr/libexec/podman/quadlet -dryrun -user ;;

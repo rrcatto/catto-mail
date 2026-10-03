@@ -1,0 +1,449 @@
+{
+  "contract": "D-32 address normalisation test vectors (specification 2.2)",
+  "description": "Language-neutral vectors for the single Smarthost address-normalisation rule (docs/architecture/conventions.md, Email addresses). PHP (app/tests/Unit/AddressNormalizerVectorsTest.php) and Python (validator/tests/test_normalize.py) consume this file unchanged; Go must use it from Phase 4. Expected values were produced by the approved PHP/ICU implementation. normalized = null means there is no normalised address. Normalisation is not validation: syntactically invalid addresses can still have a normalised form.",
+  "rule": [
+    "trim surrounding ASCII whitespace only: SP, HT, LF, VT, FF, CR",
+    "split at the final @; local part and domain must both be non-empty",
+    "preserve the local part byte-for-byte; never case-fold it",
+    "lower-case an all-ASCII domain (ASCII lower-casing only, no other processing)",
+    "convert a domain containing non-ASCII to A-labels with UTS #46 non-transitional processing (CheckHyphens, CheckBidi, CheckJoiners, no STD3 rules, DNS length limits) and lower-case the result",
+    "a failed conversion means there is no normalised address"
+  ],
+  "vectors": [
+    {
+      "input": " John@Example.COM",
+      "normalized": "John@example.com",
+      "note": "surrounding ASCII whitespace trimmed; ASCII domain lower-cased; local part kept"
+    },
+    {
+      "input": "John@example.com",
+      "normalized": "John@example.com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "john@example.com",
+      "normalized": "john@example.com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "\tA@B.EXAMPLE\r\n",
+      "normalized": "A@b.example",
+      "note": "surrounding ASCII whitespace trimmed; ASCII domain lower-cased; local part kept"
+    },
+    {
+      "input": "\u000b\fx@Y.Example\u000b",
+      "normalized": "x@y.example",
+      "note": "surrounding ASCII whitespace trimmed; ASCII domain lower-cased; local part kept"
+    },
+    {
+      "input": "\u00a0x@example.com",
+      "normalized": "\u00a0x@example.com",
+      "note": "non-ASCII whitespace is NOT trimmed (only SP HT LF VT FF CR)"
+    },
+    {
+      "input": "\u2003x@example.com",
+      "normalized": "\u2003x@example.com",
+      "note": "non-ASCII whitespace is NOT trimmed (only SP HT LF VT FF CR)"
+    },
+    {
+      "input": "user@B\u00fccher.Example",
+      "normalized": "user@xn--bcher-kva.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@xn--bcher-kva.example",
+      "normalized": "user@xn--bcher-kva.example",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "user@XN--BCHER-KVA.example",
+      "normalized": "user@xn--bcher-kva.example",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "user@fa\u00df.de",
+      "normalized": "user@xn--fa-hia.de",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@FA\u00df.DE",
+      "normalized": "user@xn--fa-hia.de",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u03b5\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac.gr",
+      "normalized": "user@xn--hxargifdar.gr",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u4f8b\u3048.\u30c6\u30b9\u30c8",
+      "normalized": "user@xn--r8jz45g.xn--zckzah",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\uff45\uff58\uff41\uff4d\uff50\uff4c\uff45.com",
+      "normalized": "user@example.com",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@example\u3002com",
+      "normalized": "user@example.com",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u2764.example",
+      "normalized": "user@xn--qei.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u00e9xample.com.",
+      "normalized": "user@xn--xample-9ua.com.",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@-bad\u00e9.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "user@\u05d0\u05d1.example",
+      "normalized": "user@xn--4dbc.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@a\u05d0.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "user@a\u200cb.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "user@\u0628\u200c\u0628.example",
+      "normalized": "user@xn--ngba799q.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u0915\u094d\u200d.example",
+      "normalized": "user@xn--11b6iy14e.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@xn--a.example",
+      "normalized": "user@xn--a.example",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "user@ab--cd\u00e9.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "user@\u0301abc.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "J\u00f6hn@B\u00fccher.Example",
+      "normalized": "J\u00f6hn@xn--bcher-kva.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": " J\u00f6hn@B\u00fccher.Example ",
+      "normalized": "J\u00f6hn@xn--bcher-kva.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "\"a@b\"@Example.com",
+      "normalized": "\"a@b\"@example.com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "a@b@Example.COM",
+      "normalized": "a@b@example.com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "@example.com",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "john@",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "john",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "   ",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "a@",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "user@exa mple.com",
+      "normalized": "user@exa mple.com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "User+Tag@Sub.Example.Org",
+      "normalized": "User+Tag@sub.example.org",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "user@EXAMPLE..com",
+      "normalized": "user@example..com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "user@sch\u00f6n\u00b7.example",
+      "normalized": "user@xn--schn-8ha09a.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@l\u00b7l.example",
+      "normalized": "user@xn--ll-0ea.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u0661\u06f1.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "user@ab\u00ad.example",
+      "normalized": "user@ab.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\ufb01.example",
+      "normalized": "user@fi.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u0130.example",
+      "normalized": "user@xn--i-9bb.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@\u212a.example",
+      "normalized": "user@k.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "user@",
+      "normalized": null,
+      "note": "no \"@\" with non-empty local part and domain: no normalised form"
+    },
+    {
+      "input": "u@\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.\u00e9.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9.xn--bcher-kva.example",
+      "normalized": "u@xn--9ca.xn--bcher-kva.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9.xn--zz--.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9.XN--BCHER-KVA.example",
+      "normalized": "u@xn--9ca.xn--bcher-kva.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9..com",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9.com..",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@.\u00e9.com",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9",
+      "normalized": "u@xn--9ca",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00c9XAMPLE.COM",
+      "normalized": "u@xn--xample-9ua.com",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@example.\u00c7OM",
+      "normalized": "u@example.xn--om-3ia",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u05e2\u05d1\u05e8\u05d9\u05ea.example",
+      "normalized": "u@xn--5dbqzzl.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u05e2\u05d1\u05e8\u05d9\u05ea1.example",
+      "normalized": "u@xn--1-1hcy8a5an.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@1\u05e2\u05d1\u05e8\u05d9\u05ea.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u05e2\u05d1\u05e8\u05d9\u05ea.\u05e7\u05d5\u05dd",
+      "normalized": "u@xn--5dbqzzl.xn--9dbq2a",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@a.\u05e2\u05d1\u05e8\u05d9\u05ea",
+      "normalized": "u@a.xn--5dbqzzl",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@ab-\u00ea.example",
+      "normalized": "u@xn--ab--hma.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u0660\u0661.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@x\u200d.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u0915\u094d\u200cx.example",
+      "normalized": "u@xn--x-tud2ow90g.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9_x.example",
+      "normalized": "u@xn--_x-9ia.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9 x.example",
+      "normalized": "u@xn-- x-9ia.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9@x.example",
+      "normalized": "u@\u00e9@x.example",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "u@\u2488.example",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u24b6.example",
+      "normalized": "u@a.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "\u00dcn\u00efcode.Local@Example.com",
+      "normalized": "\u00dcn\u00efcode.Local@example.com",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "mixed@\u00dc.Example",
+      "normalized": "mixed@xn--tda.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u3002",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    },
+    {
+      "input": "u@\u00e9\u3002com",
+      "normalized": "u@xn--9ca.com",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9\uff0ecom",
+      "normalized": "u@xn--9ca.com",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9\uff61com",
+      "normalized": "u@xn--9ca.com",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\ud83d\ude00.example",
+      "normalized": "u@xn--e28h.example",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@xn--fa-hia.de",
+      "normalized": "u@xn--fa-hia.de",
+      "note": "ASCII domain lower-cased (no IDNA processing, no other checks); local part byte-for-byte"
+    },
+    {
+      "input": "u@\u00e9.xn--fa-hia.de",
+      "normalized": "u@xn--9ca.xn--fa-hia.de",
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels"
+    },
+    {
+      "input": "u@\u00e9.xn--ss-.de",
+      "normalized": null,
+      "note": "non-ASCII domain: UTS #46 non-transitional to A-labels fails: no normalised form"
+    }
+  ]
+}

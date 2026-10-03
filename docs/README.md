@@ -2,10 +2,10 @@
 
 | Document | Purpose |
 |---|---|
-| `20260908-1644-smarthost-llm-spec.yaml` | **Authoritative** specification (version 2.1, 2026-10-02) |
-| `20260908-1644-smarthost-human-specification.md` | Human-readable companion to the spec (version 2.1) |
+| `20260908-1644-smarthost-llm-spec.yaml` | **Authoritative** specification (version 2.2, 2026-10-03) |
+| `20260908-1644-smarthost-human-specification.md` | Human-readable companion to the spec (version 2.2) |
 | `PROJECT.md` | Directory structure, purpose of every file, workflow diagrams |
-| `development-environment.md` | Rootless Podman environment: usage, pod topology, ports, volumes, mail safety, established facts, the Phase 1 verification suite and the Phase 2 application and test suite |
+| `development-environment.md` | Rootless Podman environment: usage, pod topology, ports, volumes, mail safety, established facts, the Phase 1 verification suite, the Phase 2 application and test suite, and the Phase 3 validator test suite |
 | `architecture/overview.md` | One-page map of contracts, services, flows and state machines (summary only) |
 | `architecture/conventions.md` | Cross-language development conventions |
 | `architecture/open-decisions.md` | Decision log only (not authority) |

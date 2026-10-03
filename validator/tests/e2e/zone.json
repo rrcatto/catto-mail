@@ -1,0 +1,21 @@
+{
+  "records": {
+    "example.test": {"MX": [[10, "mx.example.test"]]}, "mx.example.test": {"A": ["192.0.2.10"]},
+    "second.test": {"MX": [[10, "mx.second.test"]]}, "mx.second.test": {"A": ["192.0.2.11"]},
+    "multi.test": {"MX": [[20, "mx2.multi.test"], [10, "mx1.multi.test"]]}, "mx1.multi.test": {"A": ["192.0.2.12"]},
+    "mx2.multi.test": {"AAAA": ["2001:db8::12"]},
+    "accept-all.test": {"MX": [[10, "mx.accept-all.test"]]}, "mx.accept-all.test": {"A": ["192.0.2.13"]},
+    "block-all.test": {"MX": [[10, "mx.block-all.test"]]}, "mx.block-all.test": {"A": ["192.0.2.14"]},
+    "throttle.test": {"MX": [[10, "mx.throttle.test"]]}, "mx.throttle.test": {"A": ["192.0.2.15"]},
+    "nullmx.test": {"MX": [[0, "."]]},
+    "fallback.test": {"A": ["192.0.2.16"]},
+    "nohost.test": {"TXT": ["v=spf1 -all"]},
+    "tempmail.test": {"MX": [[10, "mx.tempmail.test"]]}, "mx.tempmail.test": {"A": ["192.0.2.17"]},
+    "gmial.com": {"MX": [[10, "mx.gmial.com"]]}, "mx.gmial.com": {"A": ["192.0.2.18"]},
+    "xn--bcher-kva.test": {"MX": [[10, "mx.xn--bcher-kva.test"]]}, "mx.xn--bcher-kva.test": {"A": ["192.0.2.19"]},
+    "bigmail.test": {"MX": [[10, "mx1.bigmail.test"], [20, "mx2.bigmail.test"]]},
+    "mx1.bigmail.test": {"A": ["192.0.2.20"]}, "mx2.bigmail.test": {"A": ["192.0.2.21"]},
+    "second-big.test": {"MX": [[10, "mx.second-big.test"]]}, "mx.second-big.test": {"A": ["192.0.2.22"]}
+  },
+  "servfail": ["servfail.test"]
+}

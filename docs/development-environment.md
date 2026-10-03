@@ -1,8 +1,8 @@
 # Development Environment
 
-**Status:** Phases 1 and 2 (database and Symfony foundation) complete.
-`smarthostctl verify --clean` passes all 166 checks starting from destroyed volumes (§6), and
-`smarthostctl test` passes the Phase 2 suite (§7).
+**Status:** Phases 1, 2 and 3 (Python validation engine) complete.
+`smarthostctl verify --clean` passes all 167 checks starting from destroyed volumes (§6), and
+`smarthostctl test` passes the Phase 2 and Phase 3 suites (§7).
 
 ## 1. Requirements
 
@@ -24,6 +24,16 @@ PID 1 is WSL's `/init`; systemd runs in a nested namespace.
   `~/.config/systemd/user` is root-owned.
 - The repository must be on a path visible to the machine. `/mnt/wsl/...` is shared between WSL
   distributions.
+- **Start at boot.** `smarthost.target` is wanted by `default.target` through a link in
+  `~/.local/share/systemd/user/default.target.wants/` (`systemctl --user enable` would write to the
+  root-owned directory, and `is-enabled` therefore reports `disabled`). With lingering, the user
+  manager starts when the machine starts (for example from Podman Desktop), and the `smarthost` pod
+  and its containers come up with it.
+- **Quadlet containers are not kept when stopped.** Stopping a unit removes its container, and
+  stopping the pod removes the pod; the next start recreates them from the units. Data lives in the
+  `smarthost-*` volumes. Start and stop the topology with `smarthostctl` rather than with Podman
+  Desktop's buttons, which bypass systemd (the unit then removes or restarts the container on its
+  own terms).
 
 ## 2. Lifecycle
 
@@ -50,16 +60,16 @@ flowchart TD
 | `smarthostctl render` | Writes one env file per consumer (least privilege, following the contract's *Consumers* column) and renders the Quadlet and systemd templates into `infra/.generated/`. Rejects any variable that is not in the contract. |
 | `smarthostctl build` | Builds the seven Smarthost images (`localhost/smarthost-*:dev`). |
 | `smarthostctl secrets` | Creates disposable self-signed TLS certificates for Postfix and nginx as Podman secrets. |
-| `smarthostctl install` | Renders the files, installs them, runs the Quadlet dry-run and reloads systemd. |
+| `smarthostctl install` | Renders the files, installs them, links `smarthost.target` into `default.target.wants` (so the topology starts at boot), runs the Quadlet dry-run and reloads systemd. |
 | `smarthostctl dkim-dev-key [domain selector]` | Generates a dev DKIM key inside the OpenDKIM volume, creating the volume with its project label if needed. The default is `smarthost-dev.test` / `phase1`. |
 | `smarthostctl start` | Starts `smarthost.target`. It returns once every service reports healthy (`Notify=healthy`). |
 | `smarthostctl stop`, `restart` | Stop the target, its timers, every member service and the pod by name. `systemctl stop smarthost.target` alone returns before PartOf-propagated stops finish, so naming the members makes stop deterministic. `restart` is a stop followed by a start. |
 | `smarthostctl status [unit]`, `logs <unit> [n]` | Show unit status and the unit's journal. |
 | `smarthostctl systemctl <args>` | Pass-through to `systemctl --user` on the engine host. |
-| `smarthostctl uninstall` | Stops the services and removes the units. Volumes are kept. |
+| `smarthostctl uninstall` | Stops the services and removes the units and the boot link. Volumes are kept. |
 | `smarthostctl destroy-volumes --yes` | Deletes the six Smarthost volumes by name. Nothing else is touched. |
 | `smarthostctl verify [--clean]` | Runs the Phase 1 verification suite (§6). `--clean` first destroys the Smarthost volumes and network to prove a clean-state start. |
-| `smarthostctl test [phpunit args]` | Runs the Phase 2 test suite in a throwaway, network-less pod (§7). Does not touch the running environment. |
+| `smarthostctl test [phase2\|phase3] [args]` | Runs the Phase 2 (PHPUnit) and/or Phase 3 (pytest + end to end) suites in throwaway, network-less pods (§7); without a phase, both. Does not touch the running environment. |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
 | `smarthostctl migrate` | Re-runs the migration oneshot and then the grants oneshot (after pulling new migrations into a rebuilt image). |
 
@@ -170,7 +180,7 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 
 | Group | Proves |
 |---|---|
-| T01–T02 | All images build; render/install passes the Quadlet dry-run; every unit loads |
+| T01–T02 | All images build; render/install passes the Quadlet dry-run; every unit loads; `default.target` wants `smarthost.target` (start at boot) |
 | T03–T04 | Clean-state start; all 10 services healthy; bootstrap, migration and grant oneshots succeeded; timers active |
 | T05–T06 | Every service is a pod member sharing the pod network namespace; only the pod publishes ports (nginx HTTPS and the Mailpit UI, both on loopback); the pod sits only on the `Internal=true` network; no Internet egress |
 | T07 | The live-mode guard refuses every unsafe combination; a pod member cannot relay through port 25 via `127.0.0.1` |
@@ -186,9 +196,9 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 | T21 | Contract checks pass |
 | T22 | Containers of other Podman projects are unchanged |
 
-The latest clean-state run (after Phase 2) passed all 166 checks.
+The latest clean-state run (after Phase 3) passed all 167 checks.
 
-## 7. Phase 2: the Symfony application
+## 7. The Symfony application and the test suites
 
 ### Start-up order
 
@@ -218,22 +228,30 @@ curl -sk https://127.0.0.1:8443/v1/send-jobs -H "Authorization: Bearer $K" \
 
 Other administration (clients, keys, users, memberships, sending domains, webhook endpoints) is
 done with the `smarthost:*` console commands (`console list smarthost`), never through undocumented
-API endpoints. Submitted jobs stay `queued` until the Go delivery daemon exists (Phase 4); Phase 2
-never creates messages or talks to Postfix.
+API endpoints. Submitted send jobs stay `queued` until the Go delivery daemon exists (Phase 4);
+nothing creates messages or talks to Postfix yet. Validation jobs are processed by the Python
+validator (Phase 3). The development pod has no Internet route, so real domains classify as
+`undeliverable` (NXDOMAIN) there; meaningful validation results come from the fake DNS/SMTP
+scenarios of `smarthostctl test phase3`.
 
-### Test suite
+### Test suites
 
 ```sh
-infra/bin/smarthostctl test                        # everything
-infra/bin/smarthostctl test --testsuite schema     # one suite (unit, contract, schema, integration)
+infra/bin/smarthostctl test                                 # Phase 2 and Phase 3 suites
+infra/bin/smarthostctl test phase2                          # PHPUnit only
+infra/bin/smarthostctl test phase2 --testsuite schema       # one suite (unit, contract, schema, integration)
+infra/bin/smarthostctl test phase3                          # pytest + end to end
+infra/bin/smarthostctl test phase3 -k leases                # pytest arguments
 ```
 
-`infra/tests/phase2-test.sh` builds the `test` stage of the app image and starts a throwaway pod
-with **no network at all** (members share only loopback): PostgreSQL 16.15, the real role
-bootstrap, the Doctrine migrations on an **empty** database, the grants, and the reference schema
-loaded into a separate `<db>_reference` database used only for comparison. PHPUnit then runs as the
-least-privilege application role; DNS is stubbed and nothing reaches the Internet. The pod is
-labelled `project=smarthost` and removed afterwards.
+Both harnesses use the throwaway test pod of `infra/tests/testpod.sh`, which has **no network at
+all** (members share only loopback): PostgreSQL 16.15, the real role bootstrap, the Doctrine
+migrations on an **empty** database and the grants. The pod is labelled `project=smarthost` and
+removed afterwards; credentials are random per run.
+
+**Phase 2** (`infra/tests/phase2-test.sh`) also loads the reference schema into a separate
+`<db>_reference` database used only for comparison. PHPUnit then runs as the least-privilege
+application role; DNS is stubbed and nothing reaches the Internet.
 
 | Suite | Proves |
 |---|---|
@@ -242,4 +260,22 @@ labelled `project=smarthost` and removed afterwards.
 | schema | The migrated catalog equals `reference-schema.sql` (tables, columns, defaults, constraints, indexes); migrations up/down/up and per-migration rollback; ORM mapping equals the database; CHECKs equal the vocabulary; grants equal `schema.md` §6; least-privilege behaviour; critical CHECK/UNIQUE/FK behaviour |
 | integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit; every response is validated against the OpenAPI contract |
 
-Latest run: 156 tests and 1,471 assertions, all passing (unit 36, contract 2, schema 33, integration 85).
+Latest run: 163 tests and 1,578 assertions, all passing (unit 37, contract 2, schema 33,
+integration 91). Unit includes the shared D-32 vectors; integration includes the D-31 client-status
+rules.
+
+**Phase 3** (`infra/tests/phase3-test.sh`) builds the validator `test` and `runtime` images, then:
+
+1. **pytest** as the `smarthost_validator` role: unit tests (D-32 vectors, syntax, typos, roles,
+   configuration, DNS, SMTP, limits, classification, pipeline), database tests (claiming, D-31
+   suspension, renewal, expiry and reclaim, fencing, atomic finalisation, D-33 metering under
+   crash/retry/reclaim, outbox, whole-job failure) and worker tests against fake DNS and fake SMTP;
+2. **end to end:** a fake DNS server (`validator/tests/fakes/fake_dns.py`, zone
+   `validator/tests/e2e/zone.json`) and the fake SMTP service join the pod; Symfony creates jobs
+   through `/v1` (a mixed-scenario job, a 10,000-address job and a suspended client's job); the
+   real worker runs, is killed with SIGKILL mid-job and restarted, and Symfony verifies results,
+   counters, usage and the outbox through `/v1` and the database. The harness fails if the fake SMTP
+   server's command log contains `DATA` or `BDAT`. The report is written to
+   `infra/.generated/phase3-e2e-report.json`.
+
+Latest run: 295 pytest tests passed; end to end PASS (details in `CHANGELOG.md`).

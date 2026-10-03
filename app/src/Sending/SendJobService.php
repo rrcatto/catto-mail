@@ -6,6 +6,7 @@ namespace App\Sending;
 
 use App\Api\ApiProblem;
 use App\Api\IdempotencyKey;
+use App\Api\WorkPermission;
 use App\Config\Limits;
 use App\Entity\Client;
 use App\Entity\SendingDomain;
@@ -55,9 +56,7 @@ final class SendJobService
      */
     public function create(Client $client, IdempotencyKey $key, string $requestHash, array $data): array
     {
-        if (!$client->maySend()) {
-            throw ApiProblem::forbidden('This client may not create send jobs in its current status.');
-        }
+        WorkPermission::assertMayCreateWork($client);
 
         return $this->em->wrapInTransaction(function () use ($client, $key, $requestHash, $data): array {
             if (!$this->lock->tryAcquire('send-jobs|'.$client->getId()->toRfc4122().'|'.$key->value)) {
@@ -116,6 +115,7 @@ final class SendJobService
      */
     public function addBatch(SendJob $job, IdempotencyKey $key, string $requestHash, array $data): array
     {
+        WorkPermission::assertMayCreateWork($job->getClient());
         return $this->em->wrapInTransaction(function () use ($job, $key, $requestHash, $data): array {
             if (!$this->lock->tryAcquire('send-job-batches|'.$job->getId()->toRfc4122().'|'.$key->value)) {
                 throw ApiProblem::idempotencyInProgress();
@@ -167,6 +167,7 @@ final class SendJobService
     /** Seal the job (POST /v1/send-jobs/{id}/submit); naturally idempotent. */
     public function submit(SendJob $job): SendJob
     {
+        WorkPermission::assertMayCreateWork($job->getClient());
         return $this->em->wrapInTransaction(function () use ($job): SendJob {
             $this->em->refresh($job, LockMode::PESSIMISTIC_WRITE);
             if ($job->isSealed()) {

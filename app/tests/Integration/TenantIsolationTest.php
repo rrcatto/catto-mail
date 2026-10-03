@@ -142,6 +142,16 @@ final class TenantIsolationTest extends ApiTestCase
         $em->getFilters()->disable('tenant');
     }
 
+    public function testOneKernelServingTwoClientsDoesNotCarryTheFilterOver(): void
+    {
+        [, $a] = $this->newApiClient();
+        [, $b] = $this->newApiClient();
+        $this->browser->disableReboot(); // same kernel and entity manager for both requests
+        self::assertSame(404, $this->api('GET', '/v1/send-jobs/01999999-0000-7000-8000-000000000000', $a)->getStatusCode());
+        self::assertSame(404, $this->api('GET', '/v1/send-jobs/01999999-0000-7000-8000-000000000000', $b)->getStatusCode(),
+            'client B must authenticate although client A filter was active in this kernel');
+    }
+
     public function testWebhookEndpointsAreTenantScoped(): void
     {
         [$aClient, $aKey] = $this->newApiClient();

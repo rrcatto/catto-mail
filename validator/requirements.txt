@@ -1,0 +1,5 @@
+# Runtime dependencies of the validator (pinned; Python 3.14).
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+dnspython==2.8.0
+idna==3.20
