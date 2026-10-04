@@ -86,6 +86,7 @@ async def test_restart_and_reclaim_never_double_count(smtp_server):
     c = cfg(smtp_server, VALIDATOR_LEASE_SECONDS="5")
     # A worker that dies holding leases (it claimed, then never wrote anything).
     import psycopg
+
     from smarthost_validator import db as dbmod
     from tests.db import validator_conninfo
     async with await psycopg.AsyncConnection.connect(validator_conninfo(), autocommit=True) as dead:

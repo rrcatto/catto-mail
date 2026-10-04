@@ -1,7 +1,7 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.2. This is a documentation revision, not a software release version.
-**Revision date:** 3 October 2026 (original: 8 September 2026)
+**Specification version:** 2.3. This is a documentation revision, not a software release version.
+**Revision date:** 4 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
 The canonical, machine-readable specification is `docs/20260908-1644-smarthost-llm-spec.yaml`.
@@ -191,16 +191,31 @@ In development all Smarthost containers run in a single Podman **pod** named `sm
 Smarthost and its client applications should remain independently deployable. In production
 Smarthost runs on its own containerised VPS.
 
-## Quadlet
+## Pod lifecycle and process management
 
-Podman Quadlet/systemd user units should be the primary method of running the Smarthost services.
+The Smarthost pod and its service containers are **persistent rootless Podman objects** (D-35).
+They are created once and then started and stopped like any pod managed with Podman or Podman
+Desktop:
+
+- **create:** create the pod and its containers from the current images and configuration;
+- **start:** start the existing objects; the database role bootstrap, migrations and grants run as
+  ordered one-off steps;
+- **stop:** stop the pod; the pod and its containers stay, shown as stopped/exited;
+- **restart:** stop and start the same objects;
+- **recreate:** deliberately replace the pod and containers after image or definition changes;
+  the named volumes are kept;
+- **destroy volumes:** the only operation that deletes persistent data, explicit and separate.
+
+A systemd user service starts the existing pod when the Podman machine boots and stops it at
+shutdown. It never removes the pod or its containers, so stopping or starting the pod directly
+from Podman or Podman Desktop is equally safe. (Until D-35 the services ran as Quadlet units,
+which delete their containers and pod whenever they stop.)
 
 The environment should support:
 
-- automatic restart on failure;
+- automatic restart on failure (Podman restart policy);
 - controlled startup/shutdown;
-- `systemctl --user status ...`;
-- `journalctl --user ...`;
+- `systemctl --user status smarthost.service` and `podman logs` for the services;
 - persistent Postfix queue storage;
 - persistent PostgreSQL storage;
 - a shared Postfix observability volume (log and queue snapshots) and a shared DSN spool volume;
@@ -1232,7 +1247,7 @@ Build:
 - PostgreSQL with the infrastructure role bootstrap;
 - Mailpit;
 - fake SMTP service;
-- Quadlet units, timers and health checks;
+- the persistent pod definition, systemd user units, timers and health checks;
 - verification of Postfix logging, rotation, queue snapshots and shared-volume ownership.
 
 Exit criteria:
@@ -1398,7 +1413,7 @@ Exit criteria:
 Implement/configure:
 
 - dedicated Smarthost VPS;
-- production Podman/Quadlet deployment;
+- production Podman deployment (persistent pod, systemd user units);
 - SPF;
 - DKIM with production OpenDKIM keys;
 - PTR;
@@ -1493,5 +1508,6 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.3 | 4 October 2026 | Incorporates D-35: a persistent pod lifecycle replaces the Quadlet pod/container units. The pod and containers are created once and then started and stopped as the same objects (also from Podman Desktop); a systemd user service starts the existing pod at boot; only an explicit recreate replaces them, and volume destruction stays separate. |
 | 2.2 | 3 October 2026 | Incorporates D-31 (403 for work creation by pending-approval and suspended clients; workers claim only active or throttled clients' work), D-32 (exact address-normalisation rule with UTS #46 IDNA and shared test vectors), D-33 (validation usage metered by the validator on completion) and D-34 (idempotent-replay semantics). |
 | 2.1 | 2 October 2026 | Incorporates the Phase 0 architecture decisions and resolves the mail-merge, tracking, unsubscribe, send-ingestion, webhook, DKIM and transport-reconciliation contracts. Main changes: fully rendered recipient content from client applications; batched recipient ingestion with `collecting`/`dispatched`/`completed` semantics; random tracking tokens; RFC 8058 one-click unsubscribe for subscription messages; webhook outbox and Symfony worker; nginx with PHP-FPM; OpenDKIM; sending-domain verification; transient rendered content; Postfix reconciliation with `outcome_unknown`; unmatched-DSN resolution; work leasing; event de-duplication; database role bootstrap; the live-sending compliance gate. The unsubscribe-signal event was removed. |

@@ -1,4 +1,4 @@
-# Build context of the Symfony application and Python validator images
+# Build context of the Symfony application, Python validator and Go delivery images
 # (repository root, so that the normative contracts and shared test fixtures can
 # be copied in). Every other image builds from its own directory and is unaffected.
 **
@@ -9,6 +9,7 @@
 !docs/schema/schema.md
 !docs/contracts/address-normalization-vectors.json
 !validator
+!delivery
 !tests/fake-smtp/fake_smtp.py
 app/vendor
 validator/**/__pycache__

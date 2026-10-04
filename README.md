@@ -4,7 +4,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 **bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
 start, so it can later serve third-party clients as a SaaS.
 
-**Version:** 0.1.3 · **Status:** Phases 0, 1, 2 and 3 complete
+**Version:** 0.1.4 · **Status:** Phases 0–4 complete
 
 ---
 
@@ -41,8 +41,10 @@ flowchart LR
     pf -- "log · queue snapshots · DSN Maildir" --> del
 ```
 
-Everything runs under **rootless Podman** with **Quadlet/systemd user units**, in a single pod
-named `smarthost` on an internal network with no Internet route. There is no Docker, no
+Everything runs under **rootless Podman** in a single, persistent pod named `smarthost` on an
+internal network with no Internet route. The pod and its containers are ordinary Podman objects:
+they are created once and then started and stopped (also from Podman Desktop) without being
+removed; a systemd user service starts the pod when the Podman machine boots. There is no Docker, no
 Kubernetes and no message broker: PostgreSQL is the only coordination medium.
 
 ## Repository layout
@@ -50,10 +52,10 @@ Kubernetes and no message broker: PostgreSQL is the only coordination medium.
 ```
 app/              Symfony 8.1 application (PHP-FPM): /v1 API, entities, migrations, auth
 validator/        Python validation worker: leased claiming, DNS/SMTP evidence, classification (never DATA)
-delivery/         Go delivery image (Phase 1 probe)
+delivery/         Go delivery daemon: send jobs -> Postfix, VERP, tracking, MIME, log ingestion, reconciliation
 postfix/          Postfix image: capture/live safety switch, DSN spool, snapshots
 opendkim/         OpenDKIM milter image and disposable dev-key tool
-infra/            Quadlet templates (smarthost pod), systemd timers, nginx, DB bootstrap, smarthostctl, test suites
+infra/            Persistent pod definition, systemd boot service and timers, nginx, DB bootstrap, smarthostctl, test suites
 tests/fake-smtp/  Deterministic fake SMTP server
 docs/             Specifications, contracts, architecture, schema, API
 scripts/          Contract consistency checker
@@ -66,7 +68,7 @@ The full file-by-file description and workflow diagrams are in
 
 | Start here | Purpose |
 |---|---|
-| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.2) |
+| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.3) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
 | [docs/development-environment.md](docs/development-environment.md) | Running the Podman environment, the application and the test suites |
@@ -74,24 +76,30 @@ The full file-by-file description and workflow diagrams are in
 
 ## Quick start (development)
 
-Requirements: rootless Podman 5.1 or later with Quadlet, either on a Linux host or in a Podman
+Requirements: rootless Podman 5.1 or later, either on a Linux host or in a Podman
 machine (WSL is supported), plus Python 3.10 or later.
 
 ```sh
 infra/bin/smarthostctl init-env     # infra/.env with random dev secrets (gitignored)
 infra/bin/smarthostctl build        # build all images
 infra/bin/smarthostctl secrets      # disposable dev TLS certs as Podman secrets
-infra/bin/smarthostctl install      # render + install Quadlet/systemd units
 infra/bin/smarthostctl dkim-dev-key # disposable dev DKIM key (OpenDKIM volume only)
-infra/bin/smarthostctl start        # start the whole topology
-infra/bin/smarthostctl status
+infra/bin/smarthostctl install      # systemd boot service + create the persistent pod and containers
+infra/bin/smarthostctl start        # start the existing pod (ordered: PostgreSQL, DB tasks, services)
+infra/bin/smarthostctl status       # pod and containers (they stay listed when stopped)
 infra/bin/smarthostctl verify       # Phase 1 verification suite
 infra/bin/smarthostctl test         # Phase 2 and 3 test suites (throwaway, network-less pods)
 infra/bin/smarthostctl console smarthost:dev:bootstrap   # dev client + API key (shown once)
 ```
 
+Lifecycle: `stop`, `start` and `restart` keep the same pod and containers (exactly like Podman
+Desktop's Stop/Start buttons). After `build` or a container-definition change, `recreate` replaces
+the pod and containers while keeping every volume. Only `destroy-volumes --yes` deletes data. See
+[docs/development-environment.md](docs/development-environment.md) §2.
+
 The API is then at `https://127.0.0.1:8443/v1` (disposable self-signed certificate). Submitted send
-jobs stay `queued`: the Go delivery daemon arrives in Phase 4.
+jobs are delivered by the Go daemon through Postfix and OpenDKIM to Mailpit
+(`http://127.0.0.1:8026`); their messages' events come from the Postfix log.
 
 Development mail never leaves the machine. Postfix runs in capture mode, relaying everything to
 Mailpit, and every Smarthost container sits on an `Internal=true` Podman network with no route
@@ -107,11 +115,12 @@ python3 scripts/check-contracts.py
 
 | Phase | Status |
 |---|---|
-| 0: Architecture and contracts | **Complete** (specification 2.2) |
-| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 167/167 checks. |
+| 0: Architecture and contracts | **Complete** (specification 2.3) |
+| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify --clean` passes 180/180 checks (including the persistent pod lifecycle). |
 | 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 163/163 tests pass. |
 | 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 295 pytest tests and the 10,000-address end-to-end run pass. |
-| 4–10 | Not started |
+| 4: Go/Postfix delivery pipeline | **Complete.** Leased send-job claiming, exactly-once message creation, suppression lookup, VERP, tracking, MIME and RFC 8058 headers, authenticated submission through OpenDKIM, queue-id capture with content purge and `message_submitted` metering, Postfix log ingestion with persistent cursors, D-27 reconciliation, pacing. `smarthostctl test phase4` (Go unit + PostgreSQL integration) and `test phase4-e2e` (real Postfix/OpenDKIM/Mailpit, crash/restart, 10,000 recipients) pass. |
+| 5–10 | Not started |
 
 See [CHANGELOG.md](CHANGELOG.md).
 

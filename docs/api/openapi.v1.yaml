@@ -2,10 +2,10 @@ openapi: 3.1.0
 info:
   title: Smarthost API
   version: 1.0.0-draft.4
-  summary: Email validation and tracked delivery API (specification 2.2 contract).
+  summary: Email validation and tracked delivery API (specification 2.3 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.2), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.3), which wins on
     any conflict. Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
 

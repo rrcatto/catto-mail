@@ -184,8 +184,8 @@ class Worker:
         async with self.pool.connection() as conn:
             for job_id, results in db.group_by_job(finals).items():
                 out = await db.write_finals(conn, self.owner, results)
-                self.stats.finalised += int(out["written"])  # type: ignore[arg-type]
-                self.stats.lost += len(results) - int(out["written"])  # type: ignore[arg-type]
+                self.stats.finalised += out["written"]
+                self.stats.lost += len(results) - out["written"]
                 if out["completed"]:
                     self.stats.jobs_completed += 1
                     log("info", "validation job completed", job_id=job_id)
@@ -244,7 +244,8 @@ class Worker:
                      JOIN clients c ON c.id = j.client_id
                     WHERE a.processing_state <> 'done' AND j.status IN ('queued', 'processing')
                       AND c.status IN ('active', 'throttled')""")
-            return (await cur.fetchone())[0] == 0  # type: ignore[index]
+            row = await cur.fetchone()
+            return row is not None and row[0] == 0
 
     async def _is_disposable(self, domain: str) -> bool:
         now = time.monotonic()

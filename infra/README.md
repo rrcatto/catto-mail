@@ -1,4 +1,4 @@
-# infra/ — Podman networks, Quadlet units, nginx, database bootstrap, environment templates
+# infra/ — Podman network and persistent pod, systemd units, nginx, database bootstrap, environment templates
 
 - `.env.example` is the safe environment template (no secrets). The normative contract is
   `docs/contracts/environment.md`. Never commit a filled-in copy.
@@ -6,17 +6,22 @@
 Contents (see `docs/PROJECT.md` for every file):
 - **nginx** (the only public HTTP entry), which hands every request to the Symfony front
   controller via FastCGI. The topology is the same in development and production.
-- The `smarthost` pod, the internal network, volumes and Quadlet units, including the separate
-  Symfony webhook-worker unit and the OpenDKIM unit.
-- Systemd timers for Postfix log rotation and Postfix queue snapshots.
+- `podman/smarthost-pod.sh.in`: the single definition of the internal network, the volumes, the
+  persistent `smarthost` pod and its ten service containers (including the separate Symfony
+  webhook worker and OpenDKIM), and the ordered one-off DB tasks. Rendered into
+  `.generated/podman/smarthost-pod.sh`; `bin/smarthostctl` drives it (create, start, stop,
+  recreate, remove). A stop never removes the pod or its containers (D-35).
+- `systemd/`: `smarthost.service`, which starts the existing pod at boot and stops it at shutdown
+  (never removes it), and the timers for Postfix log rotation and queue snapshots.
 - Shared volumes `smarthost-postfix-observability` and `smarthost-dsn-spool`.
 - **Database role bootstrap and grants.** `postgres/bootstrap.sh` creates `smarthost_owner`,
   `smarthost_app`, `smarthost_webhook`, `smarthost_validator` and `smarthost_delivery` over the
-  administrative connection. After the Doctrine migrations (`smarthost-db-migrate`, as the owner),
+  administrative connection. After the Doctrine migrations (task `db-migrate`, as the owner),
   `postgres/grants.sh` applies the grant matrix of `docs/schema/schema.md` §6 exactly
-  (`smarthost-db-grants`). Roles and grants are infrastructure, not Doctrine schema.
+  (task `db-grants`). `smarthostctl start` runs the three tasks in order on every start. Roles and grants are infrastructure, not Doctrine schema.
 - The Phase 1 verification suite (`tests/phase1-verify.sh`), the shared throwaway test pod
-  (`tests/testpod.sh`) and the Phase 2 and Phase 3 test harnesses (`tests/phase2-test.sh`,
-  `tests/phase3-test.sh`).
+  (`tests/testpod.sh`), the Phase 2, 3 and 4 test harnesses (`tests/phase2-test.sh`,
+  `tests/phase3-test.sh`, `tests/phase4-test.sh`) and the Phase 4 end-to-end run against the
+  running pod (`tests/phase4-e2e.sh`, `tests/phase4_e2e.py`).
 
-Rootless Podman with Quadlet/systemd user units only. No Docker and no Kubernetes.
+Rootless Podman with a persistent pod and systemd user units only. No Docker and no Kubernetes.

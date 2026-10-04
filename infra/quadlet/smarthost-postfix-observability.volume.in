@@ -1,4 +1,0 @@
-# Postfix log + queue snapshots (Go: read-only)
-[Volume]
-VolumeName=smarthost-postfix-observability
-Label=project=smarthost

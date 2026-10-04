@@ -1,14 +1,16 @@
 # Development Environment
 
-**Status:** Phases 1, 2 and 3 (Python validation engine) complete.
-`smarthostctl verify --clean` passes all 167 checks starting from destroyed volumes (§6), and
-`smarthostctl test` passes the Phase 2 and Phase 3 suites (§7).
+**Status:** Phases 1–4 complete (Phase 4: Go/Postfix delivery pipeline, v0.1.4).
+`smarthostctl verify --clean` passes all 180 checks starting from destroyed volumes (§6), and
+`smarthostctl test` passes the Phase 2, 3 and 4 suites, and `smarthostctl test phase4-e2e` the
+Phase 4 end-to-end run (§7).
 
 ## 1. Requirements
 
-- Rootless Podman 5.1 or later with Quadlet (needed for `Notify=healthy`). Verified with engine
-  6.0.2 in a WSL Podman machine (Fedora 44) and client `podman-remote` 6.1.1.
-- A systemd user manager on the engine host, with lingering enabled.
+- Rootless Podman 5.1 or later. Verified with engine 6.0.2 in a WSL Podman machine (Fedora 44)
+  and client `podman-remote` 6.1.1.
+- A systemd user manager on the engine host, with lingering enabled and the user's
+  `podman.socket` available (the boot service talks to it).
 - Python 3.10 or later on the workstation (for `infra/lib/smarthost_render.py` and the contract
   checker). `curl` is needed by the verification suite.
 
@@ -17,66 +19,103 @@
 The Podman engine runs inside the `podman-machine-default` WSL distribution. That distribution's
 PID 1 is WSL's `/init`; systemd runs in a nested namespace.
 
-- `smarthostctl` sends systemd/Quadlet operations through `wsl.exe` and the machine's own
-  `/usr/local/bin/enterns`, which is the same mechanism `podman machine ssh` uses.
-- Quadlet files are installed to `~/.config/containers/systemd/`.
-- The target and timers are installed to `~/.local/share/systemd/user/`. In the machine image,
+- `smarthostctl` sends systemd operations through `wsl.exe` and the machine's own
+  `/usr/local/bin/enterns`, which is the same mechanism `podman machine ssh` uses. Container
+  operations use the normal `podman` (remote) CLI.
+- The systemd units are installed to `~/.local/share/systemd/user/`. In the machine image,
   `~/.config/systemd/user` is root-owned.
 - The repository must be on a path visible to the machine. `/mnt/wsl/...` is shared between WSL
   distributions.
-- **Start at boot.** `smarthost.target` is wanted by `default.target` through a link in
+- **Start at boot.** `smarthost.service` is wanted by `default.target` through a link in
   `~/.local/share/systemd/user/default.target.wants/` (`systemctl --user enable` would write to the
   root-owned directory, and `is-enabled` therefore reports `disabled`). With lingering, the user
-  manager starts when the machine starts (for example from Podman Desktop), and the `smarthost` pod
-  and its containers come up with it.
-- **Quadlet containers are not kept when stopped.** Stopping a unit removes its container, and
-  stopping the pod removes the pod; the next start recreates them from the units. Data lives in the
-  `smarthost-*` volumes. Start and stop the topology with `smarthostctl` rather than with Podman
-  Desktop's buttons, which bypass systemd (the unit then removes or restarts the container on its
-  own terms).
+  manager starts when the machine starts (for example from Podman Desktop), and the service starts
+  the existing `smarthost` pod.
 
 ## 2. Lifecycle
+
+The `smarthost` pod and its ten service containers are **persistent Podman objects** (D-35). They
+are created once and then only started and stopped, exactly like a pod you manage in Podman
+Desktop:
+
+| Operation | Command | Pod and containers | Volumes and data |
+|---|---|---|---|
+| create | `smarthostctl install` (if missing) or `create` | created from the current images and configuration | created if missing, never replaced |
+| start | `smarthostctl start`, `podman pod start smarthost`, Podman Desktop *Start* | the same objects start | kept |
+| stop | `smarthostctl stop`, `podman pod stop smarthost`, Podman Desktop *Stop* | stopped and **kept** (`podman pod ps`, `podman ps -a` show them exited) | kept |
+| restart | `smarthostctl restart` | the same objects are stopped and started | kept |
+| recreate | `smarthostctl recreate` | **replaced** (new IDs) from the current images and configuration | kept |
+| remove | `smarthostctl remove` | stopped and removed | kept |
+| destroy volumes | `smarthostctl destroy-volumes --yes` (only after `remove`) | — | **deleted** |
+
+* **Deploying a change.** After `smarthostctl build` (new images) or a change to a container
+  definition (`infra/podman/smarthost-pod.sh.in`, env files), run `smarthostctl recreate`. A plain
+  `restart` deliberately keeps the existing containers and therefore their old image and
+  configuration.
+* **Start order.** `smarthostctl start` (and the boot service) starts PostgreSQL, waits until it is
+  healthy, runs the one-off tasks `db-bootstrap` (roles), `db-migrate` (Doctrine migrations as
+  `smarthost_owner`) and `db-grants` (the `schema.md` §6 matrix) in that order, then starts the
+  whole pod and waits until all ten services are healthy. The tasks are short-lived containers in
+  the pod (`podman run --rm`), not pod members.
+* **Starting from Podman Desktop** (`podman pod start`) starts all members at once and does not run
+  the tasks; that is safe because the database is already initialised and every service retries
+  until PostgreSQL is ready. Run `smarthostctl start` or `migrate` after changing migrations.
+* **Boot and shutdown.** `smarthost.service` (wanted by `default.target`) runs the ordered start at
+  machine boot and `podman pod stop` at shutdown. It never creates or removes objects and has no
+  `ExecStopPost`. It talks to the user's Podman API socket, so containers belong to
+  `podman.service` exactly as when Podman Desktop starts them, and stopping or starting the pod
+  outside systemd does not make the unit interfere.
+* **Restart on failure** is Podman's `--restart on-failure` policy; a deliberate stop is never
+  restarted.
 
 ```mermaid
 flowchart TD
     A[init-env<br/>infra/.env with random dev secrets] --> B[build<br/>7 images]
     B --> C[secrets<br/>dev TLS certs as Podman secrets]
-    C --> D[install<br/>render env files + units, Quadlet dry-run, daemon-reload]
-    D --> E[dkim-dev-key<br/>disposable key in OpenDKIM volume]
-    E --> F[start<br/>smarthost.target<br/>bootstrap → migrate → grants → services]
+    C --> E[dkim-dev-key<br/>disposable key in OpenDKIM volume]
+    E --> D[install<br/>render, systemd units, create pod + containers if missing]
+    D --> F[start<br/>PostgreSQL → bootstrap → migrate → grants → all services healthy]
     F --> V[verify<br/>Phase 1 suite]
     F --> K[console smarthost:dev:bootstrap<br/>dev client, domain, API key]
-    D --> T[test<br/>Phase 2 suite, throwaway pod]
+    D --> T[test<br/>Phase 2/3 suites, throwaway pods]
     F --> G{status / logs}
-    G --> H[restart / stop]
+    G --> H[stop / restart<br/>same objects]
     H --> F
-    G --> I[uninstall<br/>volumes kept]
+    G --> R[recreate<br/>new pod + containers, same volumes]
+    R --> F
+    G --> I[remove<br/>pod + containers removed, volumes kept]
     I --> J[destroy-volumes --yes<br/>data loss]
 ```
 
 | Command | Effect |
 |---|---|
 | `smarthostctl init-env` | Creates `infra/.env` (mode 0600, gitignored) from `infra/.env.example` and fills the secrets with random development values. Never overwrites. |
-| `smarthostctl render` | Writes one env file per consumer (least privilege, following the contract's *Consumers* column) and renders the Quadlet and systemd templates into `infra/.generated/`. Rejects any variable that is not in the contract. |
+| `smarthostctl render` | Writes one env file per consumer (least privilege, following the contract's *Consumers* column) and renders the pod script (`infra/podman/`) and the systemd units (`infra/systemd/`) into `infra/.generated/`. Rejects any variable that is not in the contract. |
 | `smarthostctl build` | Builds the seven Smarthost images (`localhost/smarthost-*:dev`). |
 | `smarthostctl secrets` | Creates disposable self-signed TLS certificates for Postfix and nginx as Podman secrets. |
-| `smarthostctl install` | Renders the files, installs them, links `smarthost.target` into `default.target.wants` (so the topology starts at boot), runs the Quadlet dry-run and reloads systemd. |
+| `smarthostctl install` | Renders the files, installs the systemd units and the boot link (removing the pre-D-35 Quadlet units once), and creates the pod and its containers if they do not exist. It never replaces an existing pod. |
+| `smarthostctl create` | Creates the network and volumes if missing, then the pod and its containers. Fails if the pod exists. |
 | `smarthostctl dkim-dev-key [domain selector]` | Generates a dev DKIM key inside the OpenDKIM volume, creating the volume with its project label if needed. The default is `smarthost-dev.test` / `phase1`. |
-| `smarthostctl start` | Starts `smarthost.target`. It returns once every service reports healthy (`Notify=healthy`). |
-| `smarthostctl stop`, `restart` | Stop the target, its timers, every member service and the pod by name. `systemctl stop smarthost.target` alone returns before PartOf-propagated stops finish, so naming the members makes stop deterministic. `restart` is a stop followed by a start. |
-| `smarthostctl status [unit]`, `logs <unit> [n]` | Show unit status and the unit's journal. |
+| `smarthostctl start` | Ordered start of the existing pod (see above); returns once all ten services are healthy. |
+| `smarthostctl stop` | Stops the pod (`podman pod stop`). The pod and containers are kept. |
+| `smarthostctl restart` | `stop` + `start` of the same objects. |
+| `smarthostctl recreate` | Stops, removes the pod and its containers, creates them again from the current images and configuration, starts them and shows their status. Volumes are never touched. |
+| `smarthostctl remove` | Stops and removes the pod and its containers. Volumes are kept. |
+| `smarthostctl status` | The boot service state, the pod and every container with its ID and status. |
+| `smarthostctl logs <name> [n]` | A container's log (`logs postfix`), or the journal of a unit (`logs smarthost.service`). |
 | `smarthostctl systemctl <args>` | Pass-through to `systemctl --user` on the engine host. |
-| `smarthostctl uninstall` | Stops the services and removes the units and the boot link. Volumes are kept. |
-| `smarthostctl destroy-volumes --yes` | Deletes the six Smarthost volumes by name. Nothing else is touched. |
-| `smarthostctl verify [--clean]` | Runs the Phase 1 verification suite (§6). `--clean` first destroys the Smarthost volumes and network to prove a clean-state start. |
-| `smarthostctl test [phase2\|phase3] [args]` | Runs the Phase 2 (PHPUnit) and/or Phase 3 (pytest + end to end) suites in throwaway, network-less pods (§7); without a phase, both. Does not touch the running environment. |
+| `smarthostctl uninstall` | Removes the systemd units and the boot link. The pod, containers and volumes are untouched. |
+| `smarthostctl destroy-volumes --yes` | Deletes the six Smarthost volumes by name (data loss). Refuses while the pod exists. |
+| `smarthostctl verify [--clean]` | Runs the Phase 1 verification suite (§6). `--clean` first removes the pod and destroys the Smarthost volumes and network to prove a clean-state create and start. |
+| `smarthostctl test [phase2\|phase3\|phase4] [args]` | Runs the Phase 2 (PHPUnit), Phase 3 (pytest + end to end) or Phase 4 (Go unit + PostgreSQL integration) suite in throwaway, network-less pods (§7); without a phase, all three. Does not touch the running environment. |
+| `smarthostctl test phase4-e2e [A B C D E]` | Phase 4 end to end against the **running** pod's Postfix, OpenDKIM and Mailpit (§7). It stops and restarts Smarthost containers only (OpenDKIM, Mailpit, delivery). |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
-| `smarthostctl migrate` | Re-runs the migration oneshot and then the grants oneshot (after pulling new migrations into a rebuilt image). |
+| `smarthostctl migrate` | Runs the `db-migrate` and `db-grants` tasks in the running pod (after `recreate` with a rebuilt app image that brings new migrations, `start` also runs them). |
 
 ## 3. Topology
 
-All Smarthost containers run in one Podman **pod**, `smarthost`, defined in
-`infra/quadlet/smarthost.pod.in`.
+All Smarthost containers run in one Podman **pod**, `smarthost`, defined together with its
+containers in `infra/podman/smarthost-pod.sh.in`.
 
 - **Networking is owned by the pod.** The pod (its infra container `smarthost-infra`) is the only
   thing attached to **`smarthost-internal`** (`Internal=true`, subnet `10.89.20.0/24`).
@@ -89,25 +128,26 @@ All Smarthost containers run in one Podman **pod**, `smarthost`, defined in
 - **Throwaway test clients** from the verification suite run outside the pod on
   `smarthost-internal` and reach the services through the same aliases.
 
-| Unit (`smarthost-…`) | Image | Pod alias | Identity | Readiness check |
+| Container (`smarthost-…`) | Image | Pod alias | Identity | Readiness check |
 |---|---|---|---|---|
-| pod (`smarthost-pod.service`) | infra (`smarthost-infra`) | — | — | — |
+| pod infra (`smarthost-infra`) | infra | — | — | — |
 | postgres | postgres:16.15-trixie | `postgres` | image default | `pg_isready -U … -d …` |
-| db-bootstrap (oneshot) | postgres:16.15-trixie | — | admin connection | exit status |
-| db-migrate (oneshot) | smarthost-app | — | www-data; database role `smarthost_owner` | exit status |
-| db-grants (oneshot) | postgres:16.15-trixie | — | admin connection | exit status |
+| db-bootstrap (task, not a member) | postgres:16.15-trixie | — | admin connection | exit status |
+| db-migrate (task, not a member) | smarthost-app | — | www-data; database role `smarthost_owner` | exit status |
+| db-grants (task, not a member) | postgres:16.15-trixie | — | admin connection | exit status |
 | symfony-app | smarthost-app | `symfony-app` | FPM master root, workers www-data; database role `smarthost_app` | FastCGI `/fpm-ping` |
 | webhook-worker | smarthost-app | — | www-data | heartbeat file |
 | nginx | smarthost-nginx | — | image default | loopback `/nginx-health` |
 | validator | smarthost-validator | — | uid 10001 | database probe |
-| delivery | smarthost-delivery | — | `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID` (5001:5000) | database probe |
+| delivery | smarthost-delivery | — | `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID` (5001:5000) | heartbeat (database reachable) |
 | postfix | smarthost-postfix | `postfix` | root (Postfix drops privileges) | 220 greeting on ports 25 and 587 |
 | opendkim | smarthost-opendkim | `opendkim` | opendkim | port 8891 listening |
 | mailpit | mailpit:v1.31.0 | `mailpit` | image default | `mailpit readyz` |
 | fake-smtp | smarthost-fake-smtp | `fake-smtp` | uid 10003 | 220 greeting |
 
 The timers are `smarthost-postfix-queue-snapshot.timer` (every
-`POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS`) and `smarthost-postfix-logrotate.timer` (daily).
+`POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS`) and `smarthost-postfix-logrotate.timer` (daily). They
+run with `smarthost.service` and do nothing while Postfix is not running.
 
 ### Published host ports (published by the pod; verified with `podman port smarthost-infra`, T05)
 
@@ -119,7 +159,7 @@ The timers are `smarthost-postfix-queue-snapshot.timer` (every
 PostgreSQL, PHP-FPM, OpenDKIM, Postfix, the Python and Go workers, and fake SMTP publish no
 ports. PostgreSQL is unreachable even from other Podman networks.
 
-### Persistent volumes (verified across full container recreation, T19)
+### Persistent volumes (verified across stop/start, restart, Podman-level stop/start and recreate, T19–T23)
 
 | Volume | Mounted by |
 |---|---|
@@ -162,16 +202,17 @@ Three independent layers keep development mail off the Internet:
 | Config file modes | `virtual(8)` runs as the delivery UID and must read the bounce-recipient table, so the entrypoint writes configuration with umask `022`. Only the shared-volume layout uses `027`. The sasldb is explicitly `0640 root:postfix`. |
 | OpenDKIM | 2.11.0. `opendkim-genkey` needs the `openssl` CLI. Dev keys are `0600 opendkim:opendkim` in the keys volume. It signs only mail tagged `ORIGINATING` by the submission service. |
 | PostgreSQL roles | `smarthost_owner` can create tables. `smarthost_app`, `smarthost_webhook`, `smarthost_validator` and `smarthost_delivery` cannot (`permission denied for schema public`). None is superuser, createdb or createrole, and a wrong password is refused. |
-| nginx → PHP-FPM | `/healthz` is served with `sapi=fpm-fcgi`. After a PHP-FPM restart (new container and IP), nginx reaches it again without being restarted, because it resolves the upstream at request time. |
-| `smarthost.target` stop | `systemctl stop smarthost.target` returns before PartOf-propagated stops complete. `smarthostctl stop` names every member, so stop is deterministic. |
-| First-start failure | The one-off network/volume unit failure seen during the very first installation was not reproduced in two clean-state runs that destroyed all volumes and the network. |
+| nginx → PHP-FPM | `/healthz` is served with `sapi=fpm-fcgi`. After a PHP-FPM restart, nginx reaches it again without being restarted, because it resolves the upstream at request time. |
+| Quadlet lifecycle (before D-35) | Quadlet's generated units run containers with `--rm` and remove the pod in `ExecStopPost`, so every stop (including a machine shutdown) deleted the pod and its containers. The persistent pod replaced them. |
+| Stop signals | The php-fpm base image sets `STOPSIGNAL SIGQUIT`, which the PHP webhook worker running as PID 1 ignores; its container uses `--stop-signal SIGTERM`. The fake SMTP server (Python, PID 1, no SIGTERM handler) runs with `--init`. Without these, every pod stop waited 30 s for SIGKILL. |
+| Containers started by the boot service | A unit that runs the local `podman` CLI leaves each container's `conmon` in the unit's cgroup (its journal fills with container output, and a failed unit would kill them). `smarthost.service` therefore uses the user's Podman API socket (`CONTAINER_HOST`), like Podman Desktop, plus `KillMode=process`. |
 | Postfix V-1…V-7 | See `docs/architecture/postfix-integration.md` §8. |
 
 ## 6. Verification suite
 
 ```sh
 infra/bin/smarthostctl verify          # against the running environment
-infra/bin/smarthostctl verify --clean  # destroy Smarthost volumes/network first (disposable data)
+infra/bin/smarthostctl verify --clean  # remove the pod, destroy Smarthost volumes/network first (disposable data)
 ```
 
 The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
@@ -180,8 +221,8 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 
 | Group | Proves |
 |---|---|
-| T01–T02 | All images build; render/install passes the Quadlet dry-run; every unit loads; `default.target` wants `smarthost.target` (start at boot) |
-| T03–T04 | Clean-state start; all 10 services healthy; bootstrap, migration and grant oneshots succeeded; timers active |
+| T01–T02 | All images build; install loads the boot service and both timers; `default.target` wants `smarthost.service`; no legacy Quadlet unit remains; the service has no `ExecStopPost` and stops with a pod stop; the pod and all 11 containers exist |
+| T03–T04 | Clean-state create and start (with `--clean`); all 10 services healthy; the bootstrap, migration and grant tasks ran in order; timers active |
 | T05–T06 | Every service is a pod member sharing the pod network namespace; only the pod publishes ports (nginx HTTPS and the Mailpit UI, both on loopback); the pod sits only on the `Internal=true` network; no Internet egress |
 | T07 | The live-mode guard refuses every unsafe combination; a pod member cannot relay through port 25 via `127.0.0.1` |
 | T08 | nginx → FastCGI → PHP-FPM (`/healthz`, now served by the Symfony front controller), including after a PHP-FPM restart |
@@ -191,12 +232,15 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 | T13 | OpenDKIM down → 4xx tempfail and no unsigned mail; port 25 unaffected; recovery |
 | T14–T17 | V-1…V-7: snapshots, rotation, DSN spool claim, inotify, shared identity |
 | T18 | Fake SMTP reproduces 250/421/450/451/550, DATA discard and timeout |
-| T19 | Persistence of PostgreSQL, the Postfix queue (held message), the observability log, the DSN spool and the DKIM key across a restart that recreates every container |
-| T20 | Stop leaves nothing running; start returns to healthy |
-| T21 | Contract checks pass |
-| T22 | Containers of other Podman projects are unchanged |
+| T19 | `smarthostctl restart` keeps the same pod ID and all 11 container IDs; PostgreSQL data, a held Postfix message, the DSN spool, the log generation and the DKIM key survive |
+| T20 | `smarthostctl stop` leaves the pod listed by `podman pod ps` and all 11 containers listed by `podman ps -a` as exited; the boot service becomes inactive; `start` reuses the same IDs; data survives |
+| T21 | `podman pod stop`/`start` (what Podman Desktop does): after 20 s stopped, nothing was restarted, removed or recreated; start reuses the same IDs; data survives |
+| T22 | The boot path (`systemctl --user start smarthost.service`) starts the existing pod with the same IDs; the timers run with it |
+| T23 | `smarthostctl recreate` creates a new pod and replaces all 11 containers (no ID survives) while the six volumes stay the same volumes and all data survives |
+| T24 | Contract checks pass |
+| T25 | Containers of other Podman projects are unchanged |
 
-The latest clean-state run (after Phase 3) passed all 167 checks.
+The latest clean-state run (after Phase 4) passed all 180 checks.
 
 ## 7. The Symfony application and the test suites
 
@@ -279,3 +323,25 @@ rules.
    `infra/.generated/phase3-e2e-report.json`.
 
 Latest run: 295 pytest tests passed; end to end PASS (details in `CHANGELOG.md`).
+
+**Phase 4** (`infra/tests/phase4-test.sh`) builds the delivery `test` image (gofmt and go vet run
+during the build), runs the Go unit tests with no network (D-32 vectors, identifiers and VERP,
+MIME and header injection, tracking, SMTP submission outcomes, Postfix log parsing and generations,
+snapshots, pacing, projection, configuration) and then the integration tests in the test pod as
+`smarthost_delivery`, with an in-process submission server and fixture Postfix logs and snapshots.
+
+**Phase 4 end to end** (`infra/tests/phase4-e2e.sh`, `smarthostctl test phase4-e2e`) uses the
+running pod: jobs are created through `/v1`; scenarios A–C run on the pod's own delivery daemon,
+D and E on throwaway worker containers in the pod (20 s lease, test pacing) while the pod's daemon
+is stopped:
+
+| Scenario | Proves |
+|---|---|
+| A | Subscription (tracking, Reply-To) and transactional jobs reach Mailpit with the VERP Return-Path, Message-ID, List-Unsubscribe/-Post/List-Id (subscription only), tracking pixel and rewritten links, an untouched text part, a DKIM signature verified with dkimpy; events, purge, one usage unit per message, summary counts, `send.completed` |
+| B | OpenDKIM stopped: the message stays queued with its content and no usage, nothing reaches Mailpit, the daemon retries; once OpenDKIM is back the message is delivered signed |
+| C | Mailpit stopped: `connection_failure` → deferred, job dispatched not completed; then `delivery_attempt`, `remote_accepted`, completed |
+| D | A worker is killed with SIGKILL mid-job; after its lease expires another worker reclaims it, recovers in-flight submissions from the Postfix log, and finishes; every message reached Postfix exactly once (checked in the log), usage and purge exactly once |
+| E | 10,000 recipients over 50 domains, a log rotation mid-run: exactly-once submission, usage and purge, completion via the log, pacing limits and bounded memory |
+
+Latest runs: Go unit tests (10 packages) and 14 integration tests pass; end to end A–E pass (the
+10,000-recipient job completed in about two minutes with a peak RSS of 25 MiB).

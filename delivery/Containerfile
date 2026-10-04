@@ -1,16 +1,31 @@
-# Smarthost Go delivery runtime (Phase 1: infrastructure probe only).
-FROM docker.io/library/golang:1.25-trixie AS build
-WORKDIR /src
-COPY go.mod go.sum ./
+# Smarthost Go delivery daemon (Phase 4). Build context: the repository root, so
+# the test stage can include the shared D-32 vectors.
+#   deps     Go toolchain + downloaded modules
+#   test     sources + vectors; `go test` runs offline (no network in the test pod)
+#   build    static binary
+#   runtime  (default, last stage) Debian slim with the binary
+FROM docker.io/library/golang:1.26-trixie AS deps
+WORKDIR /src/delivery
+COPY delivery/go.mod delivery/go.sum ./
 RUN go mod download
-COPY cmd/ cmd/
-RUN CGO_ENABLED=0 go build -trimpath -o /out/smarthost-delivery-probe ./cmd/smarthost-delivery-probe
 
-FROM docker.io/library/debian:trixie-slim
+FROM deps AS test
+COPY delivery/ ./
+COPY docs/contracts/address-normalization-vectors.json /contracts/address-normalization-vectors.json
+ENV SMARTHOST_NORMALIZATION_VECTORS=/contracts/address-normalization-vectors.json CGO_ENABLED=0 GOFLAGS=-mod=readonly
+# Pre-compile so offline runs only link; fail the build on formatting or vet findings.
+RUN test -z "$(gofmt -l .)" && go vet ./... && go vet -tags integration ./... && go test -run '^$' ./... && go test -c -tags integration -o /dev/null ./internal/integration
+ENTRYPOINT ["go", "test"]
+
+FROM deps AS build
+COPY delivery/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/smarthost-delivery ./cmd/smarthost-delivery
+
+FROM docker.io/library/debian:trixie-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=build /out/smarthost-delivery-probe /usr/local/bin/smarthost-delivery-probe
-# Runtime identity is set by the Quadlet unit: User=SMARTHOST_DELIVERY_UID,
-# Group/GroupAdd=SMARTHOST_SPOOL_GID. The default below matches .env.example.
+COPY --from=build /out/smarthost-delivery /usr/local/bin/smarthost-delivery
+# Runtime identity is set by the pod definition: SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID.
+# The default below matches .env.example.
 USER 5001:5000
-ENTRYPOINT ["/usr/local/bin/smarthost-delivery-probe"]
-CMD ["serve"]
+ENTRYPOINT ["/usr/local/bin/smarthost-delivery"]
+CMD ["run"]

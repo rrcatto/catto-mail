@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import Counter, defaultdict
+from typing import NotRequired, TypedDict
 
 from psycopg import AsyncConnection
 
@@ -83,14 +84,22 @@ async def renew(conn: AsyncConnection, owner: str, ids: list[str], lease_seconds
         return {r[0] for r in await cur.fetchall()}
 
 
-async def write_finals(conn: AsyncConnection, owner: str, results: list[FinalResult]) -> dict[str, object]:
+class FinalsOutcome(TypedDict):
+    """What write_finals committed for one job."""
+    written: int
+    completed: bool
+    failed: bool
+    ids: NotRequired[set[str]]
+
+
+async def write_finals(conn: AsyncConnection, owner: str, results: list[FinalResult]) -> FinalsOutcome:
     """One job's final results in one transaction. Returns what was written."""
     assert results and len({r.job_id for r in results}) == 1
     job_id, client_id = results[0].job_id, results[0].client_id
     cols = list(zip(*[(r.address_id, r.normalized_address, r.syntax_status, r.domain_status, r.smtp_status, r.is_role,
                        r.is_disposable, r.is_catch_all_or_accept_all, r.is_domain_typo_suspected, r.suggested_address,
                        r.suggestion_reason_code, r.suggestion_confidence, r.overall_classification, r.confidence,
-                       r.diagnostic_code, r.diagnostic_text) for r in results]))
+                       r.diagnostic_code, r.diagnostic_text) for r in results], strict=True))
     async with conn.transaction():
         cur = await conn.execute(
             f"""UPDATE validation_addresses a SET
@@ -111,7 +120,7 @@ async def write_finals(conn: AsyncConnection, owner: str, results: list[FinalRes
                  WHERE a.id = v.id AND {_FENCE}
                 RETURNING a.id::text, a.overall_classification""",
             {**{f"c{i}": list(col) for i, col in enumerate(cols)}, "owner": owner})
-        written = dict(await cur.fetchall())
+        written: dict[str, str] = dict(await cur.fetchall())
         if not written:
             return {"written": 0, "completed": False, "failed": False}
         await _insert_evidence(conn, [(r.address_id, e) for r in results if r.address_id in written for e in r.evidence])

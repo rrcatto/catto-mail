@@ -36,6 +36,9 @@ use Symfony\Component\Uid\Uuid;
  */
 final class SendJobService
 {
+    /** LISTEN channel of the Go delivery daemon (D-03 wake-up hint). */
+    public const NOTIFY_CHANNEL = 'smarthost_send_work';
+
     private const INSERT_CHUNK = 250;
     private const MAX_REPORTED_ERRORS = 100;
 
@@ -206,6 +209,9 @@ final class SendJobService
 
             $job->seal(Clock::now());
             $this->em->flush();
+            // Wake the Go delivery daemon (delivered at commit; it also polls).
+            $this->connection->executeStatement('SELECT pg_notify(:channel, :job)',
+                ['channel' => self::NOTIFY_CHANNEL, 'job' => $job->getId()->toRfc4122()]);
 
             return $job;
         });

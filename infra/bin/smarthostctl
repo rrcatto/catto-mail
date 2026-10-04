@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# smarthostctl — Smarthost Phase 1 rootless Podman development environment.
+# smarthostctl — Smarthost rootless Podman development environment.
 #
-# Container operations use the normal `podman` CLI (local or podman-remote).
-# systemd/Quadlet operations run where the Podman engine's systemd user manager
-# lives: locally on a Linux host, or inside the Podman machine on WSL (entered
-# with the machine's own /usr/local/bin/enterns, as `podman machine ssh` does).
+# The `smarthost` pod and its containers are persistent Podman objects (D-35):
+# created once, then started and stopped like any pod in Podman Desktop. Only
+# `recreate`/`remove` replace them, and only `destroy-volumes --yes` deletes data.
+#
+# Container operations use the normal `podman` CLI (local or podman-remote) and
+# the rendered pod script (infra/.generated/podman/smarthost-pod.sh). systemd
+# operations run where the Podman engine's systemd user manager lives: locally
+# on a Linux host, or inside the Podman machine on WSL (entered with the
+# machine's own /usr/local/bin/enterns, as `podman machine ssh` does).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GEN="$REPO/infra/.generated"
 HELPER="$REPO/infra/bin/smarthost-machine-helper.sh"
+PODSH="$GEN/podman/smarthost-pod.sh"
 RENDER="python3 $REPO/infra/lib/smarthost_render.py"
 IMAGES=(
   "localhost/smarthost-postfix:dev|postfix"
@@ -17,7 +23,7 @@ IMAGES=(
   "localhost/smarthost-app:dev|.|app/Containerfile|runtime"
   "localhost/smarthost-nginx:dev|infra/nginx"
   "localhost/smarthost-validator:dev|.|validator/Containerfile|runtime"
-  "localhost/smarthost-delivery:dev|delivery"
+  "localhost/smarthost-delivery:dev|.|delivery/Containerfile|runtime"
   "localhost/smarthost-fake-smtp:dev|tests/fake-smtp"
 )
 VOLUMES=(smarthost-postgres-data smarthost-postfix-queue smarthost-postfix-observability smarthost-dsn-spool smarthost-opendkim-keys smarthost-opendkim-tables)
@@ -40,16 +46,35 @@ machine() {
   "$wsl" -d "$name" -u "$user" --cd / -- /usr/local/bin/enterns "$HELPER" "$@"
 }
 
-units() { echo smarthost-{postgres,db-bootstrap,db-migrate,db-grants,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service; }
+pod() { [[ -x "$PODSH" ]] || die "$PODSH missing: run 'smarthostctl render' (or install)"; "$PODSH" "$@"; }
+unit_active() { [[ "$(machine systemctl is-active smarthost.service 2>/dev/null)" == active ]]; }
 
-# `systemctl stop smarthost.target` returns once the target's own job is done,
-# while PartOf-propagated stops may still be running (observed in Phase 1). Naming
-# every member (timers, services, pod) makes systemctl wait for all of them.
-stop_all() {
-  local members
-  read -ra members <<<"$(units)"
-  machine systemctl stop smarthost.target smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer \
-    "${members[@]}" smarthost-pod.service
+# start: ordered start of the existing pod (PostgreSQL, DB tasks, all services,
+# health). Through smarthost.service when that unit is inactive, so systemd also
+# stops the pod cleanly at machine shutdown; directly when the unit is already
+# active (the pod was stopped outside systemd, e.g. from Podman Desktop).
+cmd_start() {
+  pod exists || die "pod smarthost does not exist: run 'smarthostctl install' (or 'create')"
+  if unit_active; then
+    pod start
+  elif machine systemctl start smarthost.service; then
+    machine journal -u smarthost.service -n 8 -o cat | grep 'smarthost-pod:' | tail -n 3 || true
+  else
+    machine journal -u smarthost.service -n 40 -o cat >&2; die "start failed"
+  fi
+}
+
+# stop: `podman pod stop` through the unit's ExecStop, then directly in case the
+# pod was started outside systemd. Never removes anything.
+cmd_stop() {
+  machine systemctl stop smarthost.service smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer 2>/dev/null || true
+  pod stop
+}
+
+cmd_status() {
+  echo "smarthost.service: $(machine systemctl is-active smarthost.service 2>/dev/null || true) (boot: $(machine systemctl show -p WantedBy --value smarthost.service 2>/dev/null))"
+  podman pod ps --filter name='^smarthost$' --format 'pod {{.Name}} {{.Id}} {{.Status}}'
+  podman ps -a --filter pod=smarthost --format '{{.Names}}\t{{.ID}}\t{{.Status}}' | sort
 }
 
 # IMAGES entries: tag|context[|containerfile|target] (paths relative to the repository).
@@ -94,20 +119,29 @@ usage() {
   cat <<USAGE
 usage: smarthostctl <command>
   init-env          create infra/.env with random development secrets (never overwrites)
-  render            render per-service env files and Quadlet/systemd units into infra/.generated/
+  render            render per-service env files, the pod script and systemd units into infra/.generated/
   build             build all Smarthost images
   secrets           create disposable development TLS certificates as Podman secrets
-  install           render + install Quadlet/systemd units for the user and daemon-reload
+  install           render, install the systemd units (start at boot) and create the pod if missing
+  create            create the persistent pod and its containers (fails if the pod exists)
   dkim-dev-key [domain selector]   generate a DISPOSABLE dev DKIM key inside the OpenDKIM volume
-  start|stop|restart|status        operate the whole topology (smarthost.target)
-  status <unit>     systemctl --user status for one unit (e.g. smarthost-postfix)
+  start             start the existing pod: PostgreSQL, DB tasks (roles, migrations, grants), services
+  stop              stop the pod; the pod and its containers are KEPT (podman pod stop)
+  restart           stop + start of the same pod and containers
+  recreate          replace the pod and containers from the current images/configuration, keep the
+                    volumes, start and wait for health (use after 'build' or definition changes)
+  remove            stop and remove the pod and its containers; volumes are kept
+  status            unit state, pod and containers (IDs and status)
   systemctl <args>  pass-through to systemctl --user on the Podman engine host
-  logs <unit> [n]   journal of one unit (default 100 lines)
-  uninstall         stop and remove the installed units (volumes are kept)
-  destroy-volumes --yes            delete all Smarthost volumes (DATA LOSS)
+  logs <name> [n]   container log (e.g. postfix), or journal of a unit (e.g. smarthost.service)
+  uninstall         remove the systemd units; the pod, containers and volumes are untouched
+  destroy-volumes --yes            delete all Smarthost volumes (DATA LOSS; requires 'remove' first)
   verify [--clean]  run the Phase 1 verification suite
-  test [phase2|phase3] [args]      run the Phase 2 (PHPUnit) and/or Phase 3 (pytest + end-to-end)
-                    suites in a throwaway, network-less pod (default: both)
+  test [phase2|phase3|phase4] [args]   run a suite in a throwaway, network-less pod: Phase 2
+                    (PHPUnit), Phase 3 (pytest + end to end), Phase 4 (Go unit + PostgreSQL
+                    integration); without a phase, all three
+  test phase4-e2e [A B C D E]      Phase 4 end to end against the RUNNING pod (Postfix,
+                    OpenDKIM, Mailpit): headers/DKIM, OpenDKIM down, deferral, crash, 10,000
   console <args>    run a Symfony console command in the running app container (as www-data),
                     e.g. console smarthost:dev:bootstrap
   migrate           re-run Doctrine migrations and then the infrastructure grants
@@ -119,30 +153,40 @@ case "${1:-}" in
   render) $RENDER render ;;
   build) cmd_build ;;
   secrets) cmd_secrets ;;
-  install) $RENDER render && machine install ;;
+  install)
+    $RENDER render && machine install
+    if pod exists; then echo "pod smarthost exists (kept; use 'recreate' to replace it)"; else pod create; fi ;;
+  create) $RENDER render && pod create ;;
   dkim-dev-key) shift; cmd_dkim_dev_key "$@" ;;
-  start) machine systemctl start smarthost.target ;;
-  stop) stop_all ;;
-  restart) stop_all && machine systemctl start smarthost.target ;;
-  status)
-    if [[ -n "${2:-}" ]]; then machine systemctl status --no-pager "${2%.service}.service" || true
-    else machine systemctl list-units --no-pager --all 'smarthost*' || true; fi ;;
-  logs) machine journal -u "${2:?unit}" -n "${3:-100}" ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart) cmd_stop && cmd_start ;;
+  recreate) $RENDER render && cmd_stop && pod remove && pod create && cmd_start && cmd_status ;;
+  remove) cmd_stop && pod remove ;;
+  status) cmd_status ;;
+  logs)
+    case "${2:?name}" in
+      *.service|*.timer) machine journal -u "$2" -n "${3:-100}" ;;
+      *) podman logs --tail "${3:-100}" "smarthost-${2#smarthost-}" ;;
+    esac ;;
   systemctl) shift; machine systemctl "$@" ;;
   uninstall) machine uninstall ;;
   destroy-volumes)
     [[ "${2:-}" == "--yes" ]] || die "refusing without --yes (deletes PostgreSQL, Postfix queue, spool and DKIM volumes)"
-    for v in "${VOLUMES[@]}"; do podman volume rm --force "$v" >/dev/null 2>&1 && echo "removed $v" || true; done ;;
+    ! podman pod exists smarthost || die "the smarthost pod still uses the volumes: run 'smarthostctl remove' first"
+    for v in "${VOLUMES[@]}"; do podman volume rm "$v" >/dev/null 2>&1 && echo "removed $v" || true; done ;;
   verify) shift; exec "$REPO/infra/tests/phase1-verify.sh" "$@" ;;
   test)
     shift
     case "${1:-all}" in
       phase2) shift; exec "$REPO/infra/tests/phase2-test.sh" "$@" ;;
       phase3) shift; exec "$REPO/infra/tests/phase3-test.sh" "$@" ;;
-      all) "$REPO/infra/tests/phase2-test.sh" && exec "$REPO/infra/tests/phase3-test.sh" ;;
-      *) die "test: expected phase2, phase3 or nothing" ;;
+      phase4) shift; exec "$REPO/infra/tests/phase4-test.sh" "$@" ;;
+      phase4-e2e) shift; exec "$REPO/infra/tests/phase4-e2e.sh" "$@" ;;
+      all) "$REPO/infra/tests/phase2-test.sh" && "$REPO/infra/tests/phase3-test.sh" && exec "$REPO/infra/tests/phase4-test.sh" ;;
+      *) die "test: expected phase2, phase3, phase4, phase4-e2e or nothing" ;;
     esac ;;
   console) shift; exec podman exec -i -u www-data smarthost-symfony-app php bin/console "$@" ;;
-  migrate) machine systemctl restart smarthost-db-migrate.service && machine systemctl restart smarthost-db-grants.service ;;
+  migrate) pod tasks db-migrate db-grants ;;
   *) usage; exit 64 ;;
 esac

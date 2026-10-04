@@ -140,15 +140,15 @@ class _Session:
                 await asyncio.wait_for(self.writer.drain(), 2)
                 try:
                     await asyncio.wait_for(self.reader.readline(), 2)
-                except (asyncio.TimeoutError, ConnectionError):
+                except (TimeoutError, ConnectionError):
                     pass
-        except (ConnectionError, asyncio.TimeoutError, OSError):
+        except (TimeoutError, ConnectionError, OSError):
             pass
         finally:
             self.writer.close()
             try:
                 await asyncio.wait_for(self.writer.wait_closed(), 2)
-            except (ConnectionError, asyncio.TimeoutError, OSError):
+            except (TimeoutError, ConnectionError, OSError):
                 pass
 
 
@@ -167,7 +167,7 @@ class SmtpProber:
             target = self.route_override or (host, 25)
             try:
                 reader, writer = await asyncio.wait_for(asyncio.open_connection(*target), self.connect_timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 evidence.append(Evidence("smtp_connect", {"result": "timeout"}, host))
                 last = ProbeResult("timeout", "smtp.connect_timeout", "Connecting to the mail host timed out.", host)
                 continue
@@ -229,7 +229,7 @@ class SmtpProber:
                 result.accept_all = True if aa_status == "accepted" else (False if aa_status == "rejected" else None)
                 result.provider_throttling = result.provider_throttling or aa_throttle
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ProbeResult("timeout", "smtp.command_timeout", "The server did not answer in time.", host)
         except (ConnectionError, OSError):
             return ProbeResult("temporary_failure", "smtp.connection_dropped", "The server closed the connection.", host)

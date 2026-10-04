@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.2) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.3) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -23,23 +23,32 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
 - **Phase 3** (Python validation engine): complete (v0.1.3). The worker is in `validator/`;
   `infra/bin/smarthostctl test phase3` runs pytest and the 10,000-address end-to-end
   run in a throwaway pod; `smarthostctl test` runs Phases 2 and 3.
-- Do not start Phase 4 or later work unless the user explicitly asks for it.
+- **Phase 4** (Go/Postfix delivery pipeline): complete (v0.1.4). The daemon is in `delivery/`;
+  `infra/bin/smarthostctl test phase4` runs the Go unit and PostgreSQL
+  integration tests in a throwaway pod; `test phase4-e2e` runs against the running pod's Postfix,
+  OpenDKIM and Mailpit.
+- Do not start Phase 5 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
 
 ## Rules that are easy to get wrong
-- **Podman only, rootless, Quadlet.** In this development setup the engine runs in the WSL
-  Podman machine `podman-machine-default`:
+- **Podman only, rootless, persistent pod (D-35).** The `smarthost` pod and its containers are
+  persistent Podman objects: `stop`/`start`/`restart` keep them (as Podman Desktop does), only
+  `smarthostctl recreate` replaces them (volumes kept), and only `destroy-volumes --yes` deletes
+  data. Never reintroduce Quadlet `.pod`/`.container` units or any unit that removes the pod or
+  containers on stop. After rebuilding images or changing `infra/podman/smarthost-pod.sh.in`, run
+  `smarthostctl recreate`. In this development setup the engine runs in the WSL Podman machine
+  `podman-machine-default`:
   - Container commands work through `podman` (remote).
-  - systemd/Quadlet commands must run inside the machine's systemd namespace. Use
+  - systemd commands must run inside the machine's systemd namespace. Use
     `infra/bin/smarthostctl`; it enters that namespace through the machine's
     `/usr/local/bin/enterns`.
   - Do not run the in-machine `podman` CLI from an ad-hoc `wsl.exe` shell outside that
     namespace, because it creates a separate rootless user namespace.
-- **All Smarthost containers run in the `smarthost` pod** (`infra/quadlet/smarthost.pod.in`).
-  New containers join it with `Pod=smarthost.pod`. Host ports and network aliases belong on the
-  pod, never on a container. Loopback is shared by all members, so never use `127.0.0.1` as an
+- **All Smarthost containers run in the `smarthost` pod** (`infra/podman/smarthost-pod.sh.in`).
+  New containers join it with `--pod smarthost` (the `service` helper there). Host ports and
+  network aliases belong on the pod, never on a container. Loopback is shared by all members, so never use `127.0.0.1` as an
   authorisation boundary.
 - **Other projects' containers may run on the same Podman machine.** Never stop, modify or
   remove any container, volume or network that is not Smarthost's (`smarthost-*`, label
@@ -68,7 +77,8 @@ This is a public repository. Documentation, comments, examples, tests, configura
 ## Checks before reporting completion
 - `python3 scripts/check-contracts.py` must pass.
 - For infrastructure changes:
-  - `infra/bin/smarthostctl install` must succeed (the Quadlet dry-run validates units);
+  - `infra/bin/smarthostctl install` must succeed, followed by `recreate` when container
+    definitions or images changed;
   - `infra/bin/smarthostctl status` must show the services healthy;
   - `infra/bin/smarthostctl verify` must pass.
 - For application changes: `infra/bin/smarthostctl test` must pass.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smarthost contract consistency check (specification 2.2).
+"""Smarthost contract consistency check (specification 2.3).
 
 Cross-checks the canonical YAML specification, the human specification and the
 normative contract files so they cannot drift silently:
@@ -49,10 +49,10 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.2"
-EXPECTED_SPEC_DATE = "2026-10-03"
+EXPECTED_SPEC_VERSION = "2.3"
+EXPECTED_SPEC_DATE = "2026-10-04"
 # Decisions that must be incorporated across the revision history (D-30 is still open).
-EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 35)} - {"D-30"}
+EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 36)} - {"D-30"}
 
 # vocabulary key -> path of the enumerating list in the spec
 SPEC_LISTS = {

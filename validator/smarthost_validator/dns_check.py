@@ -62,7 +62,7 @@ class DnspythonResolver:
         self._r.lifetime = timeout
         self._r.cache = None
 
-    async def _query(self, name: str, rdtype: str):  # type: ignore[no-untyped-def]
+    async def _query(self, name: str, rdtype: str):
         import dns.exception
         import dns.resolver
 
@@ -111,7 +111,7 @@ _MAX_MX_HOSTS_CHECKED = 3
 
 
 class DnsChecker:
-    def __init__(self, resolver: Resolver, slot=None) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, resolver: Resolver, slot=None) -> None:
         """`slot` is an async context-manager factory (the global network limit) held
         only while a lookup really talks to DNS, not while waiting for another task's
         single-flight result."""

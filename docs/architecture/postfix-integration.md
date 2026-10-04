@@ -1,6 +1,6 @@
 # Postfix Integration Contract
 
-**Status:** normative contract for specification 2.2 (spec `go_delivery.initial_integration_strategy`,
+**Status:** normative contract for specification 2.3 (spec `go_delivery.initial_integration_strategy`,
 `service_topology.opendkim`, `transport_reconciliation`). This document describes the
 mechanics. It does not change the architecture.
 
@@ -312,3 +312,52 @@ Each result was observed on the Phase 1 images and is re-checked by `smarthostct
 | V-5 | `virtual(8)` delivers `0600` files owned by `SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID`, and creates `inbound/{tmp,new,cur}` itself as `0700`. Files appear complete in `new/`, and `tmp/` is empty afterwards. Go's rename claim succeeds exactly once, and a second claim gets `ENOENT` [T16]. |
 | V-6 | The milter is attached to the submission service only. With OpenDKIM stopped, submission gets a 4xx and nothing is queued; port 25 still accepts DSNs. With OpenDKIM running, Mailpit receives messages carrying a cryptographically valid signature [T11, T13]. |
 | V-7 | inotify works across containers on the shared volumes. A new DSN raises `IN_CREATE` in `inbound/new` (the link from `tmp/`), and log writes raise `IN_MODIFY`. Polling at `DELIVERY_FILE_POLL_INTERVAL_SECONDS` stays as a fallback [T16]. |
+
+## 9. Phase 4 implementation notes (observed)
+
+These clarify the mechanics above as implemented and observed against Postfix 3.10 and OpenDKIM
+2.11 in the development pod. They change no architecture.
+
+* **Submission TLS.** Port 587 requires STARTTLS (`smtpd_tls_security_level = encrypt`) and accepts
+  AUTH only over TLS. Go encrypts the session but does not verify Postfix's certificate: the hop
+  never leaves the `smarthost` pod and the environment contract has no CA variable. AUTH is never
+  sent over a plain connection.
+* **DSN parameters** (`RET`, `ENVID`, `NOTIFY`, `ORCPT`) are sent when Postfix advertises `DSN`;
+  `ENVID` and `ORCPT` are xtext-encoded. Addresses that need SMTPUTF8 are submitted with
+  `SMTPUTF8` and without `ORCPT`.
+* **Outcomes.** A 5xx reply to MAIL, RCPT or the end of DATA is `submission_failed` (key
+  `submission_failed:<message_id>`, source `delivery_daemon`, because no queue id exists). 4xx
+  replies, connection failures and problems before the transaction (greeting, STARTTLS, AUTH) are
+  temporary; failures that concern the submission service itself (421, 4.3.x, 4.7.x such as the
+  milter tempfail, connection, TLS, AUTH) also pause all submissions with bounded backoff (5 s
+  doubling to 2 min), and the message retries after `5 s · 2^(n-1)` capped at
+  `DELIVERY_DEFERRAL_BACKOFF_SECONDS`.
+* **Ambiguous submissions (§6.3).** The message counts as queued only when, after its
+  `cleanup … message-id=<id@bounce-domain>` record, the queue manager logged the same queue id
+  (`queue active`, a delivery status or `removed`). The worker polls the retained log for two
+  minutes; if Postfix shows nothing by then, it never queued the message and it is resubmitted. A
+  reclaimed job (attempt > 1) runs this search for all its queued messages without a queue id before
+  any submission, and re-scans the log for the later records of every recovered queue id.
+* **Log format.** `postlogd` writes syslog-style records with no year
+  (`Oct 04 08:23:16 smarthost postfix/qmgr[235]: <QID>: from=<…>, size=696, nrcpt=1 (queue active)`),
+  in UTC in the container. Go infers the year (the latest year that does not put the record more than
+  a day into the future) and also accepts ISO 8601 timestamps.
+* **Observed record sequence** of a delivered message: `submission/smtpd … client=… sasl_username=…`,
+  `cleanup … message-id=<…>`, `qmgr … from=<…> (queue active)`, `smtp … to=<…>, relay=…, dsn=2.0.0,
+  status=sent (…)`, `qmgr … removed`. With the relay down: `status=deferred (connect to …:
+  Connection refused)` with `dsn=4.4.1`, a later `queue active` and `status=sent`.
+* **Event mapping.** The first `queue active` is `postfix_queued`, later ones (after a deferral)
+  `delivery_attempt`; `status=sent` is `remote_accepted`; `status=deferred` is `connection_failure`
+  (scope `connection`) for connection/TLS failures, otherwise `deferred` with the D-18 scope from the
+  enhanced code or text (`dns`, `recipient`, `provider_policy`, `connection`, `infrastructure`,
+  `domain`, `unknown`); `status=bounced` is `hard_bounce` (5.x.x) or `soft_bounce` (4.x.x), and
+  `status=expired` is `soft_bounce`. A first entry into `hard_bounced` writes `message.hard_bounced`
+  to the outbox. Phase 4 creates no suppressions (Phase 5).
+* **Hold rule.** A `cleanup` record of a Smarthost message whose queue id is being recorded (SMTP
+  reply in flight) stops the ingestion batch for up to 60 s, so the message's later records are
+  correlated. Should two messages ever share a queue id, a record belongs to the newest message
+  created before it.
+* **Reconciliation snapshots.** "Consecutive fresh snapshots" are the newest run of snapshots with
+  no gap larger than three snapshot intervals, the newest being at most three intervals old (this is
+  why `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` is also a delivery variable). A pass also completes
+  dispatched jobs whose messages are all terminal.

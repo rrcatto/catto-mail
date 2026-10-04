@@ -1,6 +1,6 @@
 [Unit]
 Description=Smarthost Postfix queue snapshot timer
-PartOf=smarthost.target
+PartOf=smarthost.service
 
 [Timer]
 OnActiveSec=30s
@@ -8,4 +8,4 @@ OnUnitActiveSec=${POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS}s
 AccuracySec=1s
 
 [Install]
-WantedBy=smarthost.target
+WantedBy=smarthost.service

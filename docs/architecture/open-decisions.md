@@ -2,7 +2,7 @@
 
 **This file is a log, not a source of architectural authority.** Every approved decision has been
 incorporated into the canonical specification (`docs/20260908-1644-smarthost-llm-spec.yaml`,
-version 2.2, `revision_history`) and its normative contracts. If this log and the specification
+version 2.3, `revision_history`) and its normative contracts. If this log and the specification
 ever differ, the specification wins.
 
 ## 1. Decisions (all resolved, 2026-10-02)
@@ -49,6 +49,12 @@ ever differ, the specification wins.
 | D-32 | The D-18 normalisation rule is exact: ASCII-whitespace trim, split at the final `@`, local part byte-for-byte, ASCII domain lower-cased, non-ASCII domain to A-labels via UTS #46 non-transitional processing, no normalised form on failure. Shared vectors: `docs/contracts/address-normalization-vectors.json` (PHP, Python, and Go from Phase 4). | `suppression_and_reputation.address_matching.exact_rule`, `normative_contracts` |
 | D-33 | The Python validator meters validation usage: one `validation_address` unit per address that transitions to `done`, in the same transaction as the fenced result; aggregation per job and transaction is allowed; nothing is metered for unprocessed addresses, lost leases, reclaims or retries. | `validation.usage_metering` |
 | D-34 | An idempotent replay guarantees no repeated side effect, the same resource, status code and Location, and `Idempotent-Replayed: true`; resource-creation bodies may show the current representation (no stored responses); a recipient-batch replay reproduces its original result. | `api.idempotency.semantics`, OpenAPI `IdempotencyKey` |
+
+### Decision after Phase 3 (owner decision 2026-10-04, incorporated in spec 2.3)
+
+| ID | Decision | Incorporated in spec 2.3 |
+|---|---|---|
+| D-35 | The development pod and its containers are persistent Podman objects: created once, then started, stopped and restarted as the same objects, including from Podman Desktop (`podman pod stop/start`). A systemd user service starts the existing pod at boot and stops it at shutdown and never removes it. Only `smarthostctl recreate` replaces pod and containers (named volumes kept); `destroy-volumes --yes` is the only data-deleting operation. This replaces the Quadlet `.pod`/`.container` runtime, whose units delete their containers and pod on every stop. | `podman_environment.process_management`, `repository_strategy` |
 
 ## 2. Implementation choices made while incorporating the decisions
 
@@ -119,6 +125,30 @@ architecture; they are listed for review. Details: `validator/README.md`.
 | A job that can never complete (fewer address rows than `total_addresses`) becomes `failed`, with `validation.failed` in the outbox and the reason in `audit_log`. | `db.py` |
 | Development pod DNS has no Internet route, so real domains classify as `undeliverable` (NXDOMAIN) in the development pod. Meaningful validation tests use the fake DNS server of `smarthostctl test phase3`. | `validator/README.md` |
 
+### Phase 4 implementation choices
+
+Made while implementing the Go delivery daemon within specification 2.3. None changes the
+architecture; details are in `docs/architecture/postfix-integration.md` §9 and `delivery/README.md`.
+
+| Choice | Where |
+|---|---|
+| D-32 in Go uses `golang.org/x/net/idna` (UTS #46 non-transitional, no STD3, CheckHyphens/Bidi/Joiners, DNS lengths) plus one explicit check that x/net/idna lacks: an `xn--` label must decode to a non-empty, not-all-ASCII label (shared vector `xn--ss-`). All 87 vectors pass in PHP, Python and Go. | `delivery/internal/address` |
+| VERP tokens are 128-bit CSPRNG values in lower-case base32 (26 characters), so a receiver that lower-cases the return path's local part does not break correlation. Tracking tokens are 192-bit base64url (32 characters), never signed. | `delivery/internal/ids` |
+| Submission uses STARTTLS without certificate verification (pod-internal hop; no CA contract variable) and never sends AUTH in clear. | `delivery/internal/worker` |
+| Per-message retries live inside the job lease (the schema has no per-message lease or `next_attempt_at`): `5 s · 2^(n-1)` capped at `DELIVERY_DEFERRAL_BACKOFF_SECONDS`; failures of the submission service also pause all submissions (up to 2 min). A temporarily failing message keeps the job `processing`. | `delivery/internal/worker` |
+| A submission starts only when the whole SMTP transaction fits in the remaining lease (margin and minimum scale with `DELIVERY_LEASE_SECONDS`), so a stale worker never submits after its lease could have expired. | `delivery/internal/worker` |
+| An acceptance that cannot be recorded (lease lost, repeated database errors) parks the message instead of retrying the submission; the next lease owner recovers it from the log (§6.3). | `delivery/internal/worker` |
+| Ambiguous submissions are resolved from the log within 2 minutes ("committed" = a queue-manager record after the cleanup record); otherwise resubmitted. Recovered queue ids are re-scanned at once so their delivery records are not left to reconciliation. | `delivery/internal/worker`, `postfixlog` |
+| Ingestion holds for up to 60 s at the cleanup record of a submission whose queue id is being recorded; it checks those messages before correlating queue ids, so a commit between the two statements cannot let a record slip past both. | `delivery/internal/store/logevents.go` |
+| `submission_failed` is keyed as a `delivery_daemon` lifecycle event (`submission_failed:<message_id>`), since the `postfix_submission` key needs a queue id. | `delivery/internal/store` |
+| `send_jobs.summary_counts_json` (messages per status, the API's `summary_counts`) is maintained by Go in the transaction of every status change, under the job row lock; transactions lock job rows before message rows. | `delivery/internal/store` |
+| Synchronous Postfix bounces in the log (`status=bounced`/`expired`) are recorded as `hard_bounce`/`soft_bounce` (vocabulary source `postfix_log`) with `message.hard_bounced` in the outbox; no suppression is created (Phase 5, D-30). | `delivery/internal/postfixlog`, `store` |
+| Provider pressure: recipient domains with at least 3 messages currently deferred are backed off for `DELIVERY_DEFERRAL_BACKOFF_SECONDS`. | `delivery/internal/worker` |
+| Reconciliation does not conclude `outcome_unknown` while an open or match-requested unmatched DSN names the message's VERP token or queue id. | `delivery/internal/reconcile` |
+| `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` is also consumed by delivery (snapshot freshness, three intervals). | environment contract |
+| Symfony's submit sends `NOTIFY smarthost_send_work, '<job id>'`; the daemon `LISTEN`s and also polls. | `app/src/Sending/SendJobService.php` |
+| The delivery binary is `smarthost-delivery` (`run`, `health` and the Phase 1 probes `identity`, `check-db`, `check-observability`, `check-spool`). | `delivery/cmd/smarthost-delivery` |
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are
@@ -142,4 +172,7 @@ None of them required an architectural change.
 |---|---|---|
 | D-30 | Whether automatically created suppressions (hard bounce, complaint, repeated soft bounce) are client-scoped or global. The schema supports both. | Phase 5 only |
 
-D-31 to D-34 were resolved on 2026-10-03 (see §1). No remaining decision blocks Phase 4.
+D-31 to D-34 were resolved on 2026-10-03 and D-35 on 2026-10-04 (see §1). D-30 must be decided
+before Phase 5 implements automatic suppressions. Points to confirm before production (not
+blocking Phase 5): a CA file variable so Go can verify Postfix's submission certificate, and an
+index for reconciliation candidates at production volume.

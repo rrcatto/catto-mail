@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Smarthost Phase 3 test harness: Python validation worker.
 #
-# In the throwaway, network-less test pod of infra/tests/testpod.sh (PostgreSQL
-# 16.15, real role bootstrap, Doctrine migrations, grants):
+# First the validator's static checks (Ruff lint, mypy types), then, in the
+# throwaway, network-less test pod of infra/tests/testpod.sh (PostgreSQL 16.15,
+# real role bootstrap, Doctrine migrations, grants):
 #   1. pytest: unit tests, plus database tests (leases, fencing, suspension,
 #      metering, completion) and worker tests with fake DNS / fake SMTP, all as
 #      the least-privilege validator role;
@@ -28,6 +29,9 @@ echo "phase3-test: building validator images"
 podman build -q --target test -t "$VAL_TEST_IMAGE" -f "$REPO/validator/Containerfile" "$REPO" >/dev/null
 podman build -q --target runtime -t "$VAL_IMAGE" -f "$REPO/validator/Containerfile" "$REPO" >/dev/null
 podman build -q -t "$SMTP_IMAGE" "$REPO/tests/fake-smtp" >/dev/null
+echo "phase3-test: static checks (ruff, mypy; validator/pyproject.toml)"
+podman run --rm --network none --label project=smarthost --entrypoint sh "$VAL_TEST_IMAGE" -c \
+  'ruff check --no-cache . && mypy' | sed 's/^/  /'
 testpod_up
 
 db_env=("${common_env[@]}" -e SMARTHOST_DB_NAME="$DB" -e VALIDATOR_DB_PASSWORD="$VALIDATOR_PW" -e SMARTHOST_DB_OWNER_PASSWORD="$OWNER_PW")

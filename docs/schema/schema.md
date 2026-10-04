@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.2 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.3 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:

@@ -67,11 +67,14 @@ Both are gitignored.
 │   ├── requirements.txt, requirements-test.txt, pytest.ini
 │   ├── smarthost_validator/       The worker package (pipeline stages, leases, limits, SQL)
 │   └── tests/                     pytest: unit, database, worker; fakes/ (fake DNS); e2e/zone.json
-├── delivery/                      Go delivery image
-│   ├── Containerfile
+├── delivery/                      Go delivery daemon (Phase 4)
+│   ├── Containerfile              Stages: deps, test, build, runtime
 │   ├── README.md
 │   ├── go.mod, go.sum
-│   └── cmd/smarthost-delivery-probe/main.go
+│   ├── cmd/smarthost-delivery/    main.go (run, health, normalize), probe.go (Phase 1 probes)
+│   └── internal/                  address, config, ids, ingest, integration (tests), logx, mimemsg,
+│                                  pacing, postfixlog, reconcile, smtpsub, snapshot, status, store,
+│                                  testsmtp, tracking, worker
 ├── postfix/                       Postfix image
 │   ├── Containerfile
 │   ├── README.md
@@ -98,8 +101,8 @@ Both are gitignored.
 │   │   ├── bootstrap.sh           Role bootstrap
 │   │   ├── grants.sh              Applies grants.sql after migrations
 │   │   └── grants.sql             The schema.md §6 privilege matrix
-│   ├── quadlet/*.in               21 Quadlet templates (pod, network, volumes, containers)
-│   ├── systemd/*.in               target + timers
+│   ├── podman/smarthost-pod.sh.in Persistent pod: network, volumes, pod, 10 containers, DB tasks
+│   ├── systemd/*.in               boot service + timers
 │   └── tests/
 │       ├── Containerfile          Verification tool image
 │       ├── requirements.txt
@@ -107,7 +110,10 @@ Both are gitignored.
 │       ├── phase1-verify.sh       Phase 1 verification suite
 │       ├── testpod.sh             Shared throwaway network-less test pod (sourced)
 │       ├── phase2-test.sh         Phase 2 test harness (PHPUnit)
-│       └── phase3-test.sh         Phase 3 test harness (pytest + end to end)
+│       ├── phase3-test.sh         Phase 3 test harness (pytest + end to end)
+│       ├── phase4-test.sh         Phase 4 harness: Go unit + PostgreSQL integration (throwaway pod)
+│       ├── phase4-e2e.sh          Phase 4 end to end against the running pod
+│       └── phase4_e2e.py          Phase 4 end-to-end driver (API, Mailpit, DKIM, DB, Postfix log)
 ├── tests/fake-smtp/               Deterministic SMTP test server
 │   ├── Containerfile
 │   ├── README.md
@@ -147,7 +153,7 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, current phase, WSL Podman-machine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) and 0.1.3 (Phase 3 complete: Python validation engine). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine) and 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
 | `.containerignore` | The app and validator images build from the repository root so that they can copy the normative contracts; this admits only `app/` (without `vendor/`, `var/`), `validator/` (without caches), those contract files, the D-32 vectors and the fake SMTP server (validator test stage). |
@@ -156,7 +162,7 @@ Both are gitignored.
 
 | File | Purpose |
 |---|---|
-| `20260908-1644-smarthost-llm-spec.yaml` | **Canonical specification 2.2.** It covers architecture, ownership, services, API, sending, tracking, schema, security, compliance and phases. |
+| `20260908-1644-smarthost-llm-spec.yaml` | **Canonical specification 2.3.** It covers architecture, ownership, services, API, sending, tracking, schema, security, compliance and phases. |
 | `20260908-1644-smarthost-human-specification.md` | Human-readable companion that mirrors the YAML. |
 | `README.md` | Index of the documentation. |
 | `PROJECT.md` | This guide. |
@@ -170,7 +176,7 @@ Both are gitignored.
 | `architecture/overview.md` | One-page map from the specification to the contracts and flows. |
 | `architecture/conventions.md` | Cross-language rules: IDs, time, leases, API, webhooks, logging, wording. |
 | `architecture/postfix-integration.md` | Postfix/OpenDKIM/Go channels, cursors, reconciliation and the verified V-1…V-7 results. |
-| `architecture/open-decisions.md` | Decision log (D-01…D-30). Not a source of authority. |
+| `architecture/open-decisions.md` | Decision log (D-01…D-35). Not a source of authority. |
 
 ### `infra/`: environment, units and tooling
 
@@ -178,39 +184,26 @@ Both are gitignored.
 |---|---|
 | `.env.example` | Safe template of every contract variable, with secrets empty. Generated from `docs/contracts/environment.md`. |
 | `README.md` | What lives in `infra/`. |
-| `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install, dkim-dev-key, start/stop/restart, status, logs, systemctl pass-through, uninstall, destroy-volumes, verify, test (Phase 2 suite), console (Symfony console in the app container), migrate (re-run migrations and grants). |
-| `bin/smarthost-machine-helper.sh` | Runs inside the Podman engine's systemd namespace. It installs and uninstalls units (including the `default.target.wants` boot link) and passes commands through to `systemctl --user` and `journalctl --user`. |
-| `lib/smarthost_render.py` | Regenerates `.env.example` and creates `infra/.env` with random development secrets. It renders per-consumer env files and Quadlet/systemd templates, and refuses non-contract variables. |
+| `bin/smarthostctl` | Developer CLI: init-env, render, build, secrets, install (units + pod if missing), create, dkim-dev-key, start/stop/restart (same objects), recreate (new pod and containers, volumes kept), remove, status, logs, systemctl pass-through, uninstall, destroy-volumes, verify, test (Phase 2/3/4 suites and the Phase 4 end-to-end run), console (Symfony console in the app container), migrate (migration and grant tasks). |
+| `bin/smarthost-machine-helper.sh` | Runs inside the Podman engine's systemd namespace. It installs and uninstalls the systemd units (including the `default.target.wants` boot link; it removes the pre-D-35 Quadlet units once) and passes commands through to `systemctl --user` and `journalctl --user`. It never creates or removes Podman objects. |
+| `lib/smarthost_render.py` | Regenerates `.env.example` and creates `infra/.env` with random development secrets. It renders per-consumer env files, the pod script (values shell-quoted) and the systemd templates, and refuses non-contract variables. |
 | `nginx/Containerfile` | nginx 1.28 image without the default site. |
 | `nginx/templates/smarthost.conf.template` | HTTPS server. Every request goes to the Symfony front controller over FastCGI, with request-time DNS resolution. Bodies above 12 MiB get a JSON 413 from nginx; the application enforces the 10 MiB API limit itself. Also a loopback-only health server. |
 | `postgres/bootstrap.sh` | Idempotent role bootstrap: five least-privilege roles; owner of the database and schema; runtime roles get CONNECT and USAGE only. |
 | `postgres/grants.sql` | The table and column privileges of `docs/schema/schema.md` §6, exactly: revoke everything from the runtime roles, then grant the matrix, in one transaction. |
 | `postgres/grants.sh` | Runs `grants.sql` with the administrative connection. Idempotent; re-run after every migration run. |
-| `quadlet/smarthost.pod.in` | The `smarthost` pod. Every container joins it. It owns the network attachment, the service aliases and the two published loopback ports. |
-| `quadlet/smarthost-internal.network.in` | `Internal=true` network `10.89.20.0/24`, with no Internet route. The pod is its only member. |
-| `quadlet/smarthost-*.volume.in` (6) | Named volumes: postgres-data, postfix-queue, postfix-observability, dsn-spool, opendkim-keys, opendkim-tables. |
-| `quadlet/smarthost-postgres.container.in` | PostgreSQL 16.15, with readiness via `pg_isready`. |
-| `quadlet/smarthost-db-bootstrap.container.in` | Oneshot that runs `infra/postgres/bootstrap.sh` after PostgreSQL. |
-| `quadlet/smarthost-db-migrate.container.in` | Oneshot after the bootstrap: `doctrine:migrations:migrate` as `smarthost_owner` (app image, `www-data`). |
-| `quadlet/smarthost-db-grants.container.in` | Oneshot after the migrations: `infra/postgres/grants.sh` with the administrative connection. The PHP, Python and Go services start after it. |
-| `quadlet/smarthost-symfony-app.container.in` | PHP-FPM (alias `symfony-app`) running the Symfony application, with an FPM-ping health check. |
-| `quadlet/smarthost-webhook-worker.container.in` | Webhook-worker unit from the same image. Still the placeholder process until Phase 7. |
-| `quadlet/smarthost-nginx.container.in` | nginx (pod member). Its HTTPS port is published by the pod as `PROXY_HTTPS_BIND`. TLS comes from Podman secrets. |
-| `quadlet/smarthost-validator.container.in` | Python validation worker as uid 10001 (pod member, no ports); health check `python -m smarthost_validator health` (heartbeat age). |
-| `quadlet/smarthost-delivery.container.in` | Go probe as `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID`. Observability is read-only; the spool is read-write. |
-| `quadlet/smarthost-postfix.container.in` | Postfix with the queue, observability and spool volumes, and TLS secrets. |
-| `quadlet/smarthost-opendkim.container.in` | OpenDKIM, the only container that mounts the key volumes. |
-| `quadlet/smarthost-mailpit.container.in` | Mailpit v1.31.0 (pod member). Its UI is published by the pod at `MAILPIT_UI_BIND`. |
-| `quadlet/smarthost-fake-smtp.container.in` | Fake SMTP (alias `fake-smtp`), internal only. |
-| `systemd/smarthost.target.in` | Groups every unit (`PartOf`/`WantedBy`) so the topology starts and stops together. Wanted by `default.target`, so it starts when the Podman machine starts. |
-| `systemd/smarthost-postfix-queue-snapshot.{service,timer}.in` | Periodic `podman exec … smarthost-queue-snapshot`. |
-| `systemd/smarthost-postfix-logrotate.{service,timer}.in` | Daily `podman exec … smarthost-postfix-logrotate`. |
-| `tests/phase1-verify.sh` | Phase 1 verification suite behind `smarthostctl verify [--clean]`. It runs 22 test groups and writes an evidence log to `infra/.generated/verify/`. The groups cover images, units, clean start, readiness, ports, network isolation, the live-mode guard, nginx→FPM, PostgreSQL roles, mail capture, DKIM, the milter-failure policy, V-1…V-7, the DSN spool, fake SMTP, persistence, stop/start and untouched neighbours. |
+| `podman/smarthost-pod.sh.in` | The single definition of the persistent topology (D-35), rendered to `.generated/podman/smarthost-pod.sh`: the `Internal=true` network `smarthost-internal` (`10.89.20.0/24`, no Internet route), the six named volumes, the `smarthost` pod (network attachment, service aliases, the two loopback host ports) and its ten service containers with their images, env files, mounts, secrets, identities, health checks and `--restart on-failure`; plus the ordered one-off DB tasks `db-bootstrap`, `db-migrate` (as `smarthost_owner`) and `db-grants`. Actions: `create`, `start` (PostgreSQL → tasks → pod → health), `stop` (pod stop; objects kept), `remove` (pod and containers; volumes kept), `tasks`, `wait-healthy`, `postfix-exec` (timers). |
+| `systemd/smarthost.service.in` | Starts the existing pod at boot (ordered start) and stops it at shutdown (`podman pod stop`); wanted by `default.target`. No `ExecStopPost`: it never removes objects. Uses the user's Podman API socket like Podman Desktop. |
+| `systemd/smarthost-postfix-queue-snapshot.{service,timer}.in` | Periodic `smarthost-queue-snapshot` in the Postfix container (skipped while it is not running). |
+| `systemd/smarthost-postfix-logrotate.{service,timer}.in` | Daily `smarthost-postfix-logrotate` in the Postfix container (skipped while it is not running). |
+| `tests/phase1-verify.sh` | Phase 1 verification suite behind `smarthostctl verify [--clean]`. It runs 25 test groups and writes an evidence log to `infra/.generated/verify/`. The groups cover images, units, clean create and start, readiness, ports, network isolation, the live-mode guard, nginx→FPM, PostgreSQL roles, mail capture, DKIM, the milter-failure policy, V-1…V-7, the DSN spool, fake SMTP, the persistent lifecycle (restart, stop/start, Podman-level stop/start, boot path and recreate with pod/container ID and data checks) and untouched neighbours. |
 | `tests/testpod.sh` | Sourced by the Phase 2 and 3 harnesses. It builds the app `test` image and starts a throwaway pod **without any network** (`--network none`, label `project=smarthost`) with PostgreSQL 16.15, then runs the real role bootstrap, the Doctrine migrations on the empty database and the grants. Random credentials; the pod is removed afterwards. |
 | `tests/phase2-test.sh` | Phase 2 harness behind `smarthostctl test phase2`: the test pod, plus the reference schema loaded into a separate database for comparison, then PHPUnit as the application role. |
 | `tests/phase3-test.sh` | Phase 3 harness behind `smarthostctl test phase3`: in the test pod, pytest (unit, database and worker tests as the validator role), then an end-to-end run with the fake DNS and fake SMTP servers: Symfony creates jobs through `/v1` (including 10,000 addresses), the real worker is SIGKILLed mid-job and restarted, and Symfony verifies results, usage and the outbox. Fails if the fake SMTP server ever received `DATA`. `smarthostctl test` runs both harnesses. |
+| `tests/phase4-test.sh` | Phase 4 harness behind `smarthostctl test phase4`: builds the delivery `test` image (gofmt and go vet run during the build), runs the Go unit tests without network, then the integration tests against PostgreSQL in the throwaway test pod as `smarthost_delivery` (claiming, fencing, exactly-once expansion, suppressions, submission outcomes, purge and metering, ambiguity and crash recovery, log ingestion with rotation and the hold rule, reconciliation, pacing, headers and tracking). |
+| `tests/phase4-e2e.sh`, `tests/phase4_e2e.py` | Phase 4 end to end behind `smarthostctl test phase4-e2e`, against the running pod: jobs through `/v1`, the dev daemon or throwaway worker containers, real Postfix/OpenDKIM/Mailpit. Scenarios A (headers, VERP, tracking, DKIM, events, purge, usage, completion), B (OpenDKIM down), C (deferral), D (SIGKILL and reclaim), E (10,000 recipients with a log rotation); duplicates are checked against the Postfix log. |
 | `tests/phase1_client.py` | Test client run inside the tool image on the internal network: submission (with queue ID), port-25 DSN injection, Mailpit lookup, cryptographic DKIM verification, fake-SMTP scenarios, PostgreSQL role/privilege probes and inotify watching. |
-| `tests/Containerfile`, `tests/requirements.txt` | Verification tool image (`localhost/smarthost-testtools:dev`): Python with dkimpy, psycopg and inotify_simple. Test-only; never a service. |
+| `tests/Containerfile`, `tests/requirements.txt` | Verification tool image (`localhost/smarthost-testtools:dev`): Python with dkimpy, psycopg and inotify_simple, plus the Phase 4 end-to-end driver. Test-only; never a service. |
 
 ### Service images
 
@@ -234,9 +227,10 @@ Both are gitignored.
 | `validator/requirements.txt` | Pinned runtime dependencies: psycopg 3, psycopg-pool, dnspython, idna. `requirements-test.txt`: pytest, pytest-asyncio. |
 | `validator/smarthost_validator/` | The worker (see `validator/README.md`): `__main__` (`run`, `health`, `check-db`, `normalize`), `config`, `worker` (claiming, renewal, chunks, LISTEN/poll), `pipeline`, `normalize` (D-32), `syntax`, `typo` + `typo_data`, `dns_check`, `roles`, `smtp_probe` (never DATA), `limits` (global/domain/MX slots, back-off, accept-all policy), `classify` (rule table), `db` (every SQL statement, fenced), `models`, `logs`. |
 | `validator/tests/` | pytest suites: normalisation vectors, syntax, typos, roles, config, DNS (with a fake DNS server), SMTP (with the fake SMTP server), limits, classification, pipeline, database leases/fencing/metering, worker end to end. `fakes/fake_dns.py` is a deterministic UDP/TCP DNS server driven by a zone file. |
-| `delivery/Containerfile` | Multi-stage Go 1.25 build, then a Debian slim runtime. |
-| `delivery/cmd/smarthost-delivery-probe/main.go` | Probe subcommands: `serve`, `identity`, `check-db`, `check-observability` (reads the log and snapshots; proves it cannot write), and `check-spool [--claim]` (atomic rename claim; proves a second claim fails). |
-| `delivery/go.mod`, `go.sum` | Module definition; the only dependency is pgx v5. |
+| `delivery/Containerfile` | Go 1.26, built from the repository root. Stages: `deps` (modules), `test` (sources, shared D-32 vectors; `gofmt` and `go vet` run during the build; `go test` runs offline), `build` (static binary), `runtime` (default; Debian slim, `USER 5001:5000`). |
+| `delivery/cmd/smarthost-delivery/` | The daemon (`run`: job worker, log ingestion, reconciliation, heartbeat, stats), `health`, `normalize`, and the Phase 1 probes `identity`, `check-db`, `check-observability`, `check-spool [--claim]`. |
+| `delivery/internal/` | See `delivery/README.md`: `config` (environment contract), `logx` (contract logs), `address` (D-32), `ids` (UUIDv7, VERP, tracking tokens, Message-ID), `mimemsg` (MIME and header contract), `tracking` (pixel, click rewriting), `smtpsub` (submission client), `pacing`, `store` (all SQL: leases, expansion, acceptance with purge and metering, projection, counts, outbox, log batches, reconciliation), `worker` (job processing), `postfixlog` (parser, generations, searches), `ingest` (cursor-following ingestion), `snapshot` and `reconcile` (D-27), `status` (vocabulary ranks), `testsmtp` (scripted submission server for tests), `integration` (PostgreSQL integration tests, build tag `integration`). |
+| `delivery/go.mod`, `go.sum` | Module definition: pgx v5 and `golang.org/x/net` (IDNA, HTML tokenizer). |
 | `tests/fake-smtp/fake_smtp.py` | Stdlib asyncio SMTP server whose reply is chosen by the recipient prefix (`reject-550`, `tempfail-450/451`, `unavailable-421`, `timeout`, otherwise accept) plus the validator scenarios: `accept-all`/`block-all` domain labels and `throttle-421`, `block-554` and accept-all-probe local parts. It logs every command as JSON so tests can prove `DATA` never arrives; DATA is discarded. |
 | `tests/fake-smtp/Containerfile` | Python 3.14 slim, uid 10003. |
 
@@ -307,7 +301,7 @@ flowchart LR
             pf -- "milter :8891" --> dk["opendkim"]
             pf -- "capture relay :1025" --> mp["mailpit"]
             val -. "dev probes" .-> fs["fake-smtp"]
-            boot["db-bootstrap → db-migrate → db-grants (oneshots)"] --> pg
+            boot["db-bootstrap → db-migrate → db-grants (ordered tasks of start)"] --> pg
         end
         obs[("observability vol<br/>log/ + queue/")]
         spool[("dsn-spool vol<br/>Maildir")]
@@ -320,7 +314,7 @@ flowchart LR
     user -- "127.0.0.1:8026" --> mp
 ```
 
-### 3.2 Send workflow (target behaviour, Phases 2–6)
+### 3.2 Send workflow (Phase 4; tracking endpoints Phase 6, webhook delivery Phase 7)
 
 ```mermaid
 sequenceDiagram

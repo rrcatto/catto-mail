@@ -1,4 +1,4 @@
-# Structured logs to stderr (journald via Quadlet). Level and format come from the
+# Structured logs to stderr (collected by Podman's log driver). Level and format come from the
 # contract variables SMARTHOST_LOG_LEVEL and SMARTHOST_LOG_FORMAT.
 monolog:
     channels: ['deprecation']

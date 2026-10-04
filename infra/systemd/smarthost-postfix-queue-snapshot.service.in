@@ -1,8 +1,8 @@
+# Writes one atomic `postqueue -j` snapshot inside the Postfix container. A no-op
+# while the pod is stopped.
 [Unit]
 Description=Smarthost atomic Postfix queue snapshot (postqueue -j)
-After=smarthost-postfix.service
-Requisite=smarthost-postfix.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/podman exec smarthost-postfix smarthost-queue-snapshot
+ExecStart=@GENERATED@/podman/smarthost-pod.sh postfix-exec smarthost-queue-snapshot

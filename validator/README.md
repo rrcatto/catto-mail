@@ -94,6 +94,14 @@ python -m smarthost_validator normalize ADDRESS
 `infra/bin/smarthostctl test phase3` (`infra/tests/phase3-test.sh`) runs, in a throwaway pod with
 no network:
 
+* **Static checks** (`pyproject.toml`, tools pinned in `requirements-test.txt`):
+  * `ruff check .`: pyflakes/pycodestyle errors, bugbear, async pitfalls, import order and
+    pyupgrade. No formatter and no line-length rule are enforced.
+  * `mypy`: types of `smarthost_validator/`, including the bodies of untyped functions, with no
+    unused `type: ignore` comments and no `Any` returns.
+
+  The pytest suite remains the behavioural authority. To run the checks locally:
+  `podman run --rm --entrypoint sh localhost/smarthost-validator-test:dev -c 'ruff check . && mypy'`.
 * **pytest:** unit, database and worker tests (`tests/`), against PostgreSQL 16 with the real
   migrations and grants.
 * **End to end:** Symfony creates jobs through `/v1`, including a 10,000-address job. The real

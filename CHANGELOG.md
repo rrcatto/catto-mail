@@ -4,6 +4,70 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.2.
 
+## [0.1.4] - 2026-10-04
+
+Phase 4 complete: Go/Postfix delivery pipeline. Also the persistent development pod lifecycle
+(D-35, specification 2.3) and Python static checks.
+
+### Added
+- `delivery/`: the Go 1.26 delivery daemon (`smarthost-delivery run`) replaces the Phase 1 probe.
+  It leases sealed send jobs (fenced writes, renewal, reclaim, D-31 client status), creates exactly
+  one message per staged recipient (UUIDv7, 128-bit VERP token and return path, 192-bit tracking
+  token), honours existing suppressions, builds MIME from the rendered content under the header
+  contract (RFC 2047, header-injection rejection, RFC 8058 `List-Unsubscribe`/`List-Id` for
+  subscription mail), instruments HTML (open pixel, click rewriting via `message_links`; never
+  plain text, `mailto:`, fragments, other schemes or the unsubscribe URL) and submits one message
+  per transaction to Postfix 587 (STARTTLS, SASL, `RET`/`ENVID`/`NOTIFY`/`ORCPT`).
+- One transaction records a Postfix acceptance: queue id, `submitted_to_postfix`, content purge and
+  one `message_submitted` usage unit. Temporary failures (including OpenDKIM tempfail) keep the
+  content and retry with bounded backoff; permanent refusals are `submission_failed`; ambiguous
+  submissions and reclaimed jobs are resolved from the Postfix log before any resubmission.
+- Postfix log ingestion with the persistent `delivery_ingest_cursors` cursor (first-record
+  fingerprint generations, `.gz` rotation, complete records only, hold rule), append-only events with
+  rank-based projection, `send_jobs.summary_counts_json`, dispatch/completion with `send.completed`
+  (and `message.hard_bounced`) in the transactional outbox; D-27 reconciliation against fresh queue
+  snapshots producing `transport_outcome_unknown`; global/per-domain concurrency, per-domain rate and
+  deferral back-off.
+- D-32 in Go, passing the shared 87 vectors (PHP, Python and Go agree).
+- Tests: `smarthostctl test phase4` (gofmt, go vet, Go unit tests, PostgreSQL integration tests as
+  `smarthost_delivery` in a throwaway pod) and `smarthostctl test phase4-e2e` (the running pod's
+  Postfix, OpenDKIM and Mailpit: headers and DKIM, OpenDKIM down, deferral, SIGKILL/reclaim,
+  10,000 recipients with a log rotation).
+- Persistent pod lifecycle (D-35, spec 2.3): `infra/podman/smarthost-pod.sh.in` defines the
+  network, volumes, pod and containers once; `smarthostctl create`, `start`, `stop`, `restart`
+  keep the same objects; `recreate` replaces pod and containers (volumes kept); `remove`;
+  `smarthost.service` starts the existing pod at boot and never removes it. Phase 1 verification
+  T19–T23 prove ID persistence across restart, stop/start, `podman pod stop/start` and the boot path,
+  and replacement by `recreate` with data intact.
+- Python static checks for the validator: Ruff and mypy (`validator/pyproject.toml`), run by
+  `smarthostctl test phase3`; `.gitignore` excludes Python bytecode and tool caches.
+
+### Changed
+- Specification 2.3 (D-35) replaces the Quadlet `.pod`/`.container` runtime, which removed the pod and
+  containers on every stop. The DB bootstrap, migrations and grants are ordered tasks of `start`.
+- `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` is also consumed by delivery (snapshot freshness).
+- Symfony's send-job submit sends `NOTIFY smarthost_send_work`.
+- The webhook worker container stops with SIGTERM and fake SMTP runs with `--init`, so a pod stop no
+  longer waits 30 s for SIGKILL.
+
+### Fixed
+- Validator typing gaps found by mypy (no behaviour change).
+
+### Verified
+- `smarthostctl test phase4`: gofmt and go vet clean; Go unit tests in 10 packages and 14
+  PostgreSQL integration tests (as `smarthost_delivery`) pass. D-32: all 87 shared vectors pass in
+  Go, as in PHP and Python.
+- `smarthostctl test phase4-e2e`: A (headers, VERP, tracking, DKIM verified with dkimpy, events,
+  purge, usage, completion), B (OpenDKIM down: no unsigned mail, no usage, retry then signed
+  delivery), C (deferral then delivery), D (SIGKILL after 267 of 600 submissions; reclaim; every
+  message reached Postfix exactly once), E (10,000 recipients over 50 domains completed in 124 s
+  with a log rotation; peak RSS 24.8 MiB; at most 20 concurrent submissions, 2 per domain).
+- `smarthostctl verify --clean`: 180/180 checks, including the lifecycle groups T19–T23.
+- `smarthostctl test phase3`: Ruff and mypy clean; 295 pytest tests and the 10,000-address run pass
+  (no DATA). `smarthostctl test phase2`: 163 tests, 1,578 assertions.
+- Contract checks 1870/1870; OpenAPI 3.1 valid; yamllint clean; shellcheck clean at warning
+  severity; `composer validate --strict` and `composer check-platform-reqs` pass.
+
 ## [0.1.3] - 2026-10-04
 
 Phase 3 complete: Python validation engine.

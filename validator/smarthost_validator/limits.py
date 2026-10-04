@@ -25,8 +25,8 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import defaultdict
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 
 class CountingSemaphore:
@@ -99,7 +99,7 @@ class Limits:
 
 
 class ProviderBackoff:
-    def __init__(self, base_seconds: float, max_seconds: float, clock=time.monotonic) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, base_seconds: float, max_seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
         self.base, self.max, self.clock = base_seconds, max_seconds, clock
         self._until: dict[str, float] = {}
         self._strikes: dict[str, int] = defaultdict(int)
@@ -110,7 +110,7 @@ class ProviderBackoff:
 
     def record_throttling(self, host: str) -> float:
         self._strikes[host] += 1
-        delay = min(self.max, self.base * (2 ** (self._strikes[host] - 1)))
+        delay = min(self.max, self.base * (2.0 ** (self._strikes[host] - 1)))
         self._until[host] = max(self._until.get(host, 0.0), self.clock() + delay)
         return delay
 
@@ -128,7 +128,8 @@ class AcceptAllPolicy:
     `finish()`.
     """
 
-    def __init__(self, window_seconds: float = 86400.0, min_interval_seconds: float = 1.0, clock=time.monotonic) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, window_seconds: float = 86400.0, min_interval_seconds: float = 1.0,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self.window, self.min_interval, self.clock = window_seconds, min_interval_seconds, clock
         self._verdict: dict[str, tuple[float, bool]] = {}
         self._executed: dict[str, float] = {}

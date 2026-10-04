@@ -1,7 +1,7 @@
 # Smarthost Python validator (Phase 3). Build context: the repository root, so the
 # test stage can include the shared D-32 vectors and the fake SMTP server.
 #   runtime  (default, last stage) the worker, unprivileged uid 10001
-#   test     runtime + pytest + tests + fakes (runs as root so the fake DNS can bind :53)
+#   test     runtime + pytest, Ruff, mypy + tests + fakes (runs as root so the fake DNS can bind :53)
 FROM docker.io/library/python:3.14-slim-trixie AS base
 RUN useradd --system --uid 10001 --no-create-home validator
 WORKDIR /opt/smarthost
@@ -13,7 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 FROM base AS test
 COPY validator/requirements-test.txt /opt/smarthost/requirements-test.txt
 RUN pip install --no-cache-dir -r /opt/smarthost/requirements-test.txt
-COPY validator/pytest.ini /opt/smarthost/pytest.ini
+COPY validator/pytest.ini validator/pyproject.toml /opt/smarthost/
 COPY validator/tests/ /opt/smarthost/tests/
 COPY tests/fake-smtp/fake_smtp.py /opt/smarthost/tests/fakes/fake_smtp.py
 COPY docs/contracts/address-normalization-vectors.json /opt/smarthost/tests/contracts/address-normalization-vectors.json

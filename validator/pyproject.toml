@@ -1,0 +1,30 @@
+# Static checks for the validator (not a packaging file). Run by
+# `infra/bin/smarthostctl test phase3` in the validator test image:
+#   ruff check .      lint (correctness, bugbear, async pitfalls, imports, pyupgrade)
+#   mypy              static types of smarthost_validator/
+# The 295 pytest tests remain the behavioural authority; these checks are
+# deliberately pragmatic (no formatter, no line-length rule).
+
+[tool.ruff]
+target-version = "py314"
+line-length = 130
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W", "B", "UP", "I", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tiny local writes (heartbeat file in /tmp, the --stats-file at exit) are not
+# worth an executor hop.
+"smarthost_validator/worker.py" = ["ASYNC230"]
+"smarthost_validator/__main__.py" = ["ASYNC230"]
+"tests/fakes/fake_dns.py" = ["ASYNC230"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["smarthost_validator"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_optional = true
+cache_dir = "/tmp/.mypy_cache"

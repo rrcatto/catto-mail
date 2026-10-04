@@ -1,4 +1,0 @@
-# PostgreSQL data directory
-[Volume]
-VolumeName=smarthost-postgres-data
-Label=project=smarthost

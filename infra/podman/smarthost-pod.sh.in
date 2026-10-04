@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Smarthost persistent development pod (D-35). Rendered by `smarthostctl render`
+# into infra/.generated/podman/smarthost-pod.sh; do not edit the rendered copy.
+#
+# The pod and its ten service containers are ordinary, persistent Podman
+# objects: they are created once and then only started and stopped, exactly like
+# a pod managed from Podman Desktop. Nothing here removes an object except the
+# explicit `remove` action (used by `smarthostctl recreate`), and nothing here
+# ever removes a named volume.
+#
+#   create          network + volumes (if missing), then the pod and its containers
+#   start           ordered start: PostgreSQL -> DB tasks -> whole pod -> wait healthy
+#   stop            podman pod stop (objects are retained)
+#   remove          podman pod rm (pod + member containers; volumes are kept)
+#   tasks [names]   run the ordered DB tasks (bootstrap, migrate, grants)
+#   wait-healthy    wait until every service reports healthy
+#   exists          exit 0 when the pod exists
+#   postfix-exec    run a command in Postfix if it is running (timers), else no-op
+#
+# It runs wherever `podman` reaches the engine: through podman-remote from the
+# workstation (smarthostctl) or inside the engine's systemd user namespace
+# (smarthost.service at boot/shutdown).
+set -euo pipefail
+
+POD=smarthost
+GENERATED=@GENERATED@
+REPO=@REPO@
+PG_IMAGE=docker.io/library/postgres:16.15-trixie
+# Long-running service containers, in the order `create` defines them.
+SERVICES=(postgres mailpit fake-smtp opendkim postfix symfony-app webhook-worker nginx validator delivery)
+# One-off DB tasks run by `start`, in this order (D-15): roles, schema, grants.
+TASKS=(db-bootstrap db-migrate db-grants)
+
+# Contract values (shell-quoted by the renderer).
+PROXY_HTTPS_BIND=${PROXY_HTTPS_BIND}
+MAILPIT_UI_BIND=${MAILPIT_UI_BIND}
+MAILPIT_SMTP_PORT=${MAILPIT_SMTP_PORT}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_DB=${POSTGRES_DB}
+PROXY_TLS_CERT_FILE=${PROXY_TLS_CERT_FILE}
+PROXY_TLS_KEY_FILE=${PROXY_TLS_KEY_FILE}
+POSTFIX_TLS_CERT_FILE=${POSTFIX_TLS_CERT_FILE}
+POSTFIX_TLS_KEY_FILE=${POSTFIX_TLS_KEY_FILE}
+OPENDKIM_KEY_DIR=${OPENDKIM_KEY_DIR}
+OPENDKIM_TABLES_DIR=${OPENDKIM_TABLES_DIR}
+OBS_DIR=${SMARTHOST_POSTFIX_OBSERVABILITY_DIR}
+SPOOL_DIR=${SMARTHOST_DSN_SPOOL_DIR}
+DELIVERY_UID=${SMARTHOST_DELIVERY_UID}
+SPOOL_GID=${SMARTHOST_SPOOL_GID}
+
+say() { echo "smarthost-pod: $*"; }
+die() { echo "smarthost-pod: ERROR: $*" >&2; exit 1; }
+exists() { podman pod exists "$POD"; }
+env_file() { echo "--env-file=$GENERATED/env/$1.env"; }
+
+# Every service container: pod member, project label, no image pulls, restarted
+# by Podman if its process fails (a deliberate stop is never restarted).
+service() {
+  local name="$1"; shift
+  podman create --name "smarthost-$name" --pod "$POD" --label project=smarthost \
+    --pull never --restart on-failure "$@" >/dev/null
+  say "created container smarthost-$name"
+}
+
+cmd_create() {
+  exists && die "pod $POD already exists (use 'smarthostctl recreate' to replace it)"
+  podman network exists smarthost-internal || {
+    podman network create --internal --subnet 10.89.20.0/24 --gateway 10.89.20.1 \
+      --label project=smarthost smarthost-internal >/dev/null
+    say "created network smarthost-internal (internal: no Internet route)"
+  }
+  local v
+  for v in postgres-data postfix-queue postfix-observability dsn-spool opendkim-keys opendkim-tables; do
+    podman volume create --ignore --label project=smarthost "smarthost-$v" >/dev/null
+  done
+  # The pod owns the network attachment, the service aliases and the only two
+  # host ports (both loopback). Members share its network namespace.
+  podman pod create --name "$POD" --infra-name smarthost-infra --label project=smarthost \
+    --exit-policy stop --network smarthost-internal \
+    --network-alias postgres --network-alias symfony-app --network-alias postfix \
+    --network-alias opendkim --network-alias mailpit --network-alias fake-smtp \
+    --publish "$PROXY_HTTPS_BIND:443" --publish "$MAILPIT_UI_BIND:8025" >/dev/null
+  say "created pod $POD"
+
+  service postgres "$(env_file postgres)" \
+    -v smarthost-postgres-data:/var/lib/postgresql/data \
+    --health-cmd "pg_isready -h 127.0.0.1 -U $POSTGRES_USER -d $POSTGRES_DB -q" \
+    --health-interval 10s --health-start-period 30s --health-retries 6 \
+    "$PG_IMAGE"
+  service mailpit \
+    -e "MP_SMTP_BIND_ADDR=0.0.0.0:$MAILPIT_SMTP_PORT" -e MP_UI_BIND_ADDR=0.0.0.0:8025 \
+    --health-cmd "/mailpit readyz" --health-interval 15s --health-start-period 5s --health-retries 4 \
+    docker.io/axllent/mailpit:v1.31.0
+  # --init: the Python server has no SIGTERM handler, and PID 1 ignores unhandled signals.
+  service fake-smtp "$(env_file fake-smtp)" --init \
+    --health-cmd "python /opt/fake-smtp/fake_smtp.py --check" \
+    --health-interval 15s --health-start-period 5s --health-retries 4 \
+    localhost/smarthost-fake-smtp:dev
+  # OpenDKIM is the only container that mounts the DKIM key volume.
+  service opendkim "$(env_file opendkim)" \
+    -v "smarthost-opendkim-keys:$OPENDKIM_KEY_DIR" -v "smarthost-opendkim-tables:$OPENDKIM_TABLES_DIR" \
+    --health-cmd "nc -z 127.0.0.1 8891" --health-interval 15s --health-start-period 5s --health-retries 4 \
+    localhost/smarthost-opendkim:dev
+  service postfix "$(env_file postfix)" \
+    --secret "smarthost-postfix-tls-cert,type=mount,target=$POSTFIX_TLS_CERT_FILE" \
+    --secret "smarthost-postfix-tls-key,type=mount,target=$POSTFIX_TLS_KEY_FILE" \
+    -v smarthost-postfix-queue:/var/spool/postfix \
+    -v "smarthost-postfix-observability:$OBS_DIR" -v "smarthost-dsn-spool:$SPOOL_DIR" \
+    --health-cmd smarthost-postfix-healthcheck --health-interval 15s --health-start-period 15s --health-retries 4 \
+    localhost/smarthost-postfix:dev
+  service symfony-app "$(env_file app)" \
+    --health-cmd smarthost-fpm-healthcheck --health-interval 15s --health-start-period 10s --health-retries 4 \
+    localhost/smarthost-app:dev
+  # The php-fpm base image sets STOPSIGNAL SIGQUIT; the worker handles SIGTERM.
+  service webhook-worker "$(env_file webhook-worker)" --user www-data --stop-signal SIGTERM \
+    --health-cmd "test -s /tmp/smarthost-worker-ok" --health-interval 30s --health-start-period 20s --health-retries 3 \
+    localhost/smarthost-app:dev php /srv/probe/webhook-worker.php
+  service nginx "$(env_file proxy)" -e NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
+    --secret "smarthost-proxy-tls-cert,type=mount,target=$PROXY_TLS_CERT_FILE" \
+    --secret "smarthost-proxy-tls-key,type=mount,target=$PROXY_TLS_KEY_FILE" \
+    --health-cmd "wget -q -O /dev/null http://127.0.0.1:8080/nginx-health" \
+    --health-interval 15s --health-start-period 5s --health-retries 4 \
+    localhost/smarthost-nginx:dev
+  service validator "$(env_file validator)" \
+    --health-cmd "python -m smarthost_validator health" --health-interval 30s --health-start-period 20s --health-retries 3 \
+    localhost/smarthost-validator:dev
+  # Observability is read-only for Go; the DSN spool is read-write (claim by rename).
+  service delivery "$(env_file delivery)" --user "$DELIVERY_UID:$SPOOL_GID" \
+    -v "smarthost-postfix-observability:$OBS_DIR:ro" -v "smarthost-dsn-spool:$SPOOL_DIR" \
+    --health-cmd "smarthost-delivery health" --health-interval 30s --health-start-period 30s --health-retries 3 \
+    localhost/smarthost-delivery:dev
+}
+
+# One-off tasks run inside the pod (they reach PostgreSQL on the shared
+# loopback) and are removed when they exit; they are steps of `start`, not
+# services, so a Podman-level `pod start` does not run them.
+run_task() {
+  local task="$1"; local args=()
+  case "$task" in
+    db-bootstrap) args=("$(env_file bootstrap)" -v "$REPO/infra/postgres:/bootstrap:ro" --entrypoint /bootstrap/bootstrap.sh "$PG_IMAGE") ;;
+    db-migrate)   args=("$(env_file app)" --user www-data localhost/smarthost-app:dev
+                        php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration) ;;
+    db-grants)    args=("$(env_file bootstrap)" -v "$REPO/infra/postgres:/bootstrap:ro" --entrypoint /bootstrap/grants.sh "$PG_IMAGE") ;;
+    *) die "unknown task $task" ;;
+  esac
+  podman rm --force --ignore "smarthost-$task" >/dev/null
+  if podman run --rm --name "smarthost-$task" --pod "$POD" --label project=smarthost --pull never "${args[@]}" \
+      | sed "s/^/  $task: /"; then
+    say "task $task ok"
+  else
+    die "task $task failed"
+  fi
+}
+
+cmd_tasks() {
+  local t list=("$@")
+  ((${#list[@]})) || list=("${TASKS[@]}")
+  for t in "${list[@]}"; do run_task "$t"; done
+}
+
+health() { podman inspect "smarthost-$1" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing; }
+
+wait_healthy() {
+  local deadline=$((SECONDS + ${1:-300})) s pending
+  while :; do
+    pending=()
+    for s in "${@:2}"; do [[ "$(health "$s")" == healthy ]] || pending+=("$s"); done
+    ((${#pending[@]} == 0)) && return 0
+    ((SECONDS < deadline)) || { die "not healthy within the timeout: ${pending[*]}"; }
+    sleep 2
+  done
+}
+
+cmd_start() {
+  exists || die "pod $POD does not exist (run 'smarthostctl install' or 'smarthostctl create')"
+  podman start smarthost-postgres >/dev/null
+  wait_healthy 300 postgres
+  say "postgres healthy"
+  cmd_tasks
+  podman pod start "$POD" >/dev/null
+  wait_healthy 300 "${SERVICES[@]}"
+  say "all ${#SERVICES[@]} services healthy"
+}
+
+cmd_stop() {
+  if exists; then podman pod stop --time 30 "$POD" >/dev/null; say "pod $POD stopped (pod and containers retained)"; fi
+}
+
+cmd_remove() {
+  if exists; then
+    podman pod rm --force --time 30 "$POD" >/dev/null
+    say "pod $POD and its containers removed (named volumes kept)"
+  fi
+}
+
+cmd_postfix_exec() {
+  if [[ "$(podman container inspect --format '{{.State.Running}}' smarthost-postfix 2>/dev/null)" == true ]]; then
+    exec podman exec smarthost-postfix "$@"
+  fi
+  say "smarthost-postfix is not running; skipped $*"
+}
+
+action="${1:-}"; shift || true
+case "$action" in
+  create) cmd_create ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  remove) cmd_remove ;;
+  tasks) cmd_tasks "$@" ;;
+  wait-healthy) wait_healthy "${1:-300}" "${SERVICES[@]}" ;;
+  exists) exists ;;
+  postfix-exec) cmd_postfix_exec "$@" ;;
+  *) die "usage: $0 create|start|stop|remove|tasks [names]|wait-healthy [seconds]|exists|postfix-exec <cmd>" ;;
+esac

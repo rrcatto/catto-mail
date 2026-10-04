@@ -13,8 +13,8 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 
 class ConfigError(Exception):
@@ -63,7 +63,7 @@ class Config:
                              application_name="smarthost-validator")
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
+    def from_env(cls, env: Mapping[str, str] | None = None) -> Config:
         e = dict(os.environ if env is None else env)
         r = _Reader(e)
         smarthost_env = r.choice("SMARTHOST_ENV", ENVIRONMENTS)

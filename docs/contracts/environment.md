@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.2 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.3 · **Template:** [`infra/.env.example`](../../infra/.env.example)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -100,7 +100,7 @@ secret has a value in the template, and that safety switches default to safe val
 |---|---|---|---|---|---|
 | `APP_ENV` | app, webhook-worker | no | 1 | `dev` | Symfony environment: `dev`, `test` or `prod`. |
 | `APP_SECRET` | app, webhook-worker | **yes** | 1 | | Symfony kernel secret (CSRF, signed URIs). |
-| `TRUSTED_PROXIES` | app | no | 1 | `10.89.20.0/24` | CIDR of nginx: the `smarthost-internal` Podman network (`infra/quadlet/smarthost-internal.network`). |
+| `TRUSTED_PROXIES` | app | no | 1 | `10.89.20.0/24` | CIDR of nginx: the `smarthost-internal` Podman network (created by `infra/podman/smarthost-pod.sh.in`). |
 | `MAILER_DSN` | app | **yes** | 2 | | Symfony Mailer transport for Smarthost's own low-volume notifications only. Never used for tracked sends. |
 | `APP_API_RATE_LIMIT_PER_MINUTE` | app | no | 2 | `600` | Default per-API-key request limit. |
 | `APP_API_MAX_REQUEST_BYTES` | app | no | 2 | `10485760` | Request body limit (10 MiB, 413 above it). It is not raised to fit large send jobs. |
@@ -180,7 +180,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `POSTFIX_TLS_KEY_FILE` | postfix | no | 1 | `/run/secrets/postfix_tls_key` | Path to the mounted private key. |
 | `POSTFIX_MESSAGE_SIZE_LIMIT` | postfix | no | 1 | `10240000` | `message_size_limit` in bytes. |
 | `POSTFIX_LOG_RETENTION_DAYS` | postfix | no | 4 | `14` | Rotated log files older than this are deleted. It must exceed the longest tolerated Go outage. |
-| `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` | postfix | no | 4 | `60` | Interval between queue snapshots. |
+| `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` | postfix, delivery | no | 4 | `60` | Interval between queue snapshots. Go treats the newest snapshot as stale (no reconciliation conclusions) when it is older than three intervals. |
 | `POSTFIX_QUEUE_SNAPSHOT_RETENTION_COUNT` | postfix | no | 4 | `60` | Number of most recent snapshots kept. |
 
 ## OpenDKIM (`opendkim`)

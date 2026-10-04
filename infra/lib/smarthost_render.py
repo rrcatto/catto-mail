@@ -7,11 +7,13 @@ Commands:
                   development secrets; never overwrites an existing file
     render        validate infra/.env against the contract, write one env file per
                   consumer (contract "Consumers" column - least privilege) and render
-                  infra/quadlet/*.in and infra/systemd/*.in into infra/.generated/
+                  infra/podman/*.in (the persistent pod script) and infra/systemd/*.in
+                  into infra/.generated/
 
 Templates may reference only contract variables as ${VAR}, plus @REPO@ (the
 repository path) and @GENERATED@ (infra/.generated). Anything else is an error,
-so no undocumented variable can reach a service.
+so no undocumented variable can reach a service. In shell templates (*.sh.in)
+every substituted value is shell-quoted, and the rendered script is executable.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import base64
 import os
 import re
 import secrets
+import shlex
 import stat
 import sys
 from pathlib import Path
@@ -28,7 +31,7 @@ CONTRACT = ROOT / "docs/contracts/environment.md"
 EXAMPLE = ROOT / "infra/.env.example"
 DOTENV = ROOT / "infra/.env"
 GENERATED = ROOT / "infra/.generated"
-TEMPLATE_DIRS = {"quadlet": ROOT / "infra/quadlet", "systemd": ROOT / "infra/systemd"}
+TEMPLATE_DIRS = {"podman": ROOT / "infra/podman", "systemd": ROOT / "infra/systemd"}
 
 ROW = re.compile(r"^\| `([A-Z][A-Z0-9_]*)` \| ([^|]+)\| (\*\*yes\*\*|no) \| ([^|]+)\| ([^|]*)\|", re.M)
 
@@ -146,9 +149,14 @@ def render() -> None:
             bad = sorted({m for m in placeholder.findall(text) if m not in names})
             if bad:
                 sys.exit(f"{template.relative_to(ROOT)} references non-contract variables {bad}")
-            text = placeholder.sub(lambda m: values[m.group(1)], text)
-            text = text.replace("@REPO@", str(ROOT)).replace("@GENERATED@", str(GENERATED))
-            (out_dir / template.name[:-3]).write_text(text, encoding="utf-8")
+            shell = template.name.endswith(".sh.in")
+            quote = shlex.quote if shell else (lambda v: v)
+            text = placeholder.sub(lambda m: quote(values[m.group(1)]), text)
+            text = text.replace("@REPO@", quote(str(ROOT))).replace("@GENERATED@", quote(str(GENERATED)))
+            target = out_dir / template.name[:-3]
+            target.write_text(text, encoding="utf-8")
+            if shell:
+                target.chmod(stat.S_IRWXU)
     print(f"rendered {len(consumers)} env files and units into {GENERATED.relative_to(ROOT)}/")
 
 

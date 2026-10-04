@@ -8,8 +8,8 @@ Nothing here writes to the database or alters the submitted address.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import Awaitable, Callable
 
 from . import roles, syntax, typo
 from .classify import Facts, classify, retry_delay
@@ -46,7 +46,7 @@ class Evaluator:
         typo_flag = (suggestion is not None) if domain is not None and not syn.address_literal else None
         evidence: list[Evidence] = []
 
-        def final(dns_status: str, smtp_status: str, *, disposable: bool | None = None, dns_outcome=None,  # type: ignore[no-untyped-def]
+        def final(dns_status: str, smtp_status: str, *, disposable: bool | None = None, dns_outcome=None,
                   probe=None, accept_all: bool | None = None, skip_code: str = "smtp.skipped") -> FinalResult:
             verdict = classify(Facts(syn, suggestion, disposable, dns_outcome, probe, skip_code, accept_all))
             return FinalResult(

@@ -5,11 +5,14 @@
 #
 # Proves the running development environment behaves as specified: topology,
 # readiness, network isolation, mail capture, DKIM, milter failure policy,
-# PostgreSQL roles, Postfix observability (V-1..V-7), DSN spool, fake SMTP and
-# persistence across restart/recreation. --clean first destroys all Smarthost
-# volumes and the network (disposable development data only) to prove a
-# clean-state start. Containers of other projects are never touched; T22
-# proves it. Exit status 0 only when every check passes.
+# PostgreSQL roles, Postfix observability (V-1..V-7), DSN spool, fake SMTP, and
+# the persistent pod lifecycle (D-35): stop/start/restart keep the same pod and
+# container objects (also when driven directly by Podman, as Podman Desktop
+# does), the boot service starts the existing pod, and only `recreate` replaces
+# the objects while every volume and its data survive. --clean first removes the
+# pod and destroys all Smarthost volumes and the network (disposable development
+# data only) to prove a clean-state start. Containers of other projects are
+# never touched; T25 proves it. Exit status 0 only when every check passes.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -42,6 +45,11 @@ tools() {
 }
 pf_log() { podman exec smarthost-postfix cat "$OBS/log/postfix.log"; }
 unit_state() { "$CTL" systemctl show -p ActiveState -p SubState -p Result --value "$1" | tr '\n' ' '; }
+# Identity of the persistent objects: pod id, then "<container id> <name>" per member.
+object_ids() { podman pod inspect smarthost --format '{{.Id}}' 2>/dev/null; podman ps -a --filter pod=smarthost --format '{{.ID}} {{.Names}}' | sort -k2; }
+member_count() { podman ps -a --filter pod=smarthost --format '{{.Names}}' | grep -c '^smarthost-' || true; }
+member_states() { podman ps -a --filter pod=smarthost --format '{{.State}}' | sort | uniq -c | tr -s ' \n' ' '; }
+volume_ids() { podman volume ls --filter label=project=smarthost --format '{{.Name}} {{.CreatedAt}}' | sort; }
 
 wait_healthy() {
   local deadline=$((SECONDS + ${1:-300})) s status all
@@ -76,38 +84,45 @@ for img in localhost/smarthost-{postfix,opendkim,app,nginx,validator,delivery,fa
   expect "image present: $img" podman image exists "$img"
 done
 
-section "T02 Quadlet render/install"
-expect "render + install (Quadlet dry-run validates every unit)" "$CTL" install
-for u in smarthost.target smarthost-{postgres,db-bootstrap,db-migrate,db-grants,symfony-app,webhook-worker,nginx,validator,delivery,postfix,opendkim,mailpit,fake-smtp}.service \
-         smarthost-pod.service smarthost-internal-network.service smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer; do
+section "T02 install: systemd units and the persistent pod"
+expect "render + install (units; pod created if missing)" "$CTL" install
+for u in smarthost.service smarthost-postfix-queue-snapshot.{service,timer} smarthost-postfix-logrotate.{service,timer}; do
   st="$("$CTL" systemctl show -p LoadState --value "$u")"
   [[ "$st" == loaded ]] && pass "unit loaded: $u" || fail "unit loaded: $u ($st)"
 done
 wants="$("$CTL" systemctl show -p Wants --value default.target)"
-[[ " $wants " == *" smarthost.target "* ]] && pass "smarthost.target starts at boot (default.target wants it)" \
-  || fail "smarthost.target starts at boot (default.target wants: $wants)"
+[[ " $wants " == *" smarthost.service "* ]] && pass "smarthost.service starts the pod at boot (default.target wants it)" \
+  || fail "smarthost.service at boot (default.target wants: $wants)"
+legacy="$("$CTL" systemctl show -p LoadState --value smarthost.target smarthost-pod.service | grep -v '^$' | sort -u | tr '\n' ' ')"
+[[ "$legacy" == "not-found " ]] && pass "no legacy Quadlet unit remains (smarthost.target, generated smarthost-pod.service)" || fail "legacy units: $legacy"
+unit_file="$GEN/systemd/smarthost.service"
+if ! grep -q '^ExecStopPost' "$unit_file" && grep -Eq '^ExecStop=.*smarthost-pod\.sh stop$' "$unit_file"; then
+  pass "the unit never removes objects (no ExecStopPost; ExecStop is a pod stop)"
+else fail "smarthost.service stop actions"; fi
 
 if $CLEAN; then
   section "T03 clean state (disposable Smarthost data only)"
-  "$CTL" stop >>"$LOG" 2>&1
-  # Network/volume oneshot units are not PartOf the target; stop them so the
-  # next start re-creates what is deleted below.
-  "$CTL" systemctl stop smarthost-internal-network.service 'smarthost-*-volume.service' >>"$LOG" 2>&1 || true
-  "$CTL" systemctl reset-failed >>"$LOG" 2>&1 || true
+  expect "remove the pod and its containers" "$CTL" remove
   expect "destroy Smarthost volumes" "$CTL" destroy-volumes --yes
   podman network rm smarthost-internal >>"$LOG" 2>&1 || true
   left="$(podman volume ls --format '{{.Name}}' | grep -c '^smarthost-' || true)"
   [[ "$left" == 0 ]] && pass "no Smarthost volumes remain" || fail "no Smarthost volumes remain ($left)"
   expect "disposable dev DKIM key generated into fresh volume" "$CTL" dkim-dev-key
+  expect "create the pod and containers on fresh volumes and network" "$CTL" create
 fi
+podman pod exists smarthost && pass "pod 'smarthost' exists after install/create" || fail "pod 'smarthost' missing after install/create"
+[[ "$(member_count)" == 11 ]] && pass "all 10 service containers and the infra container exist" || fail "pod members: $(member_count)"
 
 section "T04 start + readiness"
-expect "smarthost.target starts" "$CTL" start
+"$CTL" stop >>"$LOG" 2>&1   # a known state: the next start runs every step
+start_out="$("$CTL" start 2>&1)"; rc=$?; echo "$start_out" >>"$LOG"
+[[ $rc == 0 ]] && pass "smarthostctl start (ordered start of the existing pod)" || fail "smarthostctl start (rc=$rc)"
 expect "all 10 long-running services healthy" wait_healthy 300
-for oneshot in db-bootstrap db-migrate db-grants; do
-  st="$(unit_state "smarthost-$oneshot.service")"
-  [[ "$st" == "active exited success "* ]] && pass "$oneshot oneshot succeeded ($st)" || fail "$oneshot oneshot ($st)"
+steps="$start_out $("$CTL" logs smarthost.service 80 2>/dev/null)"
+for task in db-bootstrap db-migrate db-grants; do
+  [[ "$steps" == *"task $task ok"* ]] && pass "$task task succeeded (ordered after PostgreSQL)" || fail "$task task"
 done
+[[ "$(unit_state smarthost.service)" == "active exited success "* ]] && pass "smarthost.service active after start" || fail "smarthost.service: $(unit_state smarthost.service)"
 for t in smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer; do
   st="$(unit_state "$t")"; [[ "$st" == active* ]] && pass "timer active: $t" || fail "timer active: $t ($st)"
 done
@@ -178,11 +193,11 @@ note "GET /healthz: $body"
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://$(ev PROXY_HTTPS_BIND)/")"
 [[ "$code" == 404 ]] && pass "no application routes in Phase 1 (/ -> 404)" || fail "/ returned $code"
 fpm_back() {
-  "$CTL" systemctl restart smarthost-symfony-app.service || return 1
+  podman restart smarthost-symfony-app || return 1
   for _ in $(seq 1 30); do curl -sk --max-time 5 "https://$(ev PROXY_HTTPS_BIND)/healthz" | grep -q fpm-fcgi && return 0; sleep 1; done
   return 1
 }
-expect "PHP-FPM restart (new container/IP) is picked up by nginx without restarting nginx" fpm_back
+expect "a PHP-FPM restart is picked up by nginx without restarting nginx" fpm_back
 
 section "T09 PostgreSQL 16, roles and isolation"
 ver="$(podman exec -e PGPASSWORD="$(ev POSTGRES_PASSWORD)" smarthost-postgres psql -h 127.0.0.1 -U "$(ev POSTGRES_USER)" -d "$(ev SMARTHOST_DB_NAME)" -Atc 'show server_version')"
@@ -193,7 +208,7 @@ expect "Symfony app role (in-container probe)" podman exec smarthost-symfony-app
 expect "Symfony webhook role (in-container probe)" podman exec smarthost-webhook-worker php /srv/probe/db-check.php webhook
 expect "owner role can create tables (migrations role)" podman exec smarthost-symfony-app php /srv/probe/db-check.php owner
 expect "validator role (in-container probe)" podman exec smarthost-validator python -m smarthost_validator check-db
-expect "delivery role (in-container probe)" podman exec smarthost-delivery smarthost-delivery-probe check-db
+expect "delivery role (in-container probe)" podman exec smarthost-delivery smarthost-delivery check-db
 pgip="$(podman inspect smarthost-infra --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
 out="$(podman run --rm --network podman --entrypoint python "$TOOLS" -c "import socket
 try:
@@ -238,7 +253,7 @@ expect "private key is 0600 opendkim inside OpenDKIM" bash -c "podman exec smart
 expect "no private key material in the repository" bash -c "! git -C '$REPO' grep -q --untracked -E -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' ."
 
 section "T13 OpenDKIM unavailable -> temporary failure, never unsigned mail (V-6)"
-"$CTL" systemctl stop smarthost-opendkim.service >>"$LOG" 2>&1
+podman stop smarthost-opendkim >>"$LOG" 2>&1
 SUBJ_DOWN="phase1-verify-milterdown-$(date +%s)"
 out="$(submit "$SUBJ_DOWN" someone@example.com)"; note "$out"
 code="$(json "d.get('code', 0)" <<<"$out")"
@@ -248,7 +263,7 @@ sleep 3
 [[ "$(json "d['result']" <<<"$(tools "$TOOLS" mailpit-find "$SUBJ_DOWN")")" == not-found ]] && pass "no unsigned message reached Mailpit" || fail "unsigned message delivered"
 out="$(tools "$TOOLS" inbound "bounce+milterdown@$(ev SMARTHOST_BOUNCE_DOMAIN)" verify-milterdown)"; note "$out"
 [[ "$(json "d['result']" <<<"$out")" == accepted ]] && pass "inbound port 25 DSN unaffected (milter is submission-only)" || fail "inbound while milter down: $out"
-"$CTL" systemctl start smarthost-opendkim.service >>"$LOG" 2>&1
+podman start smarthost-opendkim >>"$LOG" 2>&1
 expect "OpenDKIM restored and healthy" wait_healthy 120
 SUBJ_BACK="phase1-verify-milterback-$(date +%s)"
 submit "$SUBJ_BACK" someone@example.com >>"$LOG"; sleep 2
@@ -256,7 +271,7 @@ submit "$SUBJ_BACK" someone@example.com >>"$LOG"; sleep 2
 
 # ---------------------------------------------------------------------------
 section "T14 queue snapshots: postqueue -j (V-3)"
-"$CTL" systemctl stop smarthost-mailpit.service >>"$LOG" 2>&1
+podman stop smarthost-mailpit >>"$LOG" 2>&1
 SUBJ_Q="phase1-verify-queued-$(date +%s)"
 QQ="$(json "d.get('queue_id') or ''" <<<"$(submit "$SUBJ_Q" queued@example.com)")"; sleep 4
 expect "snapshot service runs (timer target)" "$CTL" systemctl start smarthost-postfix-queue-snapshot.service
@@ -270,8 +285,8 @@ assert any(r['queue_id']=='$QQ' and r['queue_name']=='deferred' for r in recs)" 
   && pass "snapshot is JSON Lines with queue_id/queue_name/recipients; deferred $QQ present" || fail "snapshot content"
 expect "snapshot file is 0640 root:$(ev SMARTHOST_SPOOL_GID) (readable by the delivery group)" bash -c "podman exec smarthost-postfix stat -c '%a %u:%g' '$newest' | grep -qx '640 0:$(ev SMARTHOST_SPOOL_GID)'"
 expect "no partial temp files left behind" bash -c "! podman exec smarthost-postfix sh -c 'ls -A $OBS/queue | grep -q \"^\.tmp-\"'"
-expect "delivery identity reads log + newest snapshot and cannot write (read-only)" podman exec smarthost-delivery smarthost-delivery-probe check-observability
-"$CTL" systemctl start smarthost-mailpit.service >>"$LOG" 2>&1; wait_healthy 120 >/dev/null
+expect "delivery identity reads log + newest snapshot and cannot write (read-only)" podman exec smarthost-delivery smarthost-delivery check-observability
+podman start smarthost-mailpit >>"$LOG" 2>&1; wait_healthy 120 >/dev/null
 podman exec smarthost-postfix postqueue -f >>"$LOG" 2>&1; sleep 5
 [[ "$(json "d['result']" <<<"$(tools "$TOOLS" mailpit-find "$SUBJ_Q")")" == found ]] && pass "deferred message delivered to Mailpit once it returned (no fallback to MX)" || fail "queued message not delivered"
 "$CTL" systemctl start smarthost-postfix-queue-snapshot.service >>"$LOG" 2>&1
@@ -308,14 +323,14 @@ note "inotify: $ino"
 files="$(podman exec smarthost-postfix sh -c "find $SPOOL/inbound/new -type f -exec stat -c '%a %u:%g %n' {} +")"; note "$files"
 [[ -n "$files" && "$(grep -vc "^600 $(ev SMARTHOST_DELIVERY_UID):$(ev SMARTHOST_SPOOL_GID) " <<<"$files")" == 0 ]] && pass "DSN files are 0600 owned by the delivery UID / spool GID" || fail "DSN file ownership: $files"
 expect "Maildir tmp/ is empty after delivery (only complete files in new/)" bash -c "[ -z \"\$(podman exec smarthost-postfix ls -A $SPOOL/inbound/tmp)\" ]"
-expect "delivery identity reads and atomically claims every file; second claim fails with ENOENT" podman exec smarthost-delivery smarthost-delivery-probe check-spool --claim
+expect "delivery identity reads and atomically claims every file; second claim fails with ENOENT" podman exec smarthost-delivery smarthost-delivery check-spool --claim
 for r in "someone@$(ev SMARTHOST_BOUNCE_DOMAIN):550" "someone@example.com:554"; do
   out="$(tools "$TOOLS" inbound "${r%:*}" verify-reject)"
   [[ "$(json "d.get('code')" <<<"$out")" == "${r##*:}" ]] && pass "port 25 rejects ${r%:*} (${r##*:})" || fail "port 25 for ${r%:*}: $out"
 done
 
 section "T17 shared identity under rootless Podman (V-4)"
-expect "delivery runs as $(ev SMARTHOST_DELIVERY_UID):$(ev SMARTHOST_SPOOL_GID)" bash -c "podman exec smarthost-delivery smarthost-delivery-probe identity | grep -q '^uid=$(ev SMARTHOST_DELIVERY_UID) gid=$(ev SMARTHOST_SPOOL_GID)'"
+expect "delivery runs as $(ev SMARTHOST_DELIVERY_UID):$(ev SMARTHOST_SPOOL_GID)" bash -c "podman exec smarthost-delivery smarthost-delivery identity | grep -q '^uid=$(ev SMARTHOST_DELIVERY_UID) gid=$(ev SMARTHOST_SPOOL_GID)'"
 um="$(podman inspect smarthost-postfix smarthost-delivery --format '{{.HostConfig.UsernsMode}}|{{.HostConfig.IDMappings}}' | sort -u | wc -l)"
 [[ "$um" == 1 ]] && pass "Postfix and delivery share the same user-namespace mapping" || fail "different userns mappings"
 
@@ -324,47 +339,92 @@ out="$(tools "$TOOLS" fake-smtp)"; note "$out"
 [[ "$(json "d['result']" <<<"$out")" == ok ]] && pass "fake SMTP reproduces 250/421/450/451/550, DATA accept-and-discard and timeout" || fail "fake SMTP: $out"
 
 # ---------------------------------------------------------------------------
-section "T19 persistence across restart and container recreation"
+section "T19 restart keeps the same objects and data"
 MARK="phase1_$(date +%s)"
 OWNER_PSQL=(podman exec -e PGPASSWORD="$(ev SMARTHOST_DB_OWNER_PASSWORD)" smarthost-postgres psql -h 127.0.0.1 -U "$(ev SMARTHOST_DB_OWNER_USER)" -d "$(ev SMARTHOST_DB_NAME)" -Atc)
 expect "write PostgreSQL marker row" "${OWNER_PSQL[@]}" "CREATE TABLE IF NOT EXISTS phase1_verify_marker (token text); INSERT INTO phase1_verify_marker VALUES ('$MARK')"
-"$CTL" systemctl stop smarthost-mailpit.service >>"$LOG" 2>&1
+podman stop smarthost-mailpit >>"$LOG" 2>&1
 QH="$(json "d.get('queue_id') or ''" <<<"$(submit "phase1-verify-hold-$(date +%s)" hold@example.com)")"; sleep 3
 expect "hold queued message $QH" podman exec smarthost-postfix postsuper -h "$QH"
-"$CTL" systemctl start smarthost-mailpit.service >>"$LOG" 2>&1
+podman start smarthost-mailpit >>"$LOG" 2>&1
 tools "$TOOLS" inbound "bounce+persist$(date +%s)@$(ev SMARTHOST_BOUNCE_DOMAIN)" verify-persist >>"$LOG"; sleep 2
-spool_before="$(podman exec smarthost-postfix sh -c "find $SPOOL -type f -printf '%m %U:%G %P\n' | sort")"
-keyhash_before="$(podman exec smarthost-opendkim sh -c 'sha256sum "$OPENDKIM_KEY_DIR"/smarthost-dev.test/phase1.private | cut -c1-64')"
-logino_before="$(podman exec smarthost-postfix stat -c %i "$OBS/log/postfix.log")"
-ids_before="$(podman ps --format '{{.ID}} {{.Names}}' | grep ' smarthost-' | sort)"
-expect "smarthost.target restart" "$CTL" restart
+wait_healthy 120 >/dev/null
+data_state() {  # everything that must survive stop/start/restart/recreate
+  echo "marker=$("${OWNER_PSQL[@]}" "SELECT count(*) FROM phase1_verify_marker WHERE token='$MARK'")"
+  echo "held=$(podman exec smarthost-postfix postqueue -j | python3 -c "import json,sys;print(any(json.loads(l)['queue_id']=='$QH' and json.loads(l)['queue_name']=='hold' for l in sys.stdin if l.strip()))")"
+  echo "spool=$(podman exec smarthost-postfix sh -c "find $SPOOL -type f -printf '%m %U:%G %P\n' | sort | sha256sum")"
+  echo "loginode=$(podman exec smarthost-postfix stat -c %i "$OBS/log/postfix.log")"
+  echo "dkim=$(podman exec smarthost-opendkim sh -c 'sha256sum "$OPENDKIM_KEY_DIR"/smarthost-dev.test/phase1.private | cut -c1-64')"
+}
+check_data() {  # $1 = label; compares with DATA_BEFORE
+  local now; now="$(data_state)"; note "data after $1: $(tr '\n' ' ' <<<"$now")"
+  [[ "$now" == "$DATA_BEFORE" && "$now" == *"marker=1"* && "$now" == *"held=True"* ]] \
+    && pass "data survived $1 (PostgreSQL row, held Postfix message, DSN spool, log generation, DKIM key)" \
+    || { fail "data changed after $1"; diff <(echo "$DATA_BEFORE") <(echo "$now") >>"$LOG"; }
+}
+DATA_BEFORE="$(data_state)"; note "data: $(tr '\n' ' ' <<<"$DATA_BEFORE")"
+IDS_BEFORE="$(object_ids)"
+expect "smarthostctl restart" "$CTL" restart
 expect "all services healthy after restart" wait_healthy 300
-ids_after="$(podman ps --format '{{.ID}} {{.Names}}' | grep ' smarthost-' | sort)"
-[[ "$(comm -12 <(cut -d' ' -f1 <<<"$ids_before") <(cut -d' ' -f1 <<<"$ids_after") | wc -l)" == 0 ]] && pass "every container was recreated (no container ID survived)" || fail "some containers were not recreated"
-[[ "$("${OWNER_PSQL[@]}" "SELECT count(*) FROM phase1_verify_marker WHERE token='$MARK'")" == 1 ]] && pass "PostgreSQL marker row persisted" || fail "PostgreSQL data lost"
-hold="$(podman exec smarthost-postfix postqueue -j | python3 -c "import json,sys;print(any(json.loads(l)['queue_id']=='$QH' and json.loads(l)['queue_name']=='hold' for l in sys.stdin if l.strip()))")"
-[[ "$hold" == True ]] && pass "Postfix queue persisted (held $QH still queued)" || fail "Postfix queue lost $QH"
-spool_after="$(podman exec smarthost-postfix sh -c "find $SPOOL -type f -printf '%m %U:%G %P\n' | sort")"
-[[ "$spool_before" == "$spool_after" && -n "$spool_after" ]] && pass "DSN spool files, ownership and modes persisted" || fail "DSN spool changed"
-[[ "$(podman exec smarthost-postfix stat -c %i "$OBS/log/postfix.log")" == "$logino_before" ]] && pass "observability log persisted (same active generation)" || fail "observability log changed"
-[[ "$(podman exec smarthost-opendkim sh -c 'sha256sum "$OPENDKIM_KEY_DIR"/smarthost-dev.test/phase1.private | cut -c1-64')" == "$keyhash_before" ]] && pass "OpenDKIM development key persisted (same fingerprint)" || fail "DKIM key changed"
+[[ "$(object_ids)" == "$IDS_BEFORE" ]] && pass "restart kept the same pod ID and all 11 container IDs" || fail "restart changed object IDs"
+check_data "restart"
+
+section "T20 stop retains the pod and containers; start reuses them"
+expect "smarthostctl stop" "$CTL" stop
+left="$(podman ps --filter pod=smarthost --format '{{.Names}}' | tr '\n' ' ')"
+[[ -z "$left" ]] && pass "no Smarthost container running after stop" || fail "still running after stop: $left"
+pstat="$(podman pod ps --filter name='^smarthost$' --format '{{.Status}}')"
+[[ "$pstat" == Exited || "$pstat" == Stopped ]] && pass "stopped pod is still listed by 'podman pod ps' ($pstat)" || fail "pod after stop: '$pstat'"
+[[ "$(member_count)" == 11 ]] && pass "all 11 containers still listed by 'podman ps -a'" || fail "containers after stop: $(member_count)"
+st="$(member_states)"; note "states after stop: $st"
+[[ "$st" == " 11 exited " ]] && pass "all containers show exited (not removed)" || fail "container states after stop: $st"
+[[ "$(unit_state smarthost.service)" == inactive* ]] && pass "smarthost.service inactive after stop (ExecStop = pod stop)" || fail "unit after stop: $(unit_state smarthost.service)"
+expect "smarthostctl start" "$CTL" start
+expect "all services healthy after start" wait_healthy 300
+[[ "$(object_ids)" == "$IDS_BEFORE" ]] && pass "start reused the same pod ID and container IDs" || fail "start changed object IDs"
+check_data "stop/start"
+
+section "T21 Podman-level stop/start (as Podman Desktop does)"
+expect "podman pod stop smarthost" podman pod stop smarthost
+sleep 20   # give systemd and restart policies time to (wrongly) interfere
+st="$(member_states)"; note "states 20 s after podman pod stop: $st; unit: $(unit_state smarthost.service)"
+podman pod exists smarthost && [[ "$st" == " 11 exited " ]] \
+  && pass "after a direct pod stop the pod and all containers remain, exited; nothing restarted or removed them" \
+  || fail "direct pod stop: $st"
+[[ "$(object_ids)" == "$IDS_BEFORE" ]] && pass "no object was recreated while stopped" || fail "objects changed while stopped"
+expect "podman pod start smarthost" podman pod start smarthost
+expect "all services healthy after podman pod start" wait_healthy 300
+[[ "$(object_ids)" == "$IDS_BEFORE" ]] && pass "podman pod start reused the same pod and container IDs" || fail "podman pod start changed object IDs"
+check_data "podman pod stop/start"
+
+section "T22 boot path: smarthost.service starts the existing pod"
+podman pod stop smarthost >>"$LOG" 2>&1
+"$CTL" systemctl stop smarthost.service >>"$LOG" 2>&1
+expect "systemctl --user start smarthost.service (what the machine boot runs)" "$CTL" systemctl start smarthost.service
+expect "all services healthy after the boot-path start" wait_healthy 300
+[[ "$(object_ids)" == "$IDS_BEFORE" ]] && pass "the boot path started the same pod and containers" || fail "boot path changed object IDs"
+for t in smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer; do
+  [[ "$(unit_state "$t")" == active* ]] && pass "timer active with the service: $t" || fail "timer: $t ($(unit_state "$t"))"
+done
+
+section "T23 recreate replaces pod and containers, keeps volumes and data"
+VOLS_BEFORE="$(volume_ids)"
+expect "smarthostctl recreate" "$CTL" recreate
+expect "all services healthy after recreate" wait_healthy 300
+IDS_AFTER="$(object_ids)"
+[[ "$(head -n1 <<<"$IDS_AFTER")" != "$(head -n1 <<<"$IDS_BEFORE")" ]] && pass "recreate created a new pod (new pod ID)" || fail "pod ID unchanged by recreate"
+same="$(comm -12 <(tail -n +2 <<<"$IDS_BEFORE" | cut -d' ' -f1 | sort) <(tail -n +2 <<<"$IDS_AFTER" | cut -d' ' -f1 | sort) | wc -l)"
+[[ "$same" == 0 && "$(member_count)" == 11 ]] && pass "recreate replaced all 11 containers (no container ID survived)" || fail "recreate: $same IDs survived, $(member_count) members"
+[[ "$(volume_ids)" == "$VOLS_BEFORE" && "$(wc -l <<<"$VOLS_BEFORE")" == 6 ]] && pass "the six named volumes are the same volumes (names and creation times)" || fail "volumes changed by recreate"
+check_data "recreate"
 podman exec smarthost-postfix postsuper -d "$QH" >>"$LOG" 2>&1
 "${OWNER_PSQL[@]}" "DROP TABLE phase1_verify_marker" >>"$LOG" 2>&1
-podman exec smarthost-delivery smarthost-delivery-probe check-spool --claim >>"$LOG" 2>&1
+podman exec smarthost-delivery smarthost-delivery check-spool --claim >>"$LOG" 2>&1
 
-section "T20 stop / start cycle"
-expect "smarthost.target stop" "$CTL" stop
-left="$(podman ps --format '{{.Names}}' | grep '^smarthost-' | tr '\n' ' ')"
-[[ -z "$left" ]] && pass "no Smarthost container running when stop returns" || fail "Smarthost containers still running after stop: $left"
-units_up="$("$CTL" systemctl list-units --no-legend --state=active,activating,deactivating 'smarthost-*.service' | grep -v -E 'volume|network|db-bootstrap|db-migrate|db-grants' | wc -l)"
-[[ "$units_up" == 0 ]] && pass "no Smarthost service unit active after stop" || fail "$units_up service units still active after stop"
-expect "smarthost.target start" "$CTL" start
-expect "all services healthy after start" wait_healthy 300
-
-section "T21 contract checks"
+section "T24 contract checks"
 expect "scripts/check-contracts.py" python3 "$REPO/scripts/check-contracts.py"
 
-section "T22 other Podman projects untouched"
+section "T25 other Podman projects untouched"
 OTHERS_AFTER="$(others_snapshot)"
 [[ "$OTHERS_BEFORE" == "$OTHERS_AFTER" ]] && pass "non-Smarthost containers identical before/after (IDs, state, start times)" || { fail "non-Smarthost containers changed"; diff <(echo "$OTHERS_BEFORE") <(echo "$OTHERS_AFTER") >>"$LOG"; }
 

@@ -11,3 +11,15 @@ secrets/
 
 # Phase 1 generated per-service env files, rendered units and dev TLS material.
 infra/.generated/
+
+# Python generated files (bytecode, test/coverage/linter caches).
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Per-user Claude Code permissions (never committed).
+.claude/settings.local.json

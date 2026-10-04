@@ -1,7 +1,7 @@
 project:
   name: Smarthost
-  specification_version: "2.2"
-  specification_date: "2026-10-03"
+  specification_version: "2.3"
+  specification_date: "2026-10-04"
   original_specification_date: "2026-09-08"
   version_note: >-
     The specification version is a documentation/specification revision number. It is not a
@@ -391,8 +391,8 @@ repository_strategy:
         purpose: OpenDKIM milter container/config templates
       - path: infra/
         purpose: >-
-          Podman networks, Quadlet units, nginx configuration, database role bootstrap, environment
-          templates and deployment scripts
+          Podman network and persistent pod definition, systemd user units, nginx configuration,
+          database role bootstrap, environment templates and deployment scripts
       - path: tests/fake-smtp/
         purpose: deterministic SMTP test service
       - path: docs/
@@ -442,12 +442,27 @@ podman_environment:
     - Development Mailpit UI must bind only to a local/development interface.
     - Client applications access Smarthost through the same HTTP API boundary expected in production.
   process_management:
-    primary: Podman Quadlet with systemd user units
+    # D-35
+    primary: >-
+      persistent rootless Podman objects: the smarthost pod and its service containers are
+      created once and then only started and stopped, like any pod managed with Podman or
+      Podman Desktop; a systemd user service starts the existing pod at boot and stops it at
+      shutdown, and systemd user timers run the Postfix maintenance steps
+    lifecycle:
+      create: create the pod and its containers from the current images and configuration
+      start: start the existing objects (database bootstrap, migrations and grants run as ordered one-off steps)
+      stop: stop the pod; the pod and its containers are retained (never removed by a stop)
+      restart: stop and start the same objects
+      recreate: explicitly replace the pod and containers (after image or definition changes); named volumes are kept
+      destroy_volumes: the only operation that deletes persistent data; explicit and separate
+    rules:
+      - no service unit removes the pod or its containers when it stops
+      - stopping or starting the pod directly through Podman (or Podman Desktop) is equivalent and safe
     requirements:
-      - restart on failure
+      - restart on failure (Podman restart policy)
       - boot/start automation where appropriate
-      - systemctl status support
-      - journalctl visibility
+      - systemctl status support for the boot service and timers
+      - container log visibility (podman logs)
     timers:
       - Postfix log rotation
       - Postfix queue snapshots
@@ -1754,7 +1769,7 @@ implementation_phases:
     objective: create deterministic rootless local environment with no real mail leaving the development machine
     deliverables:
       - Podman networks
-      - Quadlet units and timers
+      - systemd user units and timers (persistent pod lifecycle since D-35)
       - PostgreSQL with infrastructure role bootstrap
       - nginx reverse proxy
       - Symfony PHP-FPM container and webhook-worker unit
@@ -1987,4 +2002,15 @@ revision_history:
       - D-32
       - D-33
       - D-34
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.3"
+    date: "2026-10-04"
+    summary: >-
+      Replaces the Quadlet pod/container runtime with a persistent pod lifecycle (D-35): the
+      smarthost pod and its containers are created once and then started, stopped and restarted
+      as the same Podman objects (also from Podman Desktop); a systemd user service starts the
+      existing pod at boot; only an explicit recreate replaces pod and containers, and volume
+      destruction stays a separate explicit operation.
+    decisions_incorporated:
+      - D-35
     decision_log: docs/architecture/open-decisions.md

@@ -1,0 +1,28 @@
+# Starts and stops the persistent `smarthost` pod (D-35) with the engine host's
+# user manager, i.e. when the Podman machine boots and shuts down. It never
+# creates or removes the pod or its containers: ExecStop is `podman pod stop`,
+# and there is deliberately no ExecStopPost. The pod may equally be stopped and
+# started from Podman Desktop or with `podman pod stop|start smarthost`; this
+# unit then keeps its last state and does not interfere.
+#
+# The script talks to the user's Podman API socket (CONTAINER_HOST), so the
+# containers' conmon processes belong to podman.service exactly as when Podman
+# Desktop starts the pod, not to this unit's cgroup; KillMode=process keeps a
+# failed or stopped unit from killing anything but its own script.
+[Unit]
+Description=Smarthost development pod (start/stop of the persistent pod; never removes it)
+Wants=podman.socket smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer
+After=podman.socket
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
+KillMode=process
+ExecStart=@GENERATED@/podman/smarthost-pod.sh start
+ExecStop=@GENERATED@/podman/smarthost-pod.sh stop
+TimeoutStartSec=900
+TimeoutStopSec=120
+
+[Install]
+WantedBy=default.target

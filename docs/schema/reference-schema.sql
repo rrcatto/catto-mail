@@ -1,5 +1,5 @@
 -- =============================================================================
--- Smarthost reference schema — specification 2.2 (PostgreSQL 16; unchanged since 2.1)
+-- Smarthost reference schema — specification 2.3 (PostgreSQL 16; unchanged since 2.1)
 -- =============================================================================
 --
 -- THIS IS NOT A MIGRATION. Symfony/Doctrine migrations (Phase 2) are the sole

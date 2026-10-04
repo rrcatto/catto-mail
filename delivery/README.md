@@ -1,19 +1,84 @@
-# delivery/ — Go delivery/control daemon
+# delivery/ — Go delivery/control daemon (Phase 4)
 
-A long-running daemon with leased work claiming. It:
-- creates `messages` from sealed `send_job_recipients`;
-- builds MIME from the client's **already rendered** content under the header contract;
-- applies tracking instrumentation only when the job enables it (HTML pixel, HTML link
-  rewriting);
-- adds `List-Unsubscribe`/`List-Id` for subscription mail;
-- submits over SMTP to Postfix, records the queue id and purges rendered content;
-- ingests the Postfix log through generation-aware cursors;
-- reconciles against queue snapshots, producing `outcome_unknown`;
-- claims DSN files from the shared Maildir spool and applies operator-requested DSN resolutions;
-- appends source-keyed `message_events` and writes `webhook_events` outbox rows.
+A long-running Go 1.26 daemon (`cmd/smarthost-delivery`) that executes sealed send jobs through
+Postfix and records what Postfix does with them. It connects only as `smarthost_delivery`
+(`docs/schema/schema.md` §6), runs no DDL, exposes no API, has no inbound SMTP listener, never
+holds DKIM keys and sends no HTTP webhooks. Contracts: `docs/architecture/postfix-integration.md`,
+`docs/contracts/status-vocabulary.yaml`.
 
-It has no public API and no inbound SMTP listener. It does no template rendering and no DKIM,
-runs no DDL, and sends no HTTP webhooks.
+```
+smarthost-delivery run [--stats-file PATH]   the daemon (pod default command)
+smarthost-delivery health                    container health check (heartbeat age)
+smarthost-delivery normalize ADDRESS         the D-32 normalised form
+smarthost-delivery identity | check-db | check-observability | check-spool [--claim]
+                                             infrastructure probes used by `smarthostctl verify`
+```
 
-Empty until Phase 1 (container) and Phases 4–5 (implementation). Contracts:
-`docs/architecture/postfix-integration.md`, `docs/contracts/status-vocabulary.yaml`.
+## What it does
+
+```
+Symfony /v1 (submit, NOTIFY smarthost_send_work)
+  -> send_jobs queued -> lease (SKIP LOCKED) -> processing
+  -> one message per staged recipient (D-32 address, UUIDv7, VERP token, tracking token,
+     suppression check)                       -> message_created + message_queued|_suppressed
+  -> MIME + tracking -> SMTP 587 (STARTTLS, AUTH, RET/ENVID/NOTIFY/ORCPT, DATA)
+  -> Postfix -> OpenDKIM (milter) -> relay (Mailpit in development)
+  -> "250 ... queued as QID": queue id + submitted_to_postfix + content purge + usage (one tx)
+  -> dispatched; Postfix log -> postfix_queued / deferred / connection_failure / delivery_attempt /
+     remote_accepted / soft_bounce / hard_bounce -> completed (+ send.completed outbox)
+  -> queue snapshots -> reconciliation -> transport_outcome_unknown when nothing is recoverable
+```
+
+| Package | Responsibility |
+|---|---|
+| `internal/config` | The environment contract (consumer `delivery`), `_FILE` secrets, fail-closed checks. |
+| `internal/logx` | Contract JSON logs (`ts`, `level`, `service`, `msg`, `client_id`, `job_id`, `message_id`, `worker_id`). No bodies, secrets, tokens or credentials; recipient addresses only at debug level. |
+| `internal/address` | D-32 normalisation (UTS #46 non-transitional on `golang.org/x/net/idna`, plus the explicit "xn-- label must decode to non-ASCII" check); passes the shared 87 vectors. |
+| `internal/ids` | UUIDv7 message ids, 128-bit lower-case base32 VERP tokens, 192-bit base64url tracking tokens, `Message-ID: <id@SMARTHOST_BOUNCE_DOMAIN>`, VERP parsing. |
+| `internal/mimemsg` | MIME from the client's rendered content under the header contract; RFC 2047 encoded words; header-injection rejection; RFC 8058 headers for subscription mail only. |
+| `internal/tracking` | Open pixel (HTML only) and click rewriting of absolute http/https `<a href>` links via `message_links`; never plain text, `mailto:`, fragments, other schemes or the unsubscribe URL. |
+| `internal/smtpsub` | One message, one recipient per transaction to Postfix; outcome Accepted / Temporary / Permanent / Ambiguous. |
+| `internal/pacing` | Global and per-domain concurrency, per-domain start rate, per-domain deferral back-off, global pause while Postfix refuses. |
+| `internal/store` | Every SQL statement: leases and fencing, expansion, acceptance (queue id + event + purge + usage in one transaction), projection, summary counts, dispatch/completion, outbox, log batches with cursor, reconciliation. |
+| `internal/worker` | Claims and processes jobs: expansion in chunks of 500, a domain-aware dispatcher with at most 500 queued messages and one message's content per submission slot in memory. |
+| `internal/postfixlog` | Postfix log parsing and classification; generations by first-record fingerprint (active file and `.gz`); complete records only; Message-ID and queue-id searches. |
+| `internal/ingest` | Follows the log with the `delivery_ingest_cursors` cursor; survives restart and rotation. |
+| `internal/snapshot`, `internal/reconcile` | `postqueue -j` snapshots, freshness, D-27 reconciliation. |
+| `internal/status` | Status ranks and event → status projection from the vocabulary. |
+| `internal/testsmtp` | Scripted in-process submission server for tests (STARTTLS, AUTH, 4xx/5xx, drops, milter tempfail). |
+
+## Safety rules
+
+* **Fencing.** Every write that depends on the job runs in a transaction that locks the job row and
+  checks `claimed_by`, `lease_expires_at > now()`, `status = processing` and an active or throttled
+  client. A stale worker writes nothing; a submission is only started when the whole SMTP
+  transaction fits in the remaining lease.
+* **Exactly once.** `messages.send_job_recipient_id` is unique (expansion is retry-safe); the
+  queue-id update wins once (`postfix_queue_id IS NULL`), and the purge and the
+  `message_submitted` usage row are written in that same transaction; events are keyed per source
+  (D-06).
+* **Never a duplicate.** A message Postfix may already have (connection lost after the end of
+  DATA, a crash after acceptance) is never resubmitted before the retained log has been searched for
+  its Message-ID (§6.3). An acceptance that cannot be recorded parks the message; it is never
+  resubmitted by the worker that submitted it.
+* **Content.** Rendered content is purged only together with a recorded Postfix acceptance; a
+  temporary failure keeps it; a permanent refusal (`submission_failed`) leaves it to Symfony's
+  `APP_RETENTION_STAGED_CONTENT_DAYS` cleanup.
+* **Ingestion hold.** A cleanup record of a Smarthost message whose queue id is being recorded holds
+  ingestion for up to 60 s, so the message's later records are correlated by queue id.
+* **Reconciliation.** Only fresh consecutive snapshots taken after the grace interval count;
+  absence is never success; the log is re-scanned first; an open unmatched DSN prevents a
+  conclusion; `outcome_unknown` is superseded by any later authoritative event.
+
+Not in Phase 4: DSN parsing, ARF complaints, automatic suppressions (Phase 5); the spool probes
+only prove permissions.
+
+## Tests
+
+* `infra/bin/smarthostctl test phase4` (`infra/tests/phase4-test.sh`): `gofmt` and `go vet`
+  (image build), Go unit tests without network, then the integration tests
+  (`internal/integration`, build tag `integration`) against PostgreSQL 16 with the real
+  migrations and grants, as `smarthost_delivery`, in a throwaway network-less pod.
+* `infra/bin/smarthostctl test phase4-e2e` (`infra/tests/phase4-e2e.sh`): the running pod's real
+  Postfix, OpenDKIM and Mailpit (scenarios A–E: headers and DKIM, OpenDKIM down, deferral, crash,
+  10,000 recipients).

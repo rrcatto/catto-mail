@@ -1,4 +1,0 @@
-# DKIM private keys (OpenDKIM only)
-[Volume]
-VolumeName=smarthost-opendkim-keys
-Label=project=smarthost
