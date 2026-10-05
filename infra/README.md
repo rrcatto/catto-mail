@@ -20,8 +20,9 @@ Contents (see `docs/PROJECT.md` for every file):
   `postgres/grants.sh` applies the grant matrix of `docs/schema/schema.md` §6 exactly
   (task `db-grants`). `smarthostctl start` runs the three tasks in order on every start. Roles and grants are infrastructure, not Doctrine schema.
 - The Phase 1 verification suite (`tests/phase1-verify.sh`), the shared throwaway test pod
-  (`tests/testpod.sh`), the Phase 2, 3 and 4 test harnesses (`tests/phase2-test.sh`,
-  `tests/phase3-test.sh`, `tests/phase4-test.sh`) and the Phase 4 end-to-end run against the
-  running pod (`tests/phase4-e2e.sh`, `tests/phase4_e2e.py`).
+  (`tests/testpod.sh`), the Phase 2, 3 and 4/5 test harnesses (`tests/phase2-test.sh`,
+  `tests/phase3-test.sh`, `tests/phase4-test.sh`) and the Phase 4 and Phase 5 end-to-end runs
+  against the running pod (`tests/phase4-e2e.sh`, `tests/phase4_e2e.py`, `tests/phase5-e2e.sh`,
+  `tests/phase5_e2e.py`).
 
 Rootless Podman with a persistent pod and systemd user units only. No Docker and no Kubernetes.

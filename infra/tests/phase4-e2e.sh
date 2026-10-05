@@ -81,7 +81,9 @@ if [[ " $SCEN " == *" B "* ]]; then
   [[ "$st" == "queued/-/true" ]] && pass "while OpenDKIM is down the message stays queued, without queue id, content kept ($st)" || fail "state while OpenDKIM down: $st"
   [[ "$(sql "SELECT count(*) FROM usage_records u JOIN messages m ON m.id = u.reference_id WHERE m.send_job_id = '$jb'")" == 0 ]] && pass "no message_submitted usage before Postfix accepts" || fail "usage recorded while OpenDKIM down"
   [[ "$(drv mailpit-count "$tag" | jget "d['count']")" == 0 ]] && pass "nothing reached Mailpit unsigned" || fail "message reached Mailpit while OpenDKIM was down"
-  podman logs smarthost-delivery 2>&1 | grep -q 'temporary submission failure' && pass "the daemon logged temporary submission failures and retries" || fail "no temporary failure logged"
+  # Captured first: with pipefail, `podman logs | grep -q` can fail on SIGPIPE.
+  dlog="$(podman logs smarthost-delivery 2>&1)"
+  [[ "$(grep -c 'temporary submission failure' <<<"$dlog")" -ge 1 ]] && pass "the daemon logged temporary submission failures and retries" || fail "no temporary failure logged"
   podman start smarthost-opendkim >/dev/null; "$GEN/podman/smarthost-pod.sh" wait-healthy 120 >/dev/null
   [[ "$(drv wait "$jb" completed 240 | jget "d['ok']")" == True ]] && pass "after OpenDKIM returned the job completed" || fail "job $jb not completed after OpenDKIM returned"
   check "delivered message is DKIM-signed and fully recorded" "$(drv verify-single "$jb" "$tag")"

@@ -7,6 +7,7 @@ namespace App\Api;
 use App\Entity\Message;
 use App\Entity\MessageEvent;
 use App\Entity\SendJob;
+use App\Entity\Suppression;
 use App\Entity\ValidationAddress;
 use App\Entity\ValidationJob;
 use App\Util\Clock;
@@ -101,6 +102,20 @@ final class Presenter
             'current_status' => $m->getCurrentStatus()->value,
             'created_at' => Clock::rfc3339($m->getCreatedAt()),
             'resolved_at' => Clock::rfc3339($m->getResolvedAt()),
+        ];
+    }
+
+    /** @return array<string, mixed> OpenAPI GlobalOptOut (the reporting client's own row only; D-30) */
+    public static function globalOptOut(Suppression $s): array
+    {
+        return [
+            'id' => $s->getId()->toRfc4122(),
+            'email_address' => $s->getAddressOrDomain(),
+            'reason' => $s->getReason()->value,
+            'status' => null === $s->getLiftedAt() ? 'active' : 'lifted',
+            'external_reference' => $s->getExternalReference(),
+            'created_at' => Clock::rfc3339($s->getCreatedAt()),
+            'lifted_at' => Clock::rfc3339($s->getLiftedAt()),
         ];
     }
 

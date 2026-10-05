@@ -1,9 +1,10 @@
 # Development Environment
 
-**Status:** Phases 1–4 complete (Phase 4: Go/Postfix delivery pipeline, v0.1.4).
-`smarthostctl verify --clean` passes all 180 checks starting from destroyed volumes (§6), and
-`smarthostctl test` passes the Phase 2, 3 and 4 suites, and `smarthostctl test phase4-e2e` the
-Phase 4 end-to-end run (§7).
+**Status:** Phases 1–5 complete (Phase 5: inbound DSN, complaint and global suppression
+processing, D-30, v0.1.5). `smarthostctl verify` passes all 176 checks (§6; `--clean`
+additionally starts from destroyed volumes), and
+`smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e` and
+`test phase5-e2e` the end-to-end runs (§7).
 
 ## 1. Requirements
 
@@ -107,8 +108,9 @@ flowchart TD
 | `smarthostctl uninstall` | Removes the systemd units and the boot link. The pod, containers and volumes are untouched. |
 | `smarthostctl destroy-volumes --yes` | Deletes the six Smarthost volumes by name (data loss). Refuses while the pod exists. |
 | `smarthostctl verify [--clean]` | Runs the Phase 1 verification suite (§6). `--clean` first removes the pod and destroys the Smarthost volumes and network to prove a clean-state create and start. |
-| `smarthostctl test [phase2\|phase3\|phase4] [args]` | Runs the Phase 2 (PHPUnit), Phase 3 (pytest + end to end) or Phase 4 (Go unit + PostgreSQL integration) suite in throwaway, network-less pods (§7); without a phase, all three. Does not touch the running environment. |
+| `smarthostctl test [phase2\|phase3\|phase4\|phase5] [args]` | Runs the Phase 2 (PHPUnit), Phase 3 (pytest + end to end) or Phase 4/5 (Go unit + PostgreSQL integration, one suite) suite in throwaway, network-less pods (§7); without a phase, all of them. Does not touch the running environment. |
 | `smarthostctl test phase4-e2e [A B C D E]` | Phase 4 end to end against the **running** pod's Postfix, OpenDKIM and Mailpit (§7). It stops and restarts Smarthost containers only (OpenDKIM, Mailpit, delivery). |
+| `smarthostctl test phase5-e2e [A B C D E F G]` | Phase 5 end to end against the **running** pod: DSNs and ARF reports through Postfix port 25 and the real DSN spool (§7). It creates a second test client and stops/starts only the delivery container. |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
 | `smarthostctl migrate` | Runs the `db-migrate` and `db-grants` tasks in the running pod (after `recreate` with a rebuilt app image that brings new migrations, `start` also runs them). |
 
@@ -230,7 +232,7 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 | T10–T11 | Submission on 587 → Mailpit only, with a cryptographically valid DKIM signature |
 | T12 | The DKIM private key is visible only to OpenDKIM |
 | T13 | OpenDKIM down → 4xx tempfail and no unsigned mail; port 25 unaffected; recovery |
-| T14–T17 | V-1…V-7: snapshots, rotation, DSN spool claim, inotify, shared identity |
+| T14–T17 | V-1…V-7: snapshots, rotation, DSN spool claim (with the delivery daemon stopped, since it consumes the spool), inotify, shared identity; the running daemon then ingests a new DSN |
 | T18 | Fake SMTP reproduces 250/421/450/451/550, DATA discard and timeout |
 | T19 | `smarthostctl restart` keeps the same pod ID and all 11 container IDs; PostgreSQL data, a held Postfix message, the DSN spool, the log generation and the DKIM key survive |
 | T20 | `smarthostctl stop` leaves the pod listed by `podman pod ps` and all 11 containers listed by `podman ps -a` as exited; the boot service becomes inactive; `start` reuses the same IDs; data survives |
@@ -240,7 +242,9 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 | T24 | Contract checks pass |
 | T25 | Containers of other Podman projects are unchanged |
 
-The latest clean-state run (after Phase 4) passed all 180 checks.
+The latest clean-state run (`--clean`, after Phase 4) passed all 180 checks. The latest run after
+Phase 5 (without `--clean`, so without the five T03 checks, and with the new T16 daemon check)
+passed all 176 checks.
 
 ## 7. The Symfony application and the test suites
 
@@ -302,11 +306,12 @@ application role; DNS is stubbed and nothing reaches the Internet.
 | unit | D-18 normalisation (including IDNA), canonical request hashing, the keyring, fail-closed configuration, log format |
 | contract | `/v1` routes are exactly the OpenAPI operations; OpenAPI enums equal the PHP enums |
 | schema | The migrated catalog equals `reference-schema.sql` (tables, columns, defaults, constraints, indexes); migrations up/down/up and per-migration rollback; ORM mapping equals the database; CHECKs equal the vocabulary; grants equal `schema.md` §6; least-privilege behaviour; critical CHECK/UNIQUE/FK behaviour |
-| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit; every response is validated against the OpenAPI contract |
+| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API and the Phase 5 operator commands; every response is validated against the OpenAPI contract |
 
-Latest run: 163 tests and 1,578 assertions, all passing (unit 37, contract 2, schema 33,
-integration 91). Unit includes the shared D-32 vectors; integration includes the D-31 client-status
-rules.
+Latest run (v0.1.5): 177 tests and 1,838 assertions, all passing. Unit includes the shared D-32
+vectors; integration includes the D-31 client-status rules, the D-30 global opt-out API
+(`GlobalSuppressionApiTest`, including multi-process concurrency) and the Phase 5 operator commands
+(`Phase5OperatorCommandTest`); schema includes the D-30 constraints and the six-migration rollback.
 
 **Phase 3** (`infra/tests/phase3-test.sh`) builds the validator `test` and `runtime` images, then:
 
@@ -344,4 +349,28 @@ is stopped:
 | E | 10,000 recipients over 50 domains, a log rotation mid-run: exactly-once submission, usage and purge, completion via the log, pacing limits and bounded memory |
 
 Latest runs: Go unit tests (10 packages) and 14 integration tests pass; end to end A–E pass (the
-10,000-recipient job completed in about two minutes with a peak RSS of 25 MiB).
+10,000-recipient job completed in about two minutes with a peak RSS of 25 MiB). After Phase 5 (v0.1.5): Go
+unit tests in 13 packages and 28 integration tests pass; A–E pass again (10,000 recipients in
+185 s, peak RSS 26.6 MiB, with the per-message pre-submission suppression check).
+
+**Phase 5** uses the same Go harness (`smarthostctl test phase5`): DSN and ARF fixtures
+(`delivery/internal/dsn/testdata`), the failure-scope classifier, the spool processor, and
+PostgreSQL integration tests for correlation, the global suppression policy (cross-client,
+excluded scopes, repeated soft bounces and their reset, concurrency), complaints, the unmatched-DSN
+resolution, every suppression reason, suppressions created after staging, crash/reclaim/duplicate
+idempotency and retention.
+
+**Phase 5 end to end** (`infra/tests/phase5-e2e.sh`, `smarthostctl test phase5-e2e`) sends real
+messages to Mailpit and then injects synthetic DSNs and ARF reports over SMTP to Postfix port 25:
+
+| Scenario | Proves |
+|---|---|
+| A | Client A's recipient-specific 5.1.1 DSN (VERP) supersedes `remote_accepted` with `hard_bounced`, writes `message.hard_bounced` once and a global suppression with source message and event; client B's later message to the same address is suppressed and never reaches Postfix; the file is kept in `done/` |
+| B | Opt-out API: 403 without the capability; 201 for the trusted client, idempotent replay, 200 for an existing opt-out; global row with `source_client_id`; client B suppressed; only the reporter can lift; audited; sending works after the lift |
+| C | Correlation through the real spool by ENVID, returned Message-ID, Postfix queue id and corroborated recipient |
+| D | ARF complaint to the feedback-loop address: `complained`, `message.complained`, global suppression; an uncorrelated complaint stays an unmatched DSN |
+| E | Provider-policy, domain and DELAY DSNs never suppress; three recipient soft bounces across two clients give a 30-day `repeated_soft_bounce` |
+| F | Unmatched DSN → `smarthost:dsn:show` → `smarthost:dsn:match` → Go resolution (event, operator, suppression); dismissal requires a reason |
+| G | 15 DSNs while the daemon is down, 3 left as crashed claims, a worker SIGKILLed mid-pass: all recorded exactly once, stale claims reclaimed, old processed files deleted by retention while their events remain |
+
+Latest run: A–G, 44/44 checks pass.

@@ -1,0 +1,20 @@
+Delivered-To: {{VERP}}
+From: MAILER-DAEMON@mx.example.org
+Subject: Undeliverable
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="e"
+
+--e
+Content-Type: message/delivery-status
+Content-Transfer-Encoding: base64
+
+{{B64_STATUS}}
+--e
+Content-Type: text/rfc822-headers
+Content-Transfer-Encoding: quoted-printable
+
+From: {{FROM}}
+X-Smarthost-Message-ID: {{MSGID}}
+Subject: =3D?utf-8?q?Hello?=3D
+
+--e--

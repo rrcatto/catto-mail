@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Smarthost Phase 4 test harness, part 1: Go delivery daemon in isolation.
+# Smarthost Phase 4/5 test harness, part 1: Go delivery daemon in isolation
+# (smarthostctl test phase4 and test phase5 run this same suite).
 #
 #   1. static checks: gofmt, go vet (also with the integration tag);
 #   2. Go unit tests (no network, no database): D-32 vectors, identifiers/VERP,

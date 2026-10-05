@@ -1,6 +1,6 @@
 project:
   name: Smarthost
-  specification_version: "2.3"
+  specification_version: "2.4"
   specification_date: "2026-10-04"
   original_specification_date: "2026-09-08"
   version_note: >-
@@ -71,6 +71,10 @@ integration_context:
       - segmentation
       - unsubscribe state
       - per-recipient unsubscribe URLs and the one-click unsubscribe endpoint
+      - >-
+        reporting an explicit recipient global opt-out to Smarthost (D-30), only when the
+        recipient asked not to receive email from any source using the Smarthost installation;
+        an ordinary list, newsletter, campaign or client unsubscribe stays client business state
     prohibitions:
       - must not connect directly to Smarthost PostgreSQL
       - must not bypass Smarthost API for tracked bulk sends
@@ -215,7 +219,8 @@ architecture:
         - process inbound DSNs/bounces from the shared DSN spool
         - apply operator-requested unmatched-DSN resolutions
         - classify hard bounce, soft bounce, deferral and connection failures, including failure scope
-        - apply transport suppression policy
+        - parse ARF complaint (feedback) reports from the shared DSN spool
+        - apply the global transport suppression policy (D-30) to authoritative evidence from every source
         - apply per-destination pacing controls
         - append message events to PostgreSQL
         - record send/message webhook events in the transactional outbox
@@ -364,7 +369,7 @@ project_boundaries:
       - campaign_segments
       - merge_fields_and_template_rendering
       - rendered_recipient_specific_subject_html_and_text
-      - unsubscribe_business_state
+      - unsubscribe_business_state (ordinary list, newsletter, campaign and client unsubscribes)
       - per_recipient_unsubscribe_urls_and_one_click_unsubscribe_endpoint
       - visible_unsubscribe_content_in_message_bodies
   integration_rules:
@@ -524,17 +529,33 @@ api:
         - POST /v1/send-jobs
         - POST /v1/send-jobs/{id}/recipients
         - POST /v1/send-jobs/{id}/submit
+        - POST /v1/global-suppressions
+        - POST /v1/global-suppressions/{id}/lift
       reads: >-
         suspended and pending_approval clients still authenticate and may read their existing
         resources (pending_approval may also perform non-work onboarding operations where supported)
       closed: API keys of a closed client fail authentication (401)
+    capabilities:
+      # D-30
+      can_submit_global_suppressions:
+        storage: clients.can_submit_global_suppressions (boolean, default false)
+        grants: >-
+          lets a trusted client report and withdraw explicit recipient global opt-outs
+          (POST /v1/global-suppressions, POST /v1/global-suppressions/{id}/lift)
+        controlled_by: operator only, through an audited console command; never by the client
+        default: >-
+          false for every client, including existing ones; development bootstrap may enable it
+          for the disposable development client
+        without_capability: 403 for creating or lifting a global opt-out
   idempotency:
     required_for:
       - validation job creation
       - send job creation
       - send-job recipient batch upload
+      - recipient global opt-out creation (D-30)
     naturally_idempotent:
       - send-job submit (submitting an already sealed job returns its current state)
+      - global opt-out lift (lifting an already lifted opt-out returns its current state)
     mechanism: Idempotency-Key header persisted with the created resource
     semantics:
       # D-34
@@ -578,6 +599,15 @@ api:
     - method: POST
       path: /webhooks/test
       purpose: test client webhook endpoint after webhook support is added
+    - method: POST
+      path: /global-suppressions
+      purpose: report an explicit recipient global opt-out (trusted clients with can_submit_global_suppressions; D-30)
+    - method: GET
+      path: /global-suppressions/{id}
+      purpose: retrieve a global opt-out this client reported
+    - method: POST
+      path: /global-suppressions/{id}/lift
+      purpose: report that the recipient withdrew a global opt-out this client reported (D-30)
   webhooks:
     delivery: signed_https
     retry: exponential_backoff_with_limit
@@ -597,6 +627,10 @@ api:
       consumes webhook_events, creates/updates webhook_deliveries, signs requests, retries
       failures and records delivery outcomes. Python and Go never send HTTP webhooks.
     no_broker: true
+    suppression_events: >-
+      Suppressions produce no webhook event of their own; in particular a recipient global
+      opt-out produces no unsubscribe event (D-30). message.hard_bounced and message.complained
+      are written in the transaction of the message state change that causes them.
     events_initial:
       - validation.completed
       - validation.failed
@@ -882,6 +916,10 @@ sending:
       - the visible unsubscribe link in the body is client-owned content
       - the one-click unsubscribe URL is never passed through click tracking
       - Smarthost keeps no unsubscribe database and produces no unsubscribe events
+      - >-
+        an ordinary unsubscribe is never copied into Smarthost; only an explicit recipient
+        global opt-out reported by a trusted client becomes Smarthost state, as a
+        recipient_global_opt_out suppression (D-30)
   tracking_instrumentation:
     default: disabled unless explicitly enabled for the send job
     performed_by: go_delivery, after receiving rendered content
@@ -943,7 +981,11 @@ sending:
     - allocate unique VERP token
     - set envelope return-path under configured bounce domain
     - allocate an opaque random tracking token when tracking is enabled
-    - skip and record message_suppressed when an active transport suppression matches
+    - >-
+      skip and record message_suppressed when an active suppression matches (global, or of the
+      job's client); the match is checked when the message is created and again immediately
+      before submission, so a suppression created while the job is staged or queued in Go
+      prevents the submission (mail already accepted by Postfix is not recalled)
     - submit to Postfix
     - record Postfix queue id
     - append submission event
@@ -968,11 +1010,62 @@ inbound_bounce_handling:
   flow:
     - receiving Postfix accepts DSN/bounce mail for VERP, postmaster and feedback-loop recipients of the bounce domain only
     - Postfix delivers it into the dedicated shared DSN Maildir spool (never DKIM-signed)
-    - Go claims each spool file atomically and parses it
+    - Go claims each spool file atomically by rename (inotify wake-up, DELIVERY_FILE_POLL_INTERVAL_SECONDS polling fallback)
+    - Go parses it as an RFC 3464 DSN, an RFC 5965 ARF feedback report or a non-standard bounce
     - resolve VERP token, envelope id, X-Smarthost-Message-ID, queue identifier or original recipient
     - append message event (source dsn_spool, keyed by the Maildir unique file name)
     - update message current state
-    - create/update suppression signal where policy requires
+    - apply the global suppression policy (suppression_and_reputation.global_suppression_policy)
+    - write message.hard_bounced / message.complained to the outbox on the corresponding state change
+    - all of the above in one transaction; then move the file to done/
+  feedback_loop_address: >-
+    feedback-loop (ARF) reports are accepted at the VERP return path of the reported message or
+    at the plain base address <SMARTHOST_VERP_LOCAL_PART>@<bounce domain>, which is the address
+    to register with mailbox providers' feedback loops
+  parsing:
+    standards: [RFC 3464 multipart/report delivery-status, RFC 6533 global delivery-status, RFC 5965 ARF feedback-report]
+    fields: >-
+      Final-Recipient, Original-Recipient, Action, Status, Diagnostic-Code, Reporting-MTA,
+      Remote-MTA, Original-Envelope-Id, X-Postfix-Queue-ID, Arrival-Date, Last-Attempt-Date and
+      the returned headers (Message-ID, X-Smarthost-Message-ID, From); none is assumed present
+    safety:
+      - DSN content is data only; it is never executed, rendered or trusted as instructions
+      - bounded file size, MIME depth, part count and header size; oversized or malformed input becomes an unmatched DSN
+      - the stored raw message is bounded and made valid UTF-8 (the spool file stays the byte-exact original until retention)
+  correlation:
+    order:
+      - VERP token of the envelope recipient (the Delivered-To header Postfix prepends)
+      - Original-Envelope-Id (ENVID = Smarthost message id)
+      - X-Smarthost-Message-ID or a Smarthost Message-ID in the returned headers
+      - X-Postfix-Queue-ID
+      - >-
+        the recipient address combined with other evidence: exactly one message to that
+        D-18-normalised recipient created within the previous 7 days, with a Postfix queue id,
+        whose job sender equals the From of the returned headers
+    rules:
+      - a VERP token, envelope id or message id that names no message is not correlation evidence
+      - never guess from the recipient address alone; several candidates mean no correlation
+      - an uncorrelated DSN becomes an unmatched_dsns row; it never becomes a guessed message event
+      - >-
+        a DSN correlated to a message whose per-recipient report cannot be reconciled (several
+        recipient blocks, none for the message's recipient, or no interpretable status) appends
+        dsn_unmatched to that message
+  classification_rules:
+    - Action failed with a 5.x.x status is hard_bounce; with a 4.x.x status soft_bounce (a final temporary failure)
+    - Action delayed is deferred (connection_failure when the failure scope is connection)
+    - Action delivered, relayed or expanded is informational and records no event
+    - without Action, a 5.x.x status is hard_bounce and a 4.x.x status deferred; a temporary failure never becomes permanent
+    - a missing Status is taken from the Diagnostic-Code (enhanced code, or the basic SMTP reply class)
+    - an ARF feedback report of type abuse (or a missing feedback type) correlated to an exact message is complaint
+    - failure_scope comes from the shared Go classifier, the same for Postfix log and DSN evidence
+  processed_spool_retention: >-
+    processed files are kept in done/ for DELIVERY_DSN_RETENTION_DAYS (default 7) and then
+    deleted; the database event or unmatched_dsns row is the durable record. Unreadable files
+    go to failed/ and raise an operator alert.
+  crash_recovery: >-
+    a file left in processing/ for longer than DELIVERY_LEASE_SECONDS is reclaimed by rename and
+    reprocessed; the (dsn_spool, Maildir unique name) event key and unmatched_dsns.spool_ingest_key
+    make reprocessing idempotent
   unmatched_dsns:
     storage: unmatched_dsns table (operator-facing diagnostic state, not tenant-owned)
     retention: keep raw and parsed information sufficient to investigate and later resolve
@@ -986,6 +1079,13 @@ inbound_bounce_handling:
       - the resolution is queued for Go (status match_requested)
       - Go interprets the DSN and creates the appropriate message transport event
       - the original unmatched record is retained, recording who resolved it, when, and the matched message
+    resolution_failure: >-
+      if Go cannot interpret the retained DSN for the requested message (no failure status), it
+      returns the row to open and records the reason in detail_json; no event is created
+    dismissal: an operator may dismiss an open row with a written reason (resolution_note); dismissal records resolved_at
+    operator_interface: >-
+      until the Phase 6 operator dashboard exists, the workflow is driven by audited Symfony
+      console commands (list, show, match, dismiss)
   classifications:
     - hard_bounce
     - soft_bounce
@@ -1119,9 +1219,12 @@ suppression_and_reputation:
     - repeated_soft_bounce
     - operator_block
     - client_abuse_block
+    - recipient_global_opt_out
   distinction: >-
     Smarthost suppression is transport/reputation safety state. It is not the same as a client's
-    mailing-list membership, consent or unsubscribe business state.
+    mailing-list membership, consent or unsubscribe business state. The single exception is the
+    explicit recipient global opt-out (D-30): a do-not-contact instruction for the whole
+    Smarthost installation that a trusted client reports; Smarthost then owns that state.
   address_matching:
     normalisation: trim surrounding whitespace, preserve the local part exactly, lowercase/canonicalise the domain
     exact_rule:
@@ -1144,6 +1247,10 @@ suppression_and_reputation:
       bounces within a configurable rolling window (default 30 days)
     reset: a later remote_accepted outcome for the address resets the consecutive count
     counts: soft_bounce events whose failure_scope is recipient
+    evaluation: >-
+      global (D-30): across every client's messages to the same D-18-normalised address; each
+      message counts at most once (a Postfix log bounce and the DSN about the same failure are
+      one occurrence); soft bounces of other scopes neither count nor reset
     does_not_count:
       - provider-wide rate limiting
       - connection failures
@@ -1159,9 +1266,84 @@ suppression_and_reputation:
       - infrastructure
       - unknown
     configuration: [DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD, DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS]
-  automatic_suppression_scope: >-
-    whether automatically created suppressions (hard bounce, complaint, repeated soft bounce) are
-    client-scoped or global is to be decided before Phase 5; the schema supports both
+  global_suppression_policy:
+    # D-30
+    scope: >-
+      automatic transport suppressions and recipient global opt-outs are global across the whole
+      Smarthost installation (suppressions.client_id IS NULL, scope_type address) and apply to
+      every current and future client
+    creates_global_address_suppression:
+      hard_bounce: >-
+        an authoritative permanent (5.x.x) failure attributed to the recipient (failure_scope
+        recipient), confidently correlated to a message and its D-18-normalised address
+      complaint: an ARF complaint correlated to an exact message
+      repeated_soft_bounce: the repeated_soft_bounce rule below, evaluated across all clients
+      recipient_global_opt_out: an explicit global opt-out reported by a client holding can_submit_global_suppressions
+    never_creates_global_suppression:
+      - a single temporary/soft bounce
+      - provider-wide throttling
+      - sender or IP reputation rejection
+      - domain-level policy failure
+      - DNS failure
+      - connection failure
+      - TLS failure
+      - remote infrastructure failure
+      - general domain deferral
+      - an ambiguous transport outcome or outcome_unknown
+      - validation results alone
+      - a DSN or complaint that is not confidently correlated (it stays an unmatched DSN for the operator)
+      - an ordinary list, newsletter, campaign or client unsubscribe
+    attribution: >-
+      a permanent failure creates a hard_bounce suppression only when its failure_scope is
+      recipient; the classifier assigns recipient only to mailbox-specific conditions (e.g.
+      x.1.1, x.1.6, x.2.1, x.2.2) without policy, reputation, DNS or connection evidence
+    same_policy_for_every_source: >-
+      the policy is applied by Go to every newly appended authoritative event in the
+      transaction that appends it, whether the evidence came from the Postfix log, an inbound DSN
+      or an operator-requested unmatched-DSN resolution; replayed (de-duplicated) evidence
+      changes nothing
+    lifetimes:
+      hard_bounce: indefinite until explicitly lifted
+      complaint: indefinite until explicitly lifted by an operator
+      recipient_global_opt_out: indefinite until lifted by the reporting client or an operator
+      repeated_soft_bounce: >-
+        temporary: expires_at = creation + DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS, so a
+        temporary mailbox condition never becomes permanent; a new qualifying sequence after
+        expiry creates a new suppression
+      operator_block: indefinite unless the operator sets an expiry
+    active: lifted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+    matching:
+      address: exact D-18-normalised address (local part byte-for-byte, domain lower-cased)
+      domain: the lower-cased normalised domain; global domain blocks are an operator function only
+    precedence: >-
+      any active applicable suppression stops submission; independent rows (different reasons or
+      reporting clients) coexist and are never collapsed into one mutable row; lifting one row
+      never makes an address sendable while another applicable row is active
+    uniqueness: >-
+      at most one active global address suppression per address and reason for hard_bounce and
+      complaint, per address for repeated_soft_bounce, and per reporting client and address for
+      recipient_global_opt_out; repeated or concurrent evidence does not create duplicates
+    provenance:
+      system: source_message_id and source_event_id name the message and the authoritative event
+      client_opt_out: >-
+        source_client_id (the reporting client; client_id stays NULL and never means the
+        reporter), created_at, the normalised address, the reason, an optional client
+        external_reference, and an audit_log entry
+      operator: the audit_log entry names the operator (actor user) and the written note
+    lifting:
+      mechanism: set lifted_at; rows are never deleted as the normal unsuppression mechanism (only configured retention deletes)
+      client: >-
+        the reporting client (with the capability) may lift only its own active
+        recipient_global_opt_out row; the operation is idempotent and audited
+      operator: an operator may lift any suppression through an audited console command with a written note
+    future_sends: >-
+      Go checks for an active applicable suppression when it creates a message and again
+      immediately before submission; a match records message_suppressed and nothing is
+      submitted to Postfix. Mail Postfix has already accepted is not recalled.
+    client_api_limits:
+      - address scope only; a client can never create a domain suppression
+      - only reason recipient_global_opt_out; system reasons cannot be forged
+      - the representation never reveals other clients' or system suppressions of the address
   provider_reputation:
     future_metrics:
       - rolling_bounce_rate
@@ -1193,6 +1375,7 @@ schema:
         - status
         - plan
         - created_at
+        - can_submit_global_suppressions
     users:
       purpose: human dashboard login accounts; never API keys
       key_fields:
@@ -1411,6 +1594,10 @@ schema:
         - created_at
         - expires_at_nullable
         - lifted_at_nullable
+        - source_event_id
+        - source_client_id
+        - external_reference
+        - idempotency_key
     disposable_domains:
       key_fields:
         - domain
@@ -1490,6 +1677,10 @@ schema:
     - messages.postfix_queue_id
     - message_events.message_id_occurred_at
     - suppressions.address_or_domain_scope
+    - suppressions.global_address_reason_active_unique
+    - suppressions.source_client_id_idempotency_key_unique
+    - suppressions.source_client_id_address_active_opt_out_unique
+    - messages.recipient_address
     - api_keys.key_hash_unique
     - send_jobs.client_id_status
     - validation_jobs.client_id_status
@@ -1515,6 +1706,9 @@ schema:
     - send_job_recipients are immutable once the job leaves collecting, except purging rendered content
     - webhook signing secrets are stored encrypted, never in plaintext
     - external references are client-scoped
+    - >-
+      suppressions.client_id only scopes a suppression (NULL = global); the client that reported
+      a global opt-out is recorded separately in source_client_id (D-30)
     - every tenant-owned row is scoped by client directly or through an enforced parent relation
     - users.email is unique case-insensitively as a login-identity rule; it is never the SMTP mailbox-normalisation rule
 
@@ -1541,6 +1735,7 @@ security:
     - bounce-rate monitoring
     - complaint-rate monitoring
     - global suppression capability
+    - recipient global opt-out reporting only for operator-approved clients (can_submit_global_suppressions)
     - sending-domain verification (DNS TXT challenge)
   dkim:
     - private keys available to OpenDKIM only
@@ -1639,6 +1834,7 @@ testing:
     - outbound mail is DKIM-signed by OpenDKIM; milter failure causes tempfail and retry, never unsigned sending
     - fake SMTP simulates 250, 421, 450, 451, 550, timeout and connection-refused cases
     - inbound synthetic DSN maps to the correct VERP/message
+    - a global suppression caused or reported through one client stops submission for another client
     - lost log events are recovered or produce outcome_unknown through reconciliation
     - open pixel records one or more events safely
     - click redirect records event then redirects to stored target
@@ -1849,12 +2045,19 @@ implementation_phases:
       - DSN parser
       - VERP resolution
       - hard/soft bounce policy including repeated-soft-bounce rule
-      - suppression records
-      - unmatched DSN handling and operator resolution
+      - ARF complaint parsing
+      - global suppression records with provenance (D-30)
+      - trusted-client recipient global opt-out API and operator capability
+      - suppression lifting (client and operator) with audit
+      - unmatched DSN handling and operator resolution (console commands until Phase 6)
+      - processed spool retention
     acceptance:
       - synthetic DSNs resolve exact messages
       - hard bounces create suppression
       - temporary failures do not immediately create permanent suppression
+      - recipient-specific hard bounces and complaints create global suppressions; non-recipient failures do not
+      - a global suppression stops submission for every client
+      - DSN processing is idempotent across crash, retry and restart
   - phase: 6
     name: tracking_and_dashboards
     objective: expose useful operational and client visibility
@@ -2013,4 +2216,21 @@ revision_history:
       destruction stays a separate explicit operation.
     decisions_incorporated:
       - D-35
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.4"
+    date: "2026-10-04"
+    summary: >-
+      Resolves D-30: automatic transport suppressions (recipient-specific hard bounce, verified
+      complaint, repeated recipient soft bounces) are global across the installation
+      (client_id NULL) and apply to every client; temporary, provider, reputation, domain, DNS,
+      connection, TLS, infrastructure and ambiguous outcomes never create one; repeated soft
+      bounces are evaluated globally and give a temporary suppression lasting the configured
+      window. Adds the recipient_global_opt_out reason, reported through POST
+      /v1/global-suppressions only by clients an operator granted can_submit_global_suppressions,
+      with explicit provenance (source_client_id, source_event_id), idempotent creation and
+      client/operator lifting that never deletes history or overrides independent suppressions.
+      Ordinary unsubscribes remain client business state. Details the inbound DSN/ARF parsing,
+      correlation, classification, unmatched-DSN workflow and spool retention.
+    decisions_incorporated:
+      - D-30
     decision_log: docs/architecture/open-decisions.md

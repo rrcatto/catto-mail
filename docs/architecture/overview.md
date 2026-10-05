@@ -1,6 +1,6 @@
 # Smarthost Architecture Overview
 
-**Status:** summary of specification 2.3. The authoritative sources are
+**Status:** summary of specification 2.4. The authoritative sources are
 `docs/20260908-1644-smarthost-llm-spec.yaml` and its human-readable companion
 `docs/20260908-1644-smarthost-human-specification.md`. If this page disagrees with them, they win.
 It adds no architecture of its own. It maps the specification onto the contract files and shows
@@ -14,7 +14,8 @@ the main flows on one page.
 | Public API, batched send ingestion, webhooks | `api`, `sending.ingestion` | `docs/api/openapi.v1.yaml` |
 | Tables, constraints, indexes, grants | `schema`, `postgres.roles_and_privileges` | `docs/schema/reference-schema.sql`, `docs/schema/schema.md` |
 | Configuration | `instruction_for_llm.normative_contracts` | `docs/contracts/environment.md`, `infra/.env.example` |
-| Postfix, OpenDKIM, logs, snapshots, DSN spool, reconciliation | `go_delivery.initial_integration_strategy`, `opendkim`, `transport_reconciliation` | `docs/architecture/postfix-integration.md` |
+| Postfix, OpenDKIM, logs, snapshots, DSN spool, reconciliation | `go_delivery.initial_integration_strategy`, `opendkim`, `transport_reconciliation`, `inbound_bounce_handling` | `docs/architecture/postfix-integration.md` |
+| Global suppression policy, recipient global opt-out (D-30) | `suppression_and_reputation.global_suppression_policy`, `api.authentication.capabilities` | `docs/contracts/status-vocabulary.yaml`, `docs/api/openapi.v1.yaml`, `docs/schema/schema.md` |
 | Cross-language conventions | `instruction_for_llm.implementation_style` | `docs/architecture/conventions.md` |
 | Decision history (log only, not authority) | `revision_history` | `docs/architecture/open-decisions.md` |
 
@@ -27,7 +28,8 @@ PostgreSQL ◄── all Smarthost services (internal network only; per-service 
 Python validator ──(RCPT probes, never DATA)──► remote MX / fake SMTP
 Go delivery ──SMTP 587──► Postfix ──milter──► OpenDKIM
                           Postfix ──► Internet / Mailpit (dev)
-Internet ──25──► Postfix ──Maildir──► DSN spool ──► Go
+Internet ──25──► Postfix ──Maildir──► DSN spool ──► Go (DSN/ARF parsing, correlation,
+                                                        global suppression policy, D-30)
 Postfix ──► observability volume (log/, queue/ snapshots) ──read-only──► Go
 ```
 
@@ -80,6 +82,7 @@ stateDiagram-v2
     created --> queued: message_queued
     queued --> submitted: submitted_to_postfix
     queued --> failed: submission_failed
+    queued --> suppressed: message_suppressed (re-check before submission)
     submitted --> deferred
     submitted --> remote_accepted
     submitted --> soft_bounced

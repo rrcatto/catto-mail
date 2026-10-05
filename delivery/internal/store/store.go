@@ -36,7 +36,12 @@ import (
 var ErrLeaseLost = errors.New("send-job lease lost (expired, reclaimed, cancelled or client suspended)")
 
 // Store wraps the connection pool.
-type Store struct{ Pool *pgxpool.Pool }
+type Store struct {
+	Pool *pgxpool.Pool
+	// Policy configures the global suppression policy (D-30) applied to every
+	// authoritative event this store appends.
+	Policy PolicyConfig
+}
 
 // New opens a pool for dsn.
 func New(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
@@ -49,7 +54,7 @@ func New(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{Pool: pool}, nil
+	return &Store{Pool: pool, Policy: DefaultPolicy}, nil
 }
 
 // Close closes the pool.
@@ -137,12 +142,17 @@ RETURNING j.lease_expires_at`, jobID, me, lease.Seconds()).Scan(&until)
 // ---------------------------------------------------------------------------
 // Transactions
 
-// tx is one transaction with the job rows it has locked and the per-job
-// summary-count deltas to write before commit.
+// tx is one transaction with the job rows it has locked, the per-job
+// summary-count deltas to write before commit, and the suppression-policy work
+// (D-30) of the authoritative events appended in it.
 type tx struct {
 	pgx.Tx
 	locked map[string]map[string]int // job id -> summary counts (as locked)
 	deltas map[string]map[string]int
+	policy []policyItem
+	cfg    PolicyConfig
+	// Suppressions lists the suppressions created at commit (tests, logs).
+	suppressions []CreatedSuppression
 }
 
 func (s *Store) begin(ctx context.Context) (*tx, error) {
@@ -150,7 +160,7 @@ func (s *Store) begin(ctx context.Context) (*tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tx{Tx: t, locked: map[string]map[string]int{}, deltas: map[string]map[string]int{}}, nil
+	return &tx{Tx: t, locked: map[string]map[string]int{}, deltas: map[string]map[string]int{}, cfg: s.Policy}, nil
 }
 
 // fence locks the job row and checks that the lease is still ours.
@@ -217,9 +227,15 @@ func (t *tx) count(jobID, from, to string) {
 	}
 }
 
-// commit writes the summary-count deltas (messages per current_status, the
-// OpenAPI MessageStatusCounts) to the locked job rows and commits.
+// commit applies the suppression policy of the events appended in this
+// transaction (D-30, in address order so concurrent transactions cannot
+// deadlock on the per-address locks), writes the summary-count deltas (messages
+// per current_status, the OpenAPI MessageStatusCounts) to the locked job rows
+// and commits.
 func (t *tx) commit(ctx context.Context) error {
+	if err := t.applyPolicy(ctx); err != nil {
+		return err
+	}
 	for jobID, d := range t.deltas {
 		counts, ok := t.locked[jobID]
 		if !ok {
@@ -268,8 +284,18 @@ type msgState struct {
 
 // appendEvent inserts ev (de-duplicated by source key) and projects it onto the
 // message. The caller holds the job row lock. It returns whether the event was
-// new and the status transition it caused.
+// new.
 func (t *tx) appendEvent(ctx context.Context, m *msgState, ev Event) (bool, error) {
+	_, inserted, err := t.appendEventID(ctx, m, ev)
+	return inserted, err
+}
+
+// appendEventID is appendEvent that also returns the new event's id. A new
+// authoritative bounce or complaint is queued for the suppression policy, so
+// the policy is the same whatever the evidence source (Postfix log, DSN spool,
+// unmatched-DSN resolution) and a replayed event (same source key) changes
+// nothing.
+func (t *tx) appendEventID(ctx context.Context, m *msgState, ev Event) (string, bool, error) {
 	meta := ev.Metadata
 	if meta == nil {
 		meta = map[string]any{}
@@ -284,29 +310,40 @@ ON CONFLICT (event_source, source_event_key) WHERE source_event_key IS NOT NULL 
 RETURNING id::text`, ids.UUIDv7(), ev.MessageID, ev.Type, ev.Source, ev.Key, ev.FailureScope, ev.SMTPCode,
 		ev.Enhanced, ev.RemoteHost, truncate(ev.Diagnostic, 2000), string(rawMeta), ev.OccurredAt.UTC()).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil // already recorded (replay)
+		return "", false, nil // already recorded (replay)
 	}
 	if err != nil {
-		return false, err
+		return "", false, err
+	}
+	switch ev.Type {
+	case "hard_bounce", "soft_bounce", "complaint":
+		t.policy = append(t.policy, policyItem{messageID: m.ID, eventID: id, eventType: ev.Type, scope: ev.FailureScope})
 	}
 	next, changed := status.Next(m.Status, status.SetsStatus[ev.Type])
 	if !changed {
-		return true, nil
+		return id, true, nil
 	}
 	if _, err := t.Exec(ctx, `
 UPDATE messages SET current_status = $2,
        resolved_at = CASE WHEN $3 THEN COALESCE(resolved_at, $4) ELSE resolved_at END
  WHERE id = $1`, m.ID, next, status.Terminal[next], ev.OccurredAt.UTC()); err != nil {
-		return true, err
+		return id, true, err
 	}
 	t.count(m.JobID, m.Status, next)
-	if next == "hard_bounced" { // first (and only) entry into hard_bounced: outbox once
+	// First (and only) entry into hard_bounced / complained: outbox once, in this
+	// transaction (D-22). Ranks make each entry happen at most once.
+	switch next {
+	case "hard_bounced":
 		if err := t.outbox(ctx, m.ClientID, "message.hard_bounced", "message", m.ID); err != nil {
-			return true, err
+			return id, true, err
+		}
+	case "complained":
+		if err := t.outbox(ctx, m.ClientID, "message.complained", "message", m.ID); err != nil {
+			return id, true, err
 		}
 	}
 	m.Status = next
-	return true, nil
+	return id, true, nil
 }
 
 func (t *tx) outbox(ctx context.Context, clientID, eventType, subjectType, subjectID string) error {
@@ -384,8 +421,8 @@ SELECT r.id::text, r.external_recipient_reference, r.email_address, r.normalized
 type Suppression struct{ ID, Value, Scope, Reason string }
 
 // ActiveSuppressions returns the active suppressions (global or of the client)
-// matching any of the normalised addresses or their domains. Phase 4 only
-// honours existing rows; it never creates suppressions (Phase 5, D-30).
+// matching any of the normalised addresses or their domains: not lifted and not
+// expired. Global rows (client_id NULL, D-30) apply to every client.
 func (s *Store) ActiveSuppressions(ctx context.Context, clientID string, addresses, domains []string) ([]Suppression, error) {
 	rows, err := s.Pool.Query(ctx, `
 SELECT id::text, address_or_domain, scope_type, reason FROM suppressions

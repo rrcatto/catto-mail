@@ -299,7 +299,7 @@ SELECT m.id::text, m.send_job_id::text, m.postfix_queue_id, m.verp_token, e.last
 
 // PendingDSN reports an unresolved unmatched DSN that may concern the
 // message (by VERP token or queue id): an authoritative outcome exists but
-// awaits operator resolution (Phase 5), so no outcome_unknown is concluded.
+// awaits operator resolution (D-05), so no outcome_unknown is concluded.
 func (s *Store) PendingDSN(ctx context.Context, verp, qid string) (bool, error) {
 	var ok bool
 	err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM unmatched_dsns WHERE status IN ('open', 'match_requested')

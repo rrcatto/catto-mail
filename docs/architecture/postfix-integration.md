@@ -1,6 +1,6 @@
 # Postfix Integration Contract
 
-**Status:** normative contract for specification 2.3 (spec `go_delivery.initial_integration_strategy`,
+**Status:** normative contract for specification 2.4 (spec `go_delivery.initial_integration_strategy`,
 `service_topology.opendkim`, `transport_reconciliation`). This document describes the
 mechanics. It does not change the architecture.
 
@@ -185,7 +185,9 @@ attempt fails with `read-only file system`.
 **Postfix configuration.**
 * The bounce domain is a `virtual_mailbox_domains` entry.
 * Recipients are accepted only for `{SMARTHOST_VERP_LOCAL_PART}{SMARTHOST_VERP_DELIMITER}*`,
-  `postmaster@` and a registered feedback-loop address. All other recipients are rejected at RCPT.
+  `postmaster@` and the feedback-loop address, which is the plain base address
+  `{SMARTHOST_VERP_LOCAL_PART}@{bounce domain}` (to be registered with mailbox providers' feedback
+  loops). All other recipients are rejected at RCPT.
 * There is no relaying and no milter.
 * Accepted mail is delivered by `virtual(8)` to `inbound/` as
   `SMARTHOST_DELIVERY_UID:SMARTHOST_SPOOL_GID` (`virtual_uid_maps`/`virtual_gid_maps`).
@@ -223,21 +225,34 @@ why Go must run as `SMARTHOST_DELIVERY_UID`: a group member could not read them.
 **Atomic claim and processing.**
 1. Go claims a file with `rename("inbound/new/F", "processing/F")`. All directories are on one
    volume, so the rename is atomic and exactly one worker wins. The loser gets `ENOENT`.
-2. Go parses the DSN (RFC 3464), the ARF complaint (RFC 5965), or a non-standard bounce. It
-   correlates in this order:
-   1. VERP token
+2. Go parses the DSN (RFC 3464, or RFC 6533 `message/global-delivery-status`), the ARF complaint
+   (RFC 5965), or a non-standard bounce (whose quoted headers are scanned for a Smarthost
+   Message-ID). It correlates in this order:
+   1. VERP token of the topmost `Delivered-To` / `X-Original-To` (the header the receiving Postfix
+      prepends; lower ones are ignored)
    2. `Original-Envelope-Id`
-   3. `X-Smarthost-Message-ID`
+   3. `X-Smarthost-Message-ID` or a Smarthost `Message-ID` in the returned headers
    4. `X-Postfix-Queue-ID`
-   5. `Original-Recipient`
+   5. `Original-Recipient`/`Final-Recipient` (or ARF `Original-Rcpt-To`) combined with other
+      evidence: exactly one message to that normalised address within 7 days, with a queue id, whose
+      job sender equals the returned `From`
+
+   An identifier that names no message is not evidence; two identifiers naming different messages
+   are a conflict. Anything not correlated with certainty becomes an `unmatched_dsns` row.
 3. Go opens one transaction:
    * **If matched:** it appends the event (with `failure_scope` for bounces and deferrals),
-     projects status, applies suppression policy, and inserts into `webhook_events` for hard
-     bounces and complaints.
+     projects status, applies the global suppression policy (D-30), and inserts into
+     `webhook_events` for the first entry into `hard_bounced` or `complained`. A report that cannot
+     be reconciled with the matched message appends `dsn_unmatched`; a report of success
+     (`delivered`/`relayed`/`expanded`, ARF types other than `abuse`) records nothing.
    * **Otherwise:** it inserts an `unmatched_dsns` row with the raw and parsed data.
 4. Go commits, then renames the file to `done/F`.
-5. **Crash recovery.** Files left in `processing/` longer than `DELIVERY_LEASE_SECONDS` are
-   re-processed. The unique ingestion key makes this safe.
+5. **Crash recovery.** Files left in `processing/` longer than `DELIVERY_LEASE_SECONDS` (by their
+   claim time, the rename's ctime) are reclaimed by renaming them to `processing/<key>#<worker>-<nonce>`
+   (one winner) and re-processed; the key is the name up to `:` or `#`. A database error keeps the
+   claim for an in-process retry. The unique ingestion key makes all of this safe.
+6. **Retention.** Hourly, files in `done/` older than `DELIVERY_DSN_RETENTION_DAYS` (modification
+   time, i.e. Postfix's delivery time) are deleted; database rows are never touched.
 
 **Unmatched DSN resolution.**
 1. An operator identifies the candidate message in the dashboard. Symfony sets
@@ -352,7 +367,8 @@ These clarify the mechanics above as implemented and observed against Postfix 3.
   enhanced code or text (`dns`, `recipient`, `provider_policy`, `connection`, `infrastructure`,
   `domain`, `unknown`); `status=bounced` is `hard_bounce` (5.x.x) or `soft_bounce` (4.x.x), and
   `status=expired` is `soft_bounce`. A first entry into `hard_bounced` writes `message.hard_bounced`
-  to the outbox. Phase 4 creates no suppressions (Phase 5).
+  to the outbox. (Phase 4 created no suppressions; since Phase 5 these log events feed the global
+  suppression policy of §5 and §10, exactly like DSN evidence.)
 * **Hold rule.** A `cleanup` record of a Smarthost message whose queue id is being recorded (SMTP
   reply in flight) stops the ingestion batch for up to 60 s, so the message's later records are
   correlated. Should two messages ever share a queue id, a record belongs to the newest message
@@ -361,3 +377,24 @@ These clarify the mechanics above as implemented and observed against Postfix 3.
   no gap larger than three snapshot intervals, the newest being at most three intervals old (this is
   why `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` is also a delivery variable). A pass also completes
   dispatched jobs whose messages are all terminal.
+
+## 10. Phase 5 implementation notes (observed)
+
+These clarify §5 as implemented and observed against Postfix 3.10 in the development pod
+(`smarthostctl test phase5-e2e`). They change no architecture.
+
+* **Path.** A synthetic DSN sent over SMTP to `postfix:25` for `bounce+<token>@<bounce domain>`
+  (envelope sender `<>`) is delivered by `virtual(8)` into `inbound/new` with a prepended
+  `Delivered-To:`; inotify wakes Go, which claims and ingests it within about a second.
+* **Our own bounces.** Postfix's own DSNs (expiry, synchronous 5xx) also reach the spool, because
+  their recipient is the VERP return path. They carry our `X-Postfix-Queue-ID` and ENVID. The
+  resulting `dsn_spool` event is a second piece of evidence for the same failure as the
+  `postfix_log` event; projection is rank-based and the suppression policy finds the active row, so
+  nothing is duplicated except the evidence itself.
+* **Relay acceptance then DSN.** A relay may answer `250` (`remote_accepted` from the log) and the
+  final mailbox later return a DSN. The DSN supersedes the acceptance (higher rank), and that
+  acceptance is not a reset of the repeated-soft-bounce sequence.
+* **Event time.** A DSN's event time is `Last-Attempt-Date`, else `Date`, else the Maildir receipt
+  time (the epoch in the file name); implausible times are replaced by the receipt time.
+* **Phase 1 verification.** T16 stops the daemon while it observes raw Maildir delivery, since the
+  running daemon now claims spool files itself.

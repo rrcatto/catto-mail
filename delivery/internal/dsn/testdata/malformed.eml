@@ -1,0 +1,7 @@
+Delivered-To: {{VERP}}
+From: MAILER-DAEMON@mx.example.org
+Subject: broken
+Content-Type: multipart/report; report-type=delivery-status
+
+This claims to be multipart but has no boundary parameter.
+Status: 5.1.1

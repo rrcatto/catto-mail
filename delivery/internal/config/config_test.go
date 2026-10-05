@@ -22,6 +22,7 @@ func valid() map[string]string {
 		"DELIVERY_DSN_NOTIFY": "FAILURE,DELAY", "DELIVERY_DSN_RET": "HDRS", "DELIVERY_FILE_POLL_INTERVAL_SECONDS": "2",
 		"DELIVERY_RECONCILE_INTERVAL_SECONDS": "300", "DELIVERY_RECONCILE_GRACE_SECONDS": "3600", "DELIVERY_RECONCILE_MIN_SNAPSHOTS": "2",
 		"POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS": "60", "SMARTHOST_LOG_LEVEL": "info", "SMARTHOST_LOG_FORMAT": "json",
+		"DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD": "3", "DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS": "30", "DELIVERY_DSN_RETENTION_DAYS": "7",
 	}
 }
 
@@ -32,6 +33,9 @@ func TestValidConfig(t *testing.T) {
 	}
 	if c.PublicBaseURL != "https://smarthost.localhost" || c.BounceDomain != "bounce.example" || c.SubmissionAddr() != "postfix:587" {
 		t.Fatalf("%+v", c)
+	}
+	if c.SoftBounceThreshold != 3 || c.SoftBounceWindow.Hours() != 720 || c.DSNRetention.Hours() != 168 {
+		t.Fatalf("phase 5 settings: %+v", c)
 	}
 	if !strings.Contains(c.DSN(), `password='x\'y'`) {
 		t.Fatalf("dsn quoting: %s", c.DSN())
@@ -48,6 +52,8 @@ func TestFailsClosed(t *testing.T) {
 		"live outside prod":    func(m map[string]string) { m["SMARTHOST_LIVE_DELIVERY_ENABLED"] = "true" },
 		"http base url":        func(m map[string]string) { m["SMARTHOST_PUBLIC_BASE_URL"] = "http://x" },
 		"one snapshot":         func(m map[string]string) { m["DELIVERY_RECONCILE_MIN_SNAPSHOTS"] = "1" },
+		"zero threshold":       func(m map[string]string) { m["DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD"] = "0" },
+		"missing retention":    func(m map[string]string) { delete(m, "DELIVERY_DSN_RETENTION_DAYS") },
 		"bad integer":          func(m map[string]string) { m["DELIVERY_GLOBAL_CONCURRENCY"] = "ten" },
 		"both value and _FILE": func(m map[string]string) { m["DELIVERY_DB_PASSWORD_FILE"] = "/x" },
 	} {

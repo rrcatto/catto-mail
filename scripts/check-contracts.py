@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smarthost contract consistency check (specification 2.3).
+"""Smarthost contract consistency check (specification 2.4).
 
 Cross-checks the canonical YAML specification, the human specification and the
 normative contract files so they cannot drift silently:
@@ -49,10 +49,10 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.3"
+EXPECTED_SPEC_VERSION = "2.4"
 EXPECTED_SPEC_DATE = "2026-10-04"
-# Decisions that must be incorporated across the revision history (D-30 is still open).
-EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 36)} - {"D-30"}
+# Decisions that must be incorporated across the revision history (all of D-01..D-35).
+EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 36)}
 
 # vocabulary key -> path of the enumerating list in the spec
 SPEC_LISTS = {
@@ -156,6 +156,7 @@ HUMAN_REQUIRED_TOPICS = [
     "reconciliation", "outcome_unknown", "unmatched DSN", "compliance gate", "at most 500", "10 MiB",
     "List-Unsubscribe-Post", "external_address_reference", "lease_expires_at",
     "source event key", "Reply-To", "Revision History",
+    "recipient_global_opt_out", "global suppression", "can_submit_global_suppressions",
 ]
 
 failures: list[str] = []
@@ -320,15 +321,24 @@ def check_openapi(spec: dict, vocab: dict, api: dict) -> None:
     check("recipients" not in schemas["SendJobCreateRequest"]["properties"],
           "openapi: send-job creation must accept job-level metadata only (D-24)")
     for name in ("ValidationJobCreateRequest", "ValidationAddressInput", "SendJobCreateRequest",
-                 "Recipient", "RecipientBatchRequest"):
+                 "Recipient", "RecipientBatchRequest", "GlobalOptOutCreateRequest"):
         props = schemas[name]["properties"]
         check("client_id" not in props, f"openapi: {name} must not accept client_id")
         check("headers" not in props, f"openapi: {name} must not accept arbitrary headers (D-25)")
-    for path in ("/validation-jobs", "/send-jobs", "/send-jobs/{id}/recipients"):
+    for path in ("/validation-jobs", "/send-jobs", "/send-jobs/{id}/recipients", "/global-suppressions"):
         refs = [p.get("$ref") for p in api["paths"][path]["post"].get("parameters", [])]
         check("#/components/parameters/IdempotencyKey" in refs, f"openapi: POST {path} lacks Idempotency-Key")
     check(api["components"]["parameters"]["IdempotencyKey"]["required"] is True,
           "openapi: Idempotency-Key must be required")
+    # D-30: a client can only report the recipient global opt-out, address-scoped.
+    opt_out = schemas.get("GlobalOptOutCreateRequest", {})
+    check(set(opt_out.get("properties", {})) == {"email_address", "external_reference"}
+          and opt_out.get("additionalProperties") is False,
+          "openapi: GlobalOptOutCreateRequest must accept only email_address and external_reference (D-30)")
+    reason_enum = schemas.get("GlobalOptOut", {}).get("properties", {}).get("reason", {}).get("enum")
+    check(reason_enum == ["recipient_global_opt_out"], "openapi: GlobalOptOut.reason must be recipient_global_opt_out only (D-30)")
+    check("recipient_global_opt_out" in vocab_values(vocab, "suppression_reason"),
+          "vocabulary: suppression_reason lacks recipient_global_opt_out (D-30)")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 // Command smarthost-delivery is the Go delivery/control daemon (Phase 4).
 //
-//	run [--stats-file PATH]   the daemon: send jobs, Postfix log ingestion, reconciliation
+//	run [--stats-file PATH]   the daemon: send jobs, Postfix log ingestion, reconciliation,
+//	                          inbound DSN/complaint spool, unmatched-DSN resolutions
 //	health                    container health check (heartbeat age)
 //	normalize ADDRESS         print the D-32 normalised form
 //	identity                  uid/gid/groups (Phase 1 verification)
@@ -9,6 +10,8 @@
 //	check-spool [--claim]     reads (and atomically claims) DSN spool files
 //
 // The daemon has no public API and no inbound SMTP listener (spec go_delivery).
+// Postfix receives DSNs on port 25 and delivers them to the shared spool; the
+// daemon only reads and claims the spool files.
 package main
 
 import (
@@ -24,6 +27,8 @@ import (
 
 	"smarthost.local/delivery/internal/address"
 	"smarthost.local/delivery/internal/config"
+	"smarthost.local/delivery/internal/dsnspool"
+	"smarthost.local/delivery/internal/ids"
 	"smarthost.local/delivery/internal/ingest"
 	"smarthost.local/delivery/internal/logx"
 	"smarthost.local/delivery/internal/reconcile"
@@ -104,6 +109,7 @@ func run(args []string) int {
 		return 1
 	}
 	defer st.Close()
+	st.Policy = store.PolicyConfig{SoftBounceThreshold: cfg.SoftBounceThreshold, SoftBounceWindow: cfg.SoftBounceWindow}
 	w := worker.New(cfg, st, log)
 	log.Info("delivery daemon started", "worker_id", w.Me, "global_concurrency", cfg.GlobalConcurrency,
 		"per_domain_concurrency", cfg.DomainConcurrency, "per_domain_rate_per_minute", cfg.DomainRatePerMin,
@@ -111,15 +117,22 @@ func run(args []string) int {
 	ing := &ingest.Ingester{Store: st, Log: log, Dir: cfg.ObservabilityDir + "/log", BounceDomain: cfg.BounceDomain, Interval: cfg.FilePollInterval}
 	rec := &reconcile.Reconciler{Store: st, Log: log, ObservabilityDir: cfg.ObservabilityDir, BounceDomain: cfg.BounceDomain,
 		Interval: cfg.ReconcileInterval, Grace: cfg.ReconcileGrace, MinSnapshots: cfg.ReconcileMinSnaps, SnapshotInterval: cfg.SnapshotInterval}
-	done := make(chan struct{}, 3)
+	spool := &dsnspool.Processor{Dir: cfg.DSNSpoolDir, Store: st, Log: log, BounceDomain: cfg.BounceDomain,
+		VERP:         ids.VERP{LocalPart: cfg.VERPLocalPart, Delimiter: cfg.VERPDelimiter, Domain: cfg.BounceDomain},
+		PollInterval: cfg.FilePollInterval, StaleAfter: cfg.Lease, Retention: cfg.DSNRetention, Instance: w.Me}
+	res := &dsnspool.Resolver{Store: st, Log: log, PollInterval: cfg.PollInterval}
+	const services = 5
+	done := make(chan struct{}, services)
 	go func() { w.Run(ctx); done <- struct{}{} }()
 	go func() { ing.Run(ctx); done <- struct{}{} }()
 	go func() { rec.Run(ctx); done <- struct{}{} }()
-	go heartbeat(ctx, st, w, log)
-	for i := 0; i < 3; i++ {
+	go func() { spool.Run(ctx); done <- struct{}{} }()
+	go func() { res.Run(ctx); done <- struct{}{} }()
+	go heartbeat(ctx, st, w, spool, log)
+	for i := 0; i < services; i++ {
 		<-done
 	}
-	stats := statsMap(w)
+	stats := statsMap(w, spool)
 	log.Info("delivery daemon stopped", "stats", stats)
 	if statsFile != "" {
 		b, _ := json.MarshalIndent(stats, "", "  ")
@@ -128,7 +141,7 @@ func run(args []string) int {
 	return 0
 }
 
-func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, log *logx.Logger) {
+func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, spool *dsnspool.Processor, log *logx.Logger) {
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	n := 0
@@ -143,7 +156,7 @@ func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, log *logx
 		}
 		cancel()
 		if n++; n%8 == 0 { // every two minutes
-			log.Info("delivery stats", "stats", statsMap(w))
+			log.Info("delivery stats", "stats", statsMap(w, spool))
 		}
 		select {
 		case <-ctx.Done():
@@ -153,10 +166,15 @@ func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, log *logx
 	}
 }
 
-func statsMap(w *worker.Worker) map[string]any {
-	s := &w.Stats
+func statsMap(w *worker.Worker, spool *dsnspool.Processor) map[string]any {
+	s, d := &w.Stats, &spool.Stats
 	return map[string]any{
-		"jobs_claimed": s.JobsClaimed.Load(), "jobs_dispatched": s.JobsDispatched.Load(), "jobs_failed": s.JobsFailed.Load(),
+		"dsn_claimed": d.Claimed.Load(), "dsn_reclaimed": d.Reclaimed.Load(), "dsn_events": d.Events.Load(),
+		"dsn_partial": d.Partial.Load(), "dsn_informational": d.Informational.Load(), "dsn_unmatched": d.Unmatched.Load(),
+		"dsn_already_processed": d.Already.Load(), "dsn_failed": d.Failed.Load(), "dsn_retries": d.Retries.Load(),
+		"dsn_deleted_after_retention": d.Deleted.Load(), "dsn_suppressions_created": d.Suppressions.Load(),
+		"suppressed_before_submission": s.SuppressedBeforeSubmission.Load(),
+		"jobs_claimed":                 s.JobsClaimed.Load(), "jobs_dispatched": s.JobsDispatched.Load(), "jobs_failed": s.JobsFailed.Load(),
 		"messages_created": s.MessagesCreated.Load(), "suppressed": s.Suppressed.Load(), "submitted": s.Submitted.Load(),
 		"submission_failed": s.Failed.Load(), "temporary_failures": s.TempFailures.Load(), "ambiguous": s.Ambiguous.Load(),
 		"recovered_from_log": s.Recovered.Load(), "lease_lost": s.LeaseLost.Load(),

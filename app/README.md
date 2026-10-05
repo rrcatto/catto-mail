@@ -21,7 +21,15 @@ validator with `pg_notify`; the D-32 normaliser is tested against the shared vec
 a declared requirement checked by `composer check-platform-reqs`. Validation usage is metered by
 the validator (D-33), not by Symfony.
 
-**Later phases:** client and operator dashboards, tracking endpoints, send usage metering, retention
+**Phase 5 (implemented, v0.1.5, D-30):** the trusted-client recipient global opt-out API
+(`/v1/global-suppressions`, `App\Suppression\GlobalSuppressionService`; 403 without the
+operator-granted `can_submit_global_suppressions`), operator suppression administration
+(`App\Suppression\SuppressionAdministration`) and the unmatched-DSN workflow
+(`App\Dsn\UnmatchedDsnAdministration`: match requests are applied by the Go daemon, never here), as
+audited `smarthost:client:global-suppressions`, `smarthost:suppression:*` and `smarthost:dsn:*`
+console commands that require `--operator=<login email>`. Migration `Version20261004000100`.
+
+**Later phases:** client and operator dashboards (replacing the Phase 5 operator console commands), tracking endpoints, retention
 commands, and the **webhook worker**, a long-running console process from this image that
 consumes the `webhook_events` outbox and is the only component that sends webhooks. Until Phase 7
 the worker unit runs the placeholder in `phase1-probe/`.

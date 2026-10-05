@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.3). Every enum value used in the database, the /v1 API,
+# (specification 2.4). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.1.0"
-specification_version: "2.3"
+vocabulary_version: "2.2.0"
+specification_version: "2.4"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -273,13 +273,35 @@ message_event_type:
     deferred:
       origin: spec
       sets_status: deferred
-      sources: [postfix_log, dsn_spool]
+      sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]
       meaning: Postfix status=deferred or a DELAY DSN.
-    connection_failure: {origin: spec, sets_status: deferred, sources: [postfix_log], meaning: Attempt failed at TCP/TLS level.}
+    connection_failure:
+      origin: spec
+      sets_status: deferred
+      sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]
+      meaning: Attempt failed at TCP/TLS level (Postfix log, or a DELAY DSN whose failure scope is connection).
     remote_accepted: {origin: spec, sets_status: remote_accepted, sources: [postfix_log], meaning: Postfix status=sent.}
-    soft_bounce: {origin: spec, sets_status: soft_bounced, sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]}
-    hard_bounce: {origin: spec, sets_status: hard_bounced, sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]}
-    complaint: {origin: spec, sets_status: complained, sources: [dsn_spool, unmatched_dsn_resolution]}
+    soft_bounce:
+      origin: spec
+      sets_status: soft_bounced
+      sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]
+      meaning: >-
+        Final failure of a temporary nature. With failure_scope recipient it counts towards the
+        global repeated_soft_bounce rule (D-18, D-30).
+    hard_bounce:
+      origin: spec
+      sets_status: hard_bounced
+      sources: [postfix_log, dsn_spool, unmatched_dsn_resolution]
+      meaning: >-
+        Permanent failure. With failure_scope recipient it creates a global hard_bounce
+        suppression (D-30); other scopes never do.
+    complaint:
+      origin: spec
+      sets_status: complained
+      sources: [dsn_spool, unmatched_dsn_resolution]
+      meaning: >-
+        An ARF complaint correlated to this exact message. Creates a global complaint
+        suppression (D-30).
     transport_outcome_unknown:
       origin: spec
       sets_status: outcome_unknown
@@ -336,14 +358,20 @@ event_source:
     tracking_endpoint:
       origin: spec
       key_rule: null (repeated opens/clicks are legitimate distinct events)
+  event_metadata: >-
+    DSN-derived events (dsn_spool, unmatched_dsn_resolution) carry metadata_json.correlation
+    (verp | envelope_id | message_id | queue_id | recipient | operator), the DSN action,
+    reporting_mta and the spool key; complaint events carry the ARF feedback_type.
 
 failure_scope:
   description: >-
     message_events.failure_scope, set by Go's classifier on deferred,
-    connection_failure, soft_bounce and hard_bounce events (D-18). Only
-    `recipient` soft bounces count towards repeated_soft_bounce suppression.
+    connection_failure, soft_bounce and hard_bounce events (D-18). One
+    classifier serves Postfix log and DSN evidence. Only `recipient` soft
+    bounces count towards repeated_soft_bounce suppression, and only
+    `recipient` hard bounces create a hard_bounce suppression (D-30).
   values:
-    recipient: {origin: spec, meaning: "Mailbox-specific condition (e.g. 4.2.2 mailbox full, 4.2.1 mailbox disabled)."}
+    recipient: {origin: spec, meaning: "Mailbox-specific condition (e.g. 5.1.1 unknown mailbox, 4.2.2 mailbox full, 4.2.1 mailbox disabled)."}
     domain: {origin: spec, meaning: General domain-level deferral.}
     provider_policy: {origin: spec, meaning: Provider-wide rate limiting or policy/reputation deferral.}
     connection: {origin: spec, meaning: TCP/TLS connection failure.}
@@ -361,12 +389,15 @@ dsn_classification:
     malformed_or_unmatched_dsn: {origin: spec, message_event: dsn_unmatched}
 
 unmatched_dsn_status:
-  description: unmatched_dsns.status (D-05). Rows are retained after resolution.
+  description: >-
+    unmatched_dsns.status (D-05). Rows are retained after resolution. match_requested
+    returns to open when Go cannot interpret the DSN for the requested message (the
+    reason is kept in detail_json).
   values:
     open: {origin: spec, meaning: Awaiting operator investigation.}
     match_requested: {origin: spec, meaning: Operator identified the candidate message; queued for Go.}
     matched: {origin: spec, meaning: Go interpreted the DSN and created the transport event.}
-    dismissed: {origin: spec, meaning: Operator decided no message applies.}
+    dismissed: {origin: spec, meaning: "Operator decided no message applies; a written reason (resolution_note) is required."}
   transitions:
     open: [match_requested, dismissed]
     match_requested: [matched, open]
@@ -420,17 +451,35 @@ client_membership_role:
 # ---------------------------------------------------------------------------
 
 suppression_reason:
+  description: >-
+    suppressions.reason. D-30: hard_bounce, complaint and repeated_soft_bounce are created
+    only by Go, globally (client_id NULL); recipient_global_opt_out only by a client with
+    can_submit_global_suppressions through the API; operator_block and client_abuse_block
+    only by an operator. A client can never create any reason other than recipient_global_opt_out.
   values:
-    hard_bounce: {origin: spec}
-    complaint: {origin: spec}
-    repeated_soft_bounce: {origin: spec}
-    operator_block: {origin: spec}
-    client_abuse_block: {origin: spec}
+    hard_bounce: {origin: spec, lifetime: indefinite, meaning: "Recipient-specific permanent failure (failure_scope recipient)."}
+    complaint: {origin: spec, lifetime: indefinite, meaning: An ARF complaint correlated to an exact message.}
+    repeated_soft_bounce:
+      origin: spec
+      lifetime: temporary
+      meaning: >-
+        DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD consecutive recipient-scope soft bounces of
+        the address within the window, across all clients; expires after
+        DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS.
+    operator_block: {origin: spec, lifetime: indefinite unless the operator sets an expiry}
+    client_abuse_block: {origin: spec, lifetime: indefinite unless the operator sets an expiry}
+    recipient_global_opt_out:
+      origin: spec
+      lifetime: indefinite
+      meaning: >-
+        The recipient explicitly asked not to receive email from any source using this
+        Smarthost installation, reported by a trusted client (source_client_id). Never an
+        ordinary list, newsletter, campaign or client unsubscribe.
 
 suppression_scope_type:
   values:
     address: {origin: contract, meaning: "Matches the D-18 normalised address (local part preserved, domain lower-cased)."}
-    domain: {origin: contract, meaning: Matches every address at the lower-cased domain.}
+    domain: {origin: contract, meaning: "Matches every address at the lower-cased domain. Operator-created only."}
 
 usage_type:
   values:

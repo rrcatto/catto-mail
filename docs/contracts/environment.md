@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.3 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.4 · **Template:** [`infra/.env.example`](../../infra/.env.example)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -153,7 +153,7 @@ secret has a value in the template, and that safety switches default to safe val
 |---|---|---|---|---|---|
 | `DELIVERY_WORKER_ID` | delivery | no | 4 | | Written to `claimed_by`. Empty means the container hostname. |
 | `DELIVERY_POLL_INTERVAL_SECONDS` | delivery | no | 4 | `5` | Polling fallback when no NOTIFY arrives. |
-| `DELIVERY_LEASE_SECONDS` | delivery | no | 4 | `300` | Send-job lease. It is renewed while the job is processed. |
+| `DELIVERY_LEASE_SECONDS` | delivery | no | 4 | `300` | Send-job lease. It is renewed while the job is processed. It is also the age after which a DSN spool claim left in `processing/` (crashed worker) is reclaimed. |
 | `DELIVERY_POSTFIX_SUBMISSION_HOST` | delivery | no | 4 | `postfix` | Postfix on the internal network. |
 | `DELIVERY_POSTFIX_SUBMISSION_PORT` | delivery | no | 4 | `587` | Authenticated submission port, to which the OpenDKIM milter applies. |
 | `DELIVERY_GLOBAL_CONCURRENCY` | delivery | no | 4 | `10` | Concurrent submissions. |
@@ -166,8 +166,8 @@ secret has a value in the template, and that safety switches default to safe val
 | `DELIVERY_RECONCILE_INTERVAL_SECONDS` | delivery | no | 4 | `300` | How often reconciliation runs. |
 | `DELIVERY_RECONCILE_GRACE_SECONDS` | delivery | no | 4 | `3600` | Minimum time after a queue id disappears before any conclusion is drawn. |
 | `DELIVERY_RECONCILE_MIN_SNAPSHOTS` | delivery | no | 4 | `2` | Number of consecutive fresh snapshots (≥ 2) that must lack the queue id. |
-| `DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD` | delivery | no | 5 | `3` | Consecutive recipient-scope soft bounces that trigger suppression. |
-| `DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS` | delivery | no | 5 | `30` | Rolling window for that count. |
+| `DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD` | delivery | no | 5 | `3` | Consecutive recipient-scope soft bounces of an address (distinct messages, all clients; D-30) that trigger a global `repeated_soft_bounce` suppression. |
+| `DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS` | delivery | no | 5 | `30` | Rolling window for that count, and the lifetime of the resulting temporary suppression. |
 | `DELIVERY_DSN_RETENTION_DAYS` | delivery | no | 5 | `7` | Transient retention of processed DSN files in the spool's `done/` directory. |
 
 ## Postfix (`postfix`)

@@ -2,7 +2,84 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.2.
+the *specification* version, which is 2.4.
+
+## [0.1.5] - 2026-10-05
+
+Phase 5 complete: inbound DSN, complaint and global suppression processing (D-30, specification
+2.4).
+
+### Added
+- Specification 2.4 resolves D-30: automatic transport suppressions are global (`client_id`
+  NULL) and apply to every client. They are created only for a recipient-specific hard bounce
+  (`failure_scope` recipient), a correlated ARF complaint, and repeated recipient soft bounces
+  (evaluated across all clients, counted once per message; a temporary suppression that expires
+  after `DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS`). Provider-policy, reputation, domain, DNS,
+  connection, TLS, infrastructure, ambiguous and `outcome_unknown` outcomes never suppress.
+- Recipient global opt-out: the `recipient_global_opt_out` reason and `POST /v1/global-suppressions`,
+  `GET /v1/global-suppressions/{id}` and `POST /v1/global-suppressions/{id}/lift` for clients an
+  operator granted `can_submit_global_suppressions` (default false; 403 otherwise). Address-only,
+  normalised (D-18/D-32), idempotent and concurrency safe; the reporter is kept in
+  `source_client_id`; creation and lifting are audited; lifting never overrides an independent
+  suppression. Ordinary unsubscribes remain client state.
+- Migration `Version20261004000100`: `clients.can_submit_global_suppressions`; suppression
+  provenance (`source_event_id`, `source_client_id`, `external_reference`, `idempotency_key`,
+  `request_hash`), constraints and partial unique indexes; `messages_recipient_address_idx`; a
+  dismissed unmatched DSN requires a written reason. Reference schema and `schema.md` updated; no
+  grant change.
+- Go: the DSN spool processor (atomic claim by rename, inotify with polling fallback, reclaim of
+  stale claims, `failed/` for unreadable files, retention of `done/` for `DELIVERY_DSN_RETENTION_DAYS`);
+  an RFC 3464/6533 DSN and RFC 5965 ARF parser with bounds; correlation by VERP token, ENVID,
+  Smarthost Message-ID, Postfix queue id and corroborated recipient (never by address alone);
+  conservative classification; `dsn_unmatched` for unreconcilable reports; `unmatched_dsns` rows
+  with raw and parsed evidence; the operator match-request resolver
+  (`NOTIFY smarthost_unmatched_dsn_work`); `message.complained` in the outbox; the global
+  suppression policy applied to every newly appended authoritative event, whatever its source;
+  a suppression re-check immediately before each submission.
+- Symfony console commands: `smarthost:client:global-suppressions`, `smarthost:suppression:list`,
+  `create`, `lift`, `smarthost:dsn:list`, `show`, `match`, `dismiss` (operator identity required,
+  audited). Development bootstrap enables the capability for the disposable development client only.
+- Tests: `smarthostctl test phase5` (alias of the Go suite: parser fixtures, classifier, spool,
+  14 Phase 5 PostgreSQL integration tests) and `smarthostctl test phase5-e2e` (DSNs and ARF reports
+  through Postfix port 25 and the real spool, cross-client suppression, opt-out API, correlation,
+  operator workflow, crash and retention). PHPUnit: `GlobalSuppressionApiTest`,
+  `Phase5OperatorCommandTest`, schema constraint tests.
+
+### Changed
+- One shared failure-scope classifier (`delivery/internal/smtpclass`) for log and DSN evidence; it
+  is stricter (e.g. x.1.2 is `domain`, x.4.7 expiry is `unknown`, policy wording wins).
+- Vocabulary 2.2.0: `deferred` and `connection_failure` may come from `dsn_spool` and
+  `unmatched_dsn_resolution`; OpenAPI 1.0.0-draft.5.
+- The tenant filter shows a client only its client-scoped suppressions and the opt-outs it reported.
+- Phase 1 verification T16 stops the delivery daemon while it observes raw Maildir delivery, then
+  proves the running daemon ingests a new DSN.
+- `smarthostctl test` targets `phase5` (the Go suite) and `phase5-e2e`.
+
+### Fixed
+- `phase4-e2e.sh` B: the log check no longer fails spuriously under `pipefail` (SIGPIPE).
+- Stale documentation: the Postfix and OpenDKIM READMEs still said "Empty until Phase 1"; the app
+  README listed send usage metering (done by Go since Phase 4) as later work; test counts, versions
+  and status lines across README, `CLAUDE.md` and `docs/`.
+
+### Verified
+- `smarthostctl test phase5` (Go): gofmt and go vet clean; unit tests in 13 packages pass (DSN/ARF
+  fixtures, classifier, spool, D-32 vectors); 28 PostgreSQL integration tests pass as
+  `smarthost_delivery` (14 Phase 4, 14 Phase 5: cross-client hard bounce, every correlation level,
+  excluded scopes from log and DSN, repeated soft bounces with reset and relay-accepted-then-bounced
+  messages, concurrent evidence, complaints, late events, crash/reclaim/duplicate idempotency,
+  retention, operator resolution, every suppression reason, suppression after staging).
+- `smarthostctl test phase5-e2e`: 44/44 through Postfix port 25 and the real DSN spool (A–G).
+- `smarthostctl test phase4-e2e`: 21/21 (the 10,000-recipient job, now with the per-message
+  pre-submission suppression check, completed in 185 s; peak RSS 26.6 MiB; at most 20 concurrent
+  submissions, 2 per domain).
+- `smarthostctl test phase2`: 177 tests, 1,838 assertions. `smarthostctl test phase3`: Ruff and
+  mypy clean, 295 pytest tests and the 10,000-address run pass.
+- `smarthostctl verify`: 176/176 (v0.1.4's 180 with `--clean` minus the five T03 clean-state
+  checks, plus the new T16 check that the running daemon ingests a DSN), including the lifecycle
+  groups T19–T23 through systemd. A first run failed one T20 check because the Windows WSL service
+  transiently refused the `wsl.exe` call that runs `systemctl stop`; the re-run passed.
+- Contract checks 1898/1898; OpenAPI 3.1 valid; yamllint clean; shellcheck clean at warning
+  severity; `composer validate --strict` and `composer check-platform-reqs` pass.
 
 ## [0.1.4] - 2026-10-04
 

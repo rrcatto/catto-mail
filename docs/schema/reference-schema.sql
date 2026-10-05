@@ -1,5 +1,5 @@
 -- =============================================================================
--- Smarthost reference schema — specification 2.3 (PostgreSQL 16; unchanged since 2.1)
+-- Smarthost reference schema — specification 2.4 (PostgreSQL 16; D-30 changes in 2.4)
 -- =============================================================================
 --
 -- THIS IS NOT A MIGRATION. Symfony/Doctrine migrations (Phase 2) are the sole
@@ -34,7 +34,9 @@ CREATE TABLE clients (
     status         text        NOT NULL DEFAULT 'pending_approval'
         CHECK (status IN ('pending_approval', 'active', 'throttled', 'suspended', 'closed')),
     plan           text        NOT NULL,
-    created_at     timestamptz NOT NULL DEFAULT now()
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    -- D-30: operator-granted capability to report recipient global opt-outs. Never set by the client.
+    can_submit_global_suppressions  boolean  NOT NULL DEFAULT false
 );
 
 -- Dashboard login accounts (D-12). API keys are never browser credentials.
@@ -305,6 +307,8 @@ CREATE UNIQUE INDEX messages_tracking_token_uq ON messages (tracking_token) WHER
 CREATE INDEX messages_postfix_queue_id_idx ON messages (postfix_queue_id) WHERE postfix_queue_id IS NOT NULL;
 CREATE INDEX messages_unresolved_idx ON messages (current_status, created_at)   -- D-27 reconciliation candidates
     WHERE current_status IN ('queued', 'submitted', 'deferred');
+-- D-30: global repeated-soft-bounce evaluation and recipient-based DSN correlation.
+CREATE INDEX messages_recipient_address_idx ON messages (recipient_address);
 
 -- Server-side click map written by Go (D-09): /t/c/{tracking_token}/{link_index}.
 CREATE TABLE message_links (
@@ -379,7 +383,9 @@ CREATE TABLE unmatched_dsns (
         OR (matched_message_id IS NOT NULL AND resolution_requested_by IS NOT NULL AND resolution_requested_at IS NOT NULL)),
     CONSTRAINT unmatched_dsns_matched_complete CHECK (
         status <> 'matched' OR (resolution_event_id IS NOT NULL AND resolved_at IS NOT NULL)),
-    CONSTRAINT unmatched_dsns_dismissed_resolved CHECK (status <> 'dismissed' OR resolved_at IS NOT NULL)
+    -- A dismissal needs its time and the operator's written reason (Phase 5).
+    CONSTRAINT unmatched_dsns_dismissed_resolved CHECK (
+        status <> 'dismissed' OR (resolved_at IS NOT NULL AND resolution_note IS NOT NULL))
 );
 CREATE INDEX unmatched_dsns_status_received_idx ON unmatched_dsns (status, received_at);
 CREATE UNIQUE INDEX unmatched_dsns_spool_key_uq ON unmatched_dsns (spool_ingest_key);
@@ -397,27 +403,59 @@ CREATE TABLE delivery_ingest_cursors (
 -- Suppression and reputation
 -- -----------------------------------------------------------------------------
 
+-- D-30: automatic suppressions (hard_bounce, complaint, repeated_soft_bounce) and
+-- recipient global opt-outs are global (client_id NULL). client_id only scopes a
+-- row; the client that reported a global opt-out is source_client_id. Rows are
+-- lifted (lifted_at), never deleted, except by configured retention.
 CREATE TABLE suppressions (
     id                 uuid        PRIMARY KEY,
     client_id          uuid        NULL REFERENCES clients (id),     -- NULL = global suppression
     address_or_domain  text        NOT NULL,                         -- D-18 normalised
     scope_type         text        NOT NULL CHECK (scope_type IN ('address', 'domain')),
     reason             text        NOT NULL CHECK (reason IN (
-        'hard_bounce', 'complaint', 'repeated_soft_bounce', 'operator_block', 'client_abuse_block')),
+        'hard_bounce', 'complaint', 'repeated_soft_bounce', 'operator_block', 'client_abuse_block',
+        'recipient_global_opt_out')),
     source_message_id  uuid        NULL REFERENCES messages (id),
     created_at         timestamptz NOT NULL DEFAULT now(),
     expires_at         timestamptz NULL,
     lifted_at          timestamptz NULL,
+    -- Provenance (D-30)
+    source_event_id    uuid        NULL REFERENCES message_events (id),  -- authoritative event of a system suppression
+    source_client_id   uuid        NULL REFERENCES clients (id),     -- client that reported a global opt-out
+    external_reference text        NULL,                             -- optional opaque reference of that client
+    idempotency_key    text        NULL,                             -- Idempotency-Key of the opt-out request
+    request_hash       text        NULL,
     -- D-18: only the domain is lower-cased; the local part is never case-folded.
     CONSTRAINT suppressions_normalised CHECK (
         (scope_type = 'domain'  AND address_or_domain = lower(address_or_domain)
                                 AND position('@' IN address_or_domain) = 0)
      OR (scope_type = 'address' AND address_or_domain ~ '@[^@]+$'
                                 AND substring(address_or_domain FROM '@([^@]+)$')
-                                    = lower(substring(address_or_domain FROM '@([^@]+)$'))))
+                                    = lower(substring(address_or_domain FROM '@([^@]+)$')))),
+    -- A client-reported opt-out (and only it) names its reporter and request; it is
+    -- always a global address suppression.
+    CONSTRAINT suppressions_opt_out_provenance CHECK (
+        (reason = 'recipient_global_opt_out') = (source_client_id IS NOT NULL)
+        AND (source_client_id IS NULL) = (idempotency_key IS NULL)
+        AND (idempotency_key IS NULL) = (request_hash IS NULL)
+        AND (external_reference IS NULL OR source_client_id IS NOT NULL)
+        AND (reason <> 'recipient_global_opt_out' OR (client_id IS NULL AND scope_type = 'address'))),
+    -- Indefinite reasons never expire; repeated_soft_bounce is the temporary one.
+    CONSTRAINT suppressions_indefinite_reasons CHECK (
+        reason NOT IN ('hard_bounce', 'complaint', 'recipient_global_opt_out') OR expires_at IS NULL),
+    CONSTRAINT suppressions_source_event_has_message CHECK (source_event_id IS NULL OR source_message_id IS NOT NULL)
 );
 CREATE INDEX suppressions_address_or_domain_scope_idx ON suppressions (address_or_domain, scope_type);
 CREATE INDEX suppressions_client_idx ON suppressions (client_id);
+-- One active global hard_bounce / complaint row per address (concurrent evidence cannot duplicate it).
+CREATE UNIQUE INDEX suppressions_global_address_reason_active_uq ON suppressions (address_or_domain, reason)
+    WHERE client_id IS NULL AND scope_type = 'address' AND lifted_at IS NULL AND reason IN ('hard_bounce', 'complaint');
+-- Opt-out idempotency and one active opt-out per reporting client and address.
+CREATE UNIQUE INDEX suppressions_source_client_idempotency_uq ON suppressions (source_client_id, idempotency_key)
+    WHERE source_client_id IS NOT NULL;
+CREATE UNIQUE INDEX suppressions_source_client_address_active_uq ON suppressions (source_client_id, address_or_domain)
+    WHERE reason = 'recipient_global_opt_out' AND lifted_at IS NULL;
+CREATE INDEX suppressions_source_message_idx ON suppressions (source_message_id) WHERE source_message_id IS NOT NULL;
 
 CREATE TABLE domain_reputation (
     id                  uuid        PRIMARY KEY,

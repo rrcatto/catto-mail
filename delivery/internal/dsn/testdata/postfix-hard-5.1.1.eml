@@ -1,0 +1,65 @@
+Return-Path: <>
+Delivered-To: {{VERP}}
+X-Original-To: {{VERP}}
+Received: from smarthost.example (localhost [127.0.0.1])
+	by smarthost.example (Postfix) id 4hxKf66gyVz187d
+	for <{{VERP}}>; Thu,  1 Oct 2026 10:01:00 +0000 (UTC)
+Date: Thu,  1 Oct 2026 10:01:00 +0000 (UTC)
+From: MAILER-DAEMON@smarthost.example (Mail Delivery System)
+Subject: Undelivered Mail Returned to Sender
+To: {{VERP}}
+Auto-Submitted: auto-replied
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status;
+	boundary="4hxKf66gyVz187d.1790000460/smarthost.example"
+Message-Id: <20261004100100.4hxKf66gyVz187d@smarthost.example>
+
+This is a MIME-encapsulated message.
+
+--4hxKf66gyVz187d.1790000460/smarthost.example
+Content-Description: Notification
+Content-Type: text/plain; charset=us-ascii
+
+This is the mail system at host smarthost.example.
+
+I'm sorry to have to inform you that your message could not
+be delivered to one or more recipients. It's attached below.
+
+<{{RCPT}}>: host mx.example.org[192.0.2.10] said: 550 5.1.1
+    <{{RCPT}}>: Recipient address rejected: User unknown in virtual
+    mailbox table (in reply to RCPT TO command)
+
+--4hxKf66gyVz187d.1790000460/smarthost.example
+Content-Description: Delivery report
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; smarthost.example
+X-Postfix-Queue-ID: {{QID}}
+X-Postfix-Sender: rfc822; {{VERP_SENDER}}
+Original-Envelope-Id: {{ENVID}}
+Arrival-Date: Thu,  1 Oct 2026 10:00:58 +0000 (UTC)
+
+Final-Recipient: rfc822; {{RCPT}}
+Original-Recipient: rfc822;{{RCPT}}
+Action: failed
+Status: 5.1.1
+Remote-MTA: dns; mx.example.org
+Diagnostic-Code: smtp; 550 5.1.1 <{{RCPT}}>: Recipient address rejected:
+    User unknown in virtual mailbox table
+
+--4hxKf66gyVz187d.1790000460/smarthost.example
+Content-Description: Undelivered Message Headers
+Content-Type: text/rfc822-headers
+
+Return-Path: <{{VERP_SENDER}}>
+Received: from smarthost-delivery.{{BOUNCE}} (localhost [127.0.0.1])
+	by smarthost.example (Postfix) with ESMTPSA id {{QID}}
+	for <{{RCPT}}>; Thu,  1 Oct 2026 10:00:58 +0000 (UTC)
+From: Example Sender <{{FROM}}>
+To: {{RCPT}}
+Subject: Newsletter
+Message-ID: <{{MSGID}}@{{BOUNCE}}>
+X-Smarthost-Message-ID: {{MSGID}}
+Date: Thu, 01 Oct 2026 10:00:58 +0000
+
+--4hxKf66gyVz187d.1790000460/smarthost.example--

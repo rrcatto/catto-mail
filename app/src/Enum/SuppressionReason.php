@@ -15,4 +15,11 @@ enum SuppressionReason: string
     case RepeatedSoftBounce = 'repeated_soft_bounce';
     case OperatorBlock = 'operator_block';
     case ClientAbuseBlock = 'client_abuse_block';
+    case RecipientGlobalOptOut = 'recipient_global_opt_out';
+
+    /** Reasons only an operator may create (console); D-30 system reasons are Go's, the opt-out a trusted client's. */
+    public function isOperatorReason(): bool
+    {
+        return self::OperatorBlock === $this || self::ClientAbuseBlock === $this;
+    }
 }

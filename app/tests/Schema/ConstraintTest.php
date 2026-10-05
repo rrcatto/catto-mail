@@ -203,6 +203,39 @@ final class ConstraintTest extends TestCase
         self::assertNull($this->violation($s('example.com', 'domain')));
     }
 
+    /** D-30: provenance, lifetimes and the uniqueness of active global suppressions. */
+    public function testGlobalSuppressionRules(): void
+    {
+        $client = SchemaFixtures::client($this->c);
+        $addr = 'Global'.bin2hex(random_bytes(3)).'@example.com';
+        $s = fn (array $o) => fn (Connection $c) => $c->insert('suppressions', $o + ['id' => SchemaFixtures::id(),
+            'address_or_domain' => $addr, 'scope_type' => 'address', 'reason' => 'hard_bounce']);
+        $optOut = fn (array $o) => $s($o + ['reason' => 'recipient_global_opt_out', 'source_client_id' => $client,
+            'idempotency_key' => SchemaFixtures::id(), 'request_hash' => 'h']);
+
+        // One active global hard_bounce / complaint per address; lifted rows and other reasons coexist.
+        self::assertNull($this->violation($s([])));
+        self::assertSame('suppressions_global_address_reason_active_uq', $this->violation($s([])));
+        self::assertNull($this->violation($s(['reason' => 'complaint'])));
+        self::assertNull($this->violation($s(['lifted_at' => '2026-10-04T00:00:00Z'])));
+        self::assertNull($this->violation($s(['client_id' => $client])), 'a client-scoped row is independent');
+        self::assertNull($this->violation($s(['reason' => 'repeated_soft_bounce', 'expires_at' => '2026-11-04T00:00:00Z'])));
+        self::assertSame('suppressions_indefinite_reasons', $this->violation($s(['reason' => 'complaint', 'expires_at' => '2026-11-04T00:00:00Z', 'address_or_domain' => 'x'.$addr])));
+
+        // A client opt-out names its reporter and request, is global and address-scoped; nothing else may.
+        self::assertNull($this->violation($optOut([])));
+        self::assertSame('suppressions_source_client_address_active_uq', $this->violation($optOut([])));
+        self::assertNull($this->violation($optOut(['source_client_id' => SchemaFixtures::client($this->c)])), 'another reporter is independent');
+        self::assertSame('suppressions_opt_out_provenance', $this->violation($optOut(['client_id' => $client, 'address_or_domain' => 'a'.$addr])));
+        self::assertSame('suppressions_opt_out_provenance', $this->violation($s(['reason' => 'recipient_global_opt_out', 'address_or_domain' => 'b'.$addr])));
+        self::assertSame('suppressions_opt_out_provenance', $this->violation($s(['source_client_id' => $client, 'address_or_domain' => 'c'.$addr])));
+        self::assertSame('suppressions_opt_out_provenance', $this->violation($s(['external_reference' => 'r', 'address_or_domain' => 'd'.$addr])));
+        $key = SchemaFixtures::id();
+        self::assertNull($this->violation($optOut(['idempotency_key' => $key, 'address_or_domain' => 'e'.$addr])));
+        self::assertSame('suppressions_source_client_idempotency_uq', $this->violation($optOut(['idempotency_key' => $key, 'address_or_domain' => 'f'.$addr])));
+        self::assertSame('suppressions_source_event_has_message', $this->violation($s(['source_event_id' => SchemaFixtures::id(), 'address_or_domain' => 'g'.$addr])));
+    }
+
     public function testWebhookRules(): void
     {
         $client = SchemaFixtures::client($this->c);
@@ -247,6 +280,9 @@ final class ConstraintTest extends TestCase
             'spool_ingest_key' => SchemaFixtures::id(), 'content_sha256' => str_repeat('a', 64), 'classification' => 'hard_bounce', 'raw_message' => 'x']);
         self::assertSame('unmatched_dsns_match_requested', $this->violation($dsn(['status' => 'match_requested'])));
         self::assertSame('unmatched_dsns_dismissed_resolved', $this->violation($dsn(['status' => 'dismissed'])));
+        self::assertSame('unmatched_dsns_dismissed_resolved', $this->violation($dsn(['status' => 'dismissed', 'resolved_at' => '2026-10-04T00:00:00Z'])),
+            'a dismissal needs a written reason');
+        self::assertNull($this->violation($dsn(['status' => 'dismissed', 'resolved_at' => '2026-10-04T00:00:00Z', 'resolution_note' => 'backscatter'])));
         self::assertNull($this->violation($dsn(['spool_ingest_key' => 'same'])));
         self::assertSame('unmatched_dsns_spool_key_uq', $this->violation($dsn(['spool_ingest_key' => 'same'])));
     }

@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.4
-  summary: Email validation and tracked delivery API (specification 2.3 contract).
+  version: 1.0.0-draft.5
+  summary: Email validation and tracked delivery API (specification 2.4 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.3), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.4), which wins on
     any conflict. Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
 
@@ -53,6 +53,21 @@ info:
     `outcome_unknown` means Smarthost cannot determine the final SMTP result. It
     is not a success state. `open_recorded` is a recorded open, not a proven
     read.
+
+    ## Global suppression (D-30)
+    Smarthost suppresses an address globally, for every client of the
+    installation, after a recipient-specific hard bounce, a correlated
+    complaint or repeated recipient soft bounces. A suppressed recipient gets a
+    message with `current_status` `suppressed` and is never submitted.
+
+    An ordinary list, newsletter, campaign or client unsubscribe stays in the
+    client application and is never sent to Smarthost. Only when a recipient
+    explicitly asks not to receive email from any source using this Smarthost
+    installation may a client that an operator has granted the global-opt-out
+    capability report it with `POST /global-suppressions`; it can later report
+    the withdrawal with `POST /global-suppressions/{id}/lift`. Lifting removes
+    only that opt-out: the address stays suppressed while any other suppression
+    (for example a hard bounce, or another client's opt-out) is active.
   license:
     name: MIT
     identifier: MIT
@@ -70,6 +85,10 @@ tags:
     description: Per-recipient message state and append-only event history.
   - name: Webhooks
     description: Signed event notifications to the client's registered endpoints.
+  - name: Suppressions
+    description: >-
+      Recipient global opt-outs reported by trusted clients (D-30). Requires the
+      operator-granted global-opt-out capability.
 
 paths:
   /validation-jobs:
@@ -344,6 +363,96 @@ paths:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
 
+  /global-suppressions:
+    post:
+      tags: [Suppressions]
+      operationId: createGlobalOptOut
+      summary: Report an explicit recipient global opt-out.
+      description: >-
+        Records that the recipient explicitly asked not to receive email from any
+        source using this Smarthost installation. Never use it for an ordinary
+        list or newsletter unsubscribe. The address is normalised (D-18/D-32) and
+        suppressed globally with reason `recipient_global_opt_out`; no other
+        reason and no domain scope can be requested. Requires the operator-granted
+        capability (403 without it, and for `pending_approval` or `suspended`
+        clients). Returns 201 with the new opt-out, 201 with
+        `Idempotent-Replayed: true` for a replay, or 200 with the existing opt-out
+        when this client already has an active one for the address. The
+        representation never reveals other suppressions of the address.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GlobalOptOutCreateRequest'}
+      responses:
+        '200':
+          description: This client already has an active opt-out for the address; it is returned unchanged.
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlobalOptOut'}
+        '201':
+          description: Opt-out recorded (or idempotent replay).
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlobalOptOut'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/GlobalSuppressionForbidden'}
+        '409': {$ref: '#/components/responses/IdempotencyInProgress'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /global-suppressions/{id}:
+    get:
+      tags: [Suppressions]
+      operationId: getGlobalOptOut
+      summary: Retrieve a global opt-out this client reported.
+      description: Opt-outs reported by other clients and system suppressions are never visible (404).
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: The opt-out.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlobalOptOut'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /global-suppressions/{id}/lift:
+    post:
+      tags: [Suppressions]
+      operationId: liftGlobalOptOut
+      summary: Report that the recipient withdrew a global opt-out this client reported.
+      description: >-
+        Sets `lifted_at` on this client's own opt-out; the record and its audit
+        history are kept. Naturally idempotent: lifting an already lifted opt-out
+        returns it unchanged. Only the opt-out is lifted: any other active
+        suppression of the address (a hard bounce, a complaint, an operator block
+        or another client's opt-out) still prevents sending. Requires the
+        capability (403 without it).
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: The opt-out, now lifted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlobalOptOut'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/GlobalSuppressionForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
 webhooks:
   smarthostEvent:
     post:
@@ -454,6 +563,14 @@ components:
         The client may not create or add work in its current status
         (`pending_approval` or `suspended`); only `active` and `throttled` clients
         may. Reads remain available.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    GlobalSuppressionForbidden:
+      description: >-
+        The client does not hold the operator-granted global-opt-out capability,
+        or may not create work in its current status (`pending_approval` or
+        `suspended`).
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
@@ -998,6 +1115,45 @@ components:
           type: array
           items: {$ref: '#/components/schemas/MessageEvent'}
         pagination: {$ref: '#/components/schemas/Pagination'}
+
+    # ---- suppressions (D-30) ----------------------------------------------
+    GlobalOptOutCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [email_address]
+      description: >-
+        An explicit recipient global opt-out. `client_id`, `reason` and a domain
+        scope are not accepted.
+      properties:
+        email_address:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: >-
+            Normalised like recipients (surrounding whitespace trimmed, domain
+            lower-cased, local part preserved).
+        external_reference:
+          $ref: '#/components/schemas/ExternalReference'
+          description: Optional opaque client reference (for example the client's own record of the request).
+
+    GlobalOptOut:
+      type: object
+      additionalProperties: false
+      required: [id, email_address, reason, status, external_reference, created_at, lifted_at]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        email_address: {type: string, description: The normalised address that is suppressed.}
+        reason:
+          type: string
+          enum: [recipient_global_opt_out]
+        status:
+          type: string
+          enum: [active, lifted]
+        external_reference:
+          oneOf: [{$ref: '#/components/schemas/ExternalReference'}, {type: 'null'}]
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        lifted_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
 
     # ---- webhooks ---------------------------------------------------------
     WebhookTestRequest:

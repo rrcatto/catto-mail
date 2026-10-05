@@ -80,7 +80,7 @@ func TestClassify(t *testing.T) {
 		{"to=<a@x.example>, relay=none, delay=1, delays=0/0/1/0, dsn=4.4.3, status=deferred (Host or domain name not found. Name service error for name=x.example type=MX: Host not found, try again)", "deferred", "dns", 0, ""},
 		{"to=<a@x.example>, relay=mx[192.0.2.1]:25, delay=2, delays=0/0/1/1, dsn=5.1.1, status=bounced (host mx[192.0.2.1] said: 550 5.1.1 User unknown (in reply to RCPT TO command))", "hard_bounce", "recipient", 550, "mx"},
 		{"to=<a@x.example>, relay=mx[192.0.2.1]:25, delay=2, delays=0/0/1/1, dsn=4.2.2, status=bounced (host mx[192.0.2.1] said: 452 4.2.2 Over quota (in reply to end of DATA command))", "soft_bounce", "recipient", 452, "mx"},
-		{"to=<a@x.example>, relay=none, delay=432000, delays=432000/0/0/0, dsn=4.4.7, status=expired, returned to sender", "soft_bounce", "connection", 0, ""},
+		{"to=<a@x.example>, relay=none, delay=432000, delays=432000/0/0/0, dsn=4.4.7, status=expired, returned to sender", "soft_bounce", "unknown", 0, ""},
 	}
 	for _, c := range cases {
 		if strings.Contains(c.rest, "status=expired") {

@@ -310,6 +310,10 @@ gzino="$(podman exec smarthost-postfix stat -c %i "$rot")"
 [[ "$gzino" != "$before" ]] && pass "compressed generation has a different inode than the original (inode alone is not a generation id)" || fail "gz kept inode"
 
 section "T16 DSN spool: Maildir delivery and atomic claim (V-5, V-7)"
+# Since Phase 5 the running delivery daemon claims spool files itself; it is
+# stopped (kept, D-35) while the raw Maildir semantics are observed, and the
+# claim probe runs in a throwaway container with the daemon's identity.
+podman stop smarthost-delivery >>"$LOG" 2>&1
 podman rm -f sh-p1-verify-inotify >/dev/null 2>&1
 # Watcher runs as the delivery identity with the spool mounted read-only.
 podman run -d --name sh-p1-verify-inotify --network none --user "$(ev SMARTHOST_DELIVERY_UID):$(ev SMARTHOST_SPOOL_GID)" \
@@ -323,7 +327,16 @@ note "inotify: $ino"
 files="$(podman exec smarthost-postfix sh -c "find $SPOOL/inbound/new -type f -exec stat -c '%a %u:%g %n' {} +")"; note "$files"
 [[ -n "$files" && "$(grep -vc "^600 $(ev SMARTHOST_DELIVERY_UID):$(ev SMARTHOST_SPOOL_GID) " <<<"$files")" == 0 ]] && pass "DSN files are 0600 owned by the delivery UID / spool GID" || fail "DSN file ownership: $files"
 expect "Maildir tmp/ is empty after delivery (only complete files in new/)" bash -c "[ -z \"\$(podman exec smarthost-postfix ls -A $SPOOL/inbound/tmp)\" ]"
-expect "delivery identity reads and atomically claims every file; second claim fails with ENOENT" podman exec smarthost-delivery smarthost-delivery check-spool --claim
+expect "delivery identity reads and atomically claims every file; second claim fails with ENOENT" \
+  podman run --rm --network none --label project=smarthost --user "$(ev SMARTHOST_DELIVERY_UID):$(ev SMARTHOST_SPOOL_GID)" \
+  -e SMARTHOST_DSN_SPOOL_DIR="$SPOOL" -v smarthost-dsn-spool:"$SPOOL" localhost/smarthost-delivery:dev check-spool --claim
+podman start smarthost-delivery >>"$LOG" 2>&1
+dsn_count() { podman exec -e PGPASSWORD="$(ev SMARTHOST_DB_OWNER_PASSWORD)" smarthost-postgres psql -h 127.0.0.1 -U "$(ev SMARTHOST_DB_OWNER_USER)" -d "$(ev SMARTHOST_DB_NAME)" -Atc "SELECT count(*) FROM unmatched_dsns"; }
+before_dsn="$(dsn_count)"
+tools "$TOOLS" inbound "bounce+daemon$(date +%s)@$(ev SMARTHOST_BOUNCE_DOMAIN)" verify-daemon >>"$LOG"
+for _ in $(seq 1 30); do [[ "$(dsn_count)" -gt "$before_dsn" ]] && break; sleep 1; done
+[[ "$(dsn_count)" -gt "$before_dsn" && -z "$(podman exec smarthost-postfix ls -A "$SPOOL/inbound/new")" ]] \
+  && pass "the running delivery daemon claims a new DSN and records it (uncorrelated: an unmatched DSN)" || fail "daemon did not ingest the DSN"
 for r in "someone@$(ev SMARTHOST_BOUNCE_DOMAIN):550" "someone@example.com:554"; do
   out="$(tools "$TOOLS" inbound "${r%:*}" verify-reject)"
   [[ "$(json "d.get('code')" <<<"$out")" == "${r##*:}" ]] && pass "port 25 rejects ${r%:*} (${r##*:})" || fail "port 25 for ${r%:*}: $out"
@@ -348,6 +361,8 @@ QH="$(json "d.get('queue_id') or ''" <<<"$(submit "phase1-verify-hold-$(date +%s
 expect "hold queued message $QH" podman exec smarthost-postfix postsuper -h "$QH"
 podman start smarthost-mailpit >>"$LOG" 2>&1
 tools "$TOOLS" inbound "bounce+persist$(date +%s)@$(ev SMARTHOST_BOUNCE_DOMAIN)" verify-persist >>"$LOG"; sleep 2
+# The daemon files the DSN under done/; wait so the data snapshot is stable.
+for _ in $(seq 1 30); do [[ -z "$(podman exec smarthost-postfix ls -A "$SPOOL/inbound/new")" ]] && break; sleep 1; done
 wait_healthy 120 >/dev/null
 data_state() {  # everything that must survive stop/start/restart/recreate
   echo "marker=$("${OWNER_PSQL[@]}" "SELECT count(*) FROM phase1_verify_marker WHERE token='$MARK'")"

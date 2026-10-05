@@ -6,10 +6,19 @@ namespace App\Entity;
 
 use App\Enum\DsnClassification;
 use App\Enum\UnmatchedDsnStatus;
+use App\Util\Clock;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
-/** DSN that resolved to no message (D-05). Written by Go; operator resolution is Phase 5. */
+/**
+ * DSN that resolved to no message (D-05). Written by the Go delivery daemon.
+ *
+ * Operator workflow (Phase 5, console commands until the Phase 6 dashboard):
+ * open -> match_requested (operator names the message; Go then interprets the DSN,
+ * appends the transport event and sets matched, or returns the row to open with the
+ * reason in detail_json) or open -> dismissed (with a written reason). Rows are
+ * retained after resolution.
+ */
 #[ORM\Entity]
 #[ORM\Table(name: 'unmatched_dsns')]
 class UnmatchedDsn
@@ -103,4 +112,31 @@ class UnmatchedDsn
     public function getResolutionEvent(): ?MessageEvent { return $this->resolutionEvent; }
     public function getResolutionNote(): ?string { return $this->resolutionNote; }
     public function getResolvedAt(): ?\DateTimeImmutable { return $this->resolvedAt; }
+
+    /** open -> match_requested. Go performs the resolution (it never happens in Symfony). */
+    public function requestMatch(Message $message, User $operator, ?string $note): void
+    {
+        if (UnmatchedDsnStatus::Open !== $this->status) {
+            throw new \DomainException("Only an open unmatched DSN can be matched (status {$this->status->value}).");
+        }
+        $this->status = UnmatchedDsnStatus::MatchRequested;
+        $this->matchedMessage = $message;
+        $this->resolutionRequestedBy = $operator;
+        $this->resolutionRequestedAt = Clock::now();
+        $this->resolutionNote = $note;
+    }
+
+    /** open -> dismissed, with the operator's written reason. */
+    public function dismiss(string $reason): void
+    {
+        if (UnmatchedDsnStatus::Open !== $this->status) {
+            throw new \DomainException("Only an open unmatched DSN can be dismissed (status {$this->status->value}).");
+        }
+        if ('' === trim($reason)) {
+            throw new \DomainException('A dismissal needs a written reason.');
+        }
+        $this->status = UnmatchedDsnStatus::Dismissed;
+        $this->resolutionNote = trim($reason);
+        $this->resolvedAt = Clock::now();
+    }
 }

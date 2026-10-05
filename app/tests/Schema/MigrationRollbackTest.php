@@ -53,8 +53,8 @@ final class MigrationRollbackTest extends TestCase
     public function testEachMigrationRollsBackIndividually(): void
     {
         self::assertTrue(self::console('doctrine:migrations:migrate')->isSuccessful());
-        $expected = [24, 19, 17, 9, 5, 0];
-        $versions = ['DoctrineMigrations\Version20261003000500', 'DoctrineMigrations\Version20261003000400',
+        $expected = [24, 24, 19, 17, 9, 5, 0];
+        $versions = ['DoctrineMigrations\Version20261004000100', 'DoctrineMigrations\Version20261003000500', 'DoctrineMigrations\Version20261003000400',
             'DoctrineMigrations\Version20261003000300', 'DoctrineMigrations\Version20261003000200', 'DoctrineMigrations\Version20261003000100'];
         self::assertCount($expected[0], self::tables());
         foreach ($versions as $i => $version) {

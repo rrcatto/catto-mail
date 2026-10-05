@@ -31,7 +31,7 @@ Both are gitignored.
 │   ├── bin/console, bin/phpunit
 │   ├── public/index.php           The only front controller (nginx → FastCGI)
 │   ├── config/                    Framework, Doctrine, security, monolog, routes, services
-│   ├── migrations/                5 Doctrine migrations (the schema authority)
+│   ├── migrations/                6 Doctrine migrations (the schema authority)
 │   ├── src/
 │   │   ├── Api/                   Problems, OpenAPI validation, idempotency key, cursors, representations, work permission (D-31)
 │   │   ├── Audit/                 Audit log writer
@@ -42,12 +42,14 @@ Both are gitignored.
 │   │   ├── Crypto/                Encryption keyring (webhook signing secrets)
 │   │   ├── Doctrine/Type/         timestamptz and jsonb_map types
 │   │   ├── Domain/                Sending domains and DNS TXT verification
+│   │   ├── Dsn/                   Unmatched-DSN operator workflow (match request, dismissal)
 │   │   ├── Entity/                24 entities, one per table
 │   │   ├── Enum/                  32 vocabulary enums
 │   │   ├── Idempotency/           In-flight lock
 │   │   ├── Logging/               Contract log format
 │   │   ├── Security/              API-key and dashboard authentication, voter
 │   │   ├── Sending/               Send-job lifecycle, D-18 normalisation, content fingerprint
+│   │   ├── Suppression/           Recipient global opt-out API service, operator suppression administration (D-30)
 │   │   ├── Tenant/                Tenant scope and Doctrine tenant filter
 │   │   ├── Validation/            Validation-job creation
 │   │   ├── Webhook/               Endpoint/secret model and transactional outbox
@@ -67,14 +69,14 @@ Both are gitignored.
 │   ├── requirements.txt, requirements-test.txt, pytest.ini
 │   ├── smarthost_validator/       The worker package (pipeline stages, leases, limits, SQL)
 │   └── tests/                     pytest: unit, database, worker; fakes/ (fake DNS); e2e/zone.json
-├── delivery/                      Go delivery daemon (Phase 4)
+├── delivery/                      Go delivery daemon (Phases 4 and 5)
 │   ├── Containerfile              Stages: deps, test, build, runtime
 │   ├── README.md
 │   ├── go.mod, go.sum
 │   ├── cmd/smarthost-delivery/    main.go (run, health, normalize), probe.go (Phase 1 probes)
-│   └── internal/                  address, config, ids, ingest, integration (tests), logx, mimemsg,
-│                                  pacing, postfixlog, reconcile, smtpsub, snapshot, status, store,
-│                                  testsmtp, tracking, worker
+│   └── internal/                  address, config, dsn (+ testdata fixtures), dsnspool, ids, ingest,
+│                                  integration (tests), logx, mimemsg, pacing, postfixlog, reconcile,
+│                                  smtpclass, smtpsub, snapshot, status, store, testsmtp, tracking, worker
 ├── postfix/                       Postfix image
 │   ├── Containerfile
 │   ├── README.md
@@ -111,9 +113,11 @@ Both are gitignored.
 │       ├── testpod.sh             Shared throwaway network-less test pod (sourced)
 │       ├── phase2-test.sh         Phase 2 test harness (PHPUnit)
 │       ├── phase3-test.sh         Phase 3 test harness (pytest + end to end)
-│       ├── phase4-test.sh         Phase 4 harness: Go unit + PostgreSQL integration (throwaway pod)
+│       ├── phase4-test.sh         Phase 4/5 harness: Go unit + PostgreSQL integration (throwaway pod)
 │       ├── phase4-e2e.sh          Phase 4 end to end against the running pod
-│       └── phase4_e2e.py          Phase 4 end-to-end driver (API, Mailpit, DKIM, DB, Postfix log)
+│       ├── phase4_e2e.py          Phase 4 end-to-end driver (API, Mailpit, DKIM, DB, Postfix log)
+│       ├── phase5-e2e.sh          Phase 5 end to end against the running pod (DSNs via port 25)
+│       └── phase5_e2e.py          Phase 5 end-to-end driver (API, DSN/ARF injection, DB)
 ├── tests/fake-smtp/               Deterministic SMTP test server
 │   ├── Containerfile
 │   ├── README.md
@@ -153,7 +157,7 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, current phase, WSL Podman-machine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine) and 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine), 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle) and 0.1.5 (Phase 5 complete: inbound DSN, complaint and global suppression processing, D-30). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
 | `.containerignore` | The app and validator images build from the repository root so that they can copy the normative contracts; this admits only `app/` (without `vendor/`, `var/`), `validator/` (without caches), those contract files, the D-32 vectors and the fake SMTP server (validator test stage). |
@@ -201,6 +205,7 @@ Both are gitignored.
 | `tests/phase2-test.sh` | Phase 2 harness behind `smarthostctl test phase2`: the test pod, plus the reference schema loaded into a separate database for comparison, then PHPUnit as the application role. |
 | `tests/phase3-test.sh` | Phase 3 harness behind `smarthostctl test phase3`: in the test pod, pytest (unit, database and worker tests as the validator role), then an end-to-end run with the fake DNS and fake SMTP servers: Symfony creates jobs through `/v1` (including 10,000 addresses), the real worker is SIGKILLed mid-job and restarted, and Symfony verifies results, usage and the outbox. Fails if the fake SMTP server ever received `DATA`. `smarthostctl test` runs both harnesses. |
 | `tests/phase4-test.sh` | Phase 4 harness behind `smarthostctl test phase4`: builds the delivery `test` image (gofmt and go vet run during the build), runs the Go unit tests without network, then the integration tests against PostgreSQL in the throwaway test pod as `smarthost_delivery` (claiming, fencing, exactly-once expansion, suppressions, submission outcomes, purge and metering, ambiguity and crash recovery, log ingestion with rotation and the hold rule, reconciliation, pacing, headers and tracking). |
+| `tests/phase5-e2e.sh`, `tests/phase5_e2e.py` | Phase 5 end to end behind `smarthostctl test phase5-e2e`, against the running pod: messages through `/v1` to Mailpit, then the fixtures of `delivery/internal/dsn/testdata` sent to Postfix port 25 (VERP, postmaster or the feedback-loop address). Scenarios A (cross-client hard bounce), B (opt-out API and lift), C (correlation), D (ARF complaint), E (excluded scopes, repeated soft bounces), F (operator workflow), G (crash, reclaim, retention). |
 | `tests/phase4-e2e.sh`, `tests/phase4_e2e.py` | Phase 4 end to end behind `smarthostctl test phase4-e2e`, against the running pod: jobs through `/v1`, the dev daemon or throwaway worker containers, real Postfix/OpenDKIM/Mailpit. Scenarios A (headers, VERP, tracking, DKIM, events, purge, usage, completion), B (OpenDKIM down), C (deferral), D (SIGKILL and reclaim), E (10,000 recipients with a log rotation); duplicates are checked against the Postfix log. |
 | `tests/phase1_client.py` | Test client run inside the tool image on the internal network: submission (with queue ID), port-25 DSN injection, Mailpit lookup, cryptographic DKIM verification, fake-SMTP scenarios, PostgreSQL role/privilege probes and inotify watching. |
 | `tests/Containerfile`, `tests/requirements.txt` | Verification tool image (`localhost/smarthost-testtools:dev`): Python with dkimpy, psycopg and inotify_simple, plus the Phase 4 end-to-end driver. Test-only; never a service. |
@@ -229,7 +234,7 @@ Both are gitignored.
 | `validator/tests/` | pytest suites: normalisation vectors, syntax, typos, roles, config, DNS (with a fake DNS server), SMTP (with the fake SMTP server), limits, classification, pipeline, database leases/fencing/metering, worker end to end. `fakes/fake_dns.py` is a deterministic UDP/TCP DNS server driven by a zone file. |
 | `delivery/Containerfile` | Go 1.26, built from the repository root. Stages: `deps` (modules), `test` (sources, shared D-32 vectors; `gofmt` and `go vet` run during the build; `go test` runs offline), `build` (static binary), `runtime` (default; Debian slim, `USER 5001:5000`). |
 | `delivery/cmd/smarthost-delivery/` | The daemon (`run`: job worker, log ingestion, reconciliation, heartbeat, stats), `health`, `normalize`, and the Phase 1 probes `identity`, `check-db`, `check-observability`, `check-spool [--claim]`. |
-| `delivery/internal/` | See `delivery/README.md`: `config` (environment contract), `logx` (contract logs), `address` (D-32), `ids` (UUIDv7, VERP, tracking tokens, Message-ID), `mimemsg` (MIME and header contract), `tracking` (pixel, click rewriting), `smtpsub` (submission client), `pacing`, `store` (all SQL: leases, expansion, acceptance with purge and metering, projection, counts, outbox, log batches, reconciliation), `worker` (job processing), `postfixlog` (parser, generations, searches), `ingest` (cursor-following ingestion), `snapshot` and `reconcile` (D-27), `status` (vocabulary ranks), `testsmtp` (scripted submission server for tests), `integration` (PostgreSQL integration tests, build tag `integration`). |
+| `delivery/internal/` | See `delivery/README.md`: `config` (environment contract), `logx` (contract logs), `address` (D-32), `ids` (UUIDv7, VERP, tracking tokens, Message-ID), `mimemsg` (MIME and header contract), `tracking` (pixel, click rewriting), `smtpsub` (submission client), `pacing`, `store` (all SQL: leases, expansion, acceptance with purge and metering, projection, counts, outbox, log batches, reconciliation), `worker` (job processing), `postfixlog` (parser, generations, searches), `ingest` (cursor-following ingestion), `snapshot` and `reconcile` (D-27), `status` (vocabulary ranks), `testsmtp` (scripted submission server for tests), `integration` (PostgreSQL integration tests, build tag `integration`; `phase5_test.go` covers DSNs and the suppression policy). Phase 5: `smtpclass` (the one failure-scope classifier), `dsn` (bounded DSN/ARF parser, interpretation, correlation evidence; `testdata/` holds the realistic fixtures), `dsnspool` (spool claim/reclaim/retention and the match-request resolver), `store/dsn.go` (ingestion, correlation, unmatched rows, resolution) and `store/policy.go` (global suppression policy, pre-submission suppression). |
 | `delivery/go.mod`, `go.sum` | Module definition: pgx v5 and `golang.org/x/net` (IDNA, HTML tokenizer). |
 | `tests/fake-smtp/fake_smtp.py` | Stdlib asyncio SMTP server whose reply is chosen by the recipient prefix (`reject-550`, `tempfail-450/451`, `unavailable-421`, `timeout`, otherwise accept) plus the validator scenarios: `accept-all`/`block-all` domain labels and `throttle-421`, `block-554` and accept-all-probe local parts. It logs every command as JSON so tests can prove `DATA` never arrives; DATA is discarded. |
 | `tests/fake-smtp/Containerfile` | Python 3.14 slim, uid 10003. |
@@ -245,14 +250,17 @@ Both are gitignored.
 | `config/packages/security.yaml` | Stateless `/v1` firewall (API keys only) and a separate `/dashboard` form-login firewall (users only). |
 | `config/packages/monolog.yaml` | JSON lines to stderr in the contract format; Doctrine only at warning. |
 | `config/services.yaml` | Parameters from the environment contract; the test DNS stub. |
-| `migrations/Version20261003000100…000500.php` | Tenancy; validation; sending; suppression/reputation; metering, webhooks and audit. Together they reproduce `docs/schema/reference-schema.sql`; each has a `down()`. |
+| `migrations/Version20261003000100…000500.php` | Tenancy; validation; sending; suppression/reputation; metering, webhooks and audit. |
+| `migrations/Version20261004000100.php` | Phase 5 / D-30: client capability, suppression provenance, `recipient_global_opt_out`, partial unique indexes, `messages_recipient_address_idx`, dismissal reason. With the five above it reproduces `docs/schema/reference-schema.sql`; each has a `down()`. |
 | `src/Kernel.php` | Runs the fail-closed safety guard on every boot. |
 | `src/Config/` | `SafetyGuard` (SMARTHOST_ENV values; unverified domains forbidden in production), `SecretEnvVarProcessor` (`X` or `X_FILE`, never both), `Limits` (configuration may lower, never raise, the contract ceilings). |
 | `src/Doctrine/Type/` | `timestamptz` (microseconds, UTC) and `jsonb_map` (`{}` stays an object). |
 | `src/Entity/` | One entity per table (24). Tables written only by Python or Go are mapped read-only. |
 | `src/Enum/` | The 32 vocabularies of `status-vocabulary.yaml` as PHP enums. |
 | `src/Security/` | `ApiKeyManager` (raw key `shk_…`, 256 bits, shown once; SHA-256 stored), `ApiKeyAuthenticator` (Bearer; revoked keys and closed clients rejected; last-used tracking; failure rate limit), `ApiClientUser`, dashboard user provider and checker, login listener, `ClientVoter`. |
-| `src/Tenant/` | `TenantScope` (the only way API code loads tenant resources; foreign = missing), `TenantFilter` (Doctrine SQL filter, deny-by-default per table), and the listener that enables it for the authenticated client. |
+| `src/Tenant/` | `TenantScope` (the only way API code loads tenant resources; foreign = missing), `TenantFilter` (Doctrine SQL filter, deny-by-default per table; a client sees only its own suppressions and the global opt-outs it reported), and the listener that enables it for the authenticated client. |
+| `src/Suppression/` | `GlobalSuppressionService` (D-30 opt-out API: capability and D-31 check, normalisation, idempotency, per-address lock, audited create and lift) and `SuppressionAdministration` (operator capability changes, operator blocks, audited lifting, search). |
+| `src/Dsn/UnmatchedDsnAdministration.php` | Operator match requests (status `match_requested`, NOTIFY `smarthost_unmatched_dsn_work`; Go applies them) and dismissals with a reason; audited. |
 | `src/Api/` | `WorkPermission` (D-31: 403 for work-creating operations of `pending_approval`/`suspended` clients), RFC 9457 problems and their renderer, exception mapping for `/v1`, body-size and per-key rate limits, `OpenApiContract` (validates requests against the normative OpenAPI), `JsonRequest`, `RequestHasher` (canonical idempotency hash), `IdempotencyKey`, `Cursor`, `Presenter`. |
 | `src/Idempotency/IdempotencyLock.php` | Transaction-scoped advisory lock that turns a concurrent retry into 409. |
 | `src/Validation/ValidationJobService.php` | Creates the job and its pending address rows and wakes the validator with `pg_notify`; validates nothing. |
@@ -262,13 +270,13 @@ Both are gitignored.
 | `src/Webhook/` | `WebhookEndpointService` (encrypted secrets, rotation with overlap) and `WebhookOutbox` (transactional outbox writer). |
 | `src/Audit/` | `AuditLogger` and `AuditActor`. |
 | `src/Client/AccountAdministration.php` | Clients, users (case-insensitive login), passwords, operator role, memberships. |
-| `src/Command/` | `smarthost:client:*`, `smarthost:api-key:*`, `smarthost:user:*`, `smarthost:membership:set`, `smarthost:domain:*`, `smarthost:webhook:*`, `smarthost:dev:bootstrap`. |
-| `src/Controller/` | `/v1` controllers (validation jobs, send jobs, messages, `webhooks/test` = 501), `/healthz`, minimal `/dashboard` login. |
+| `src/Command/` | `smarthost:client:*` (including `client:global-suppressions`), `smarthost:api-key:*`, `smarthost:user:*`, `smarthost:membership:set`, `smarthost:domain:*`, `smarthost:webhook:*`, `smarthost:suppression:{list,create,lift}`, `smarthost:dsn:{list,show,match,dismiss}`, `smarthost:dev:bootstrap`. Operator actions require `--operator=<login email>`. |
+| `src/Controller/` | `/v1` controllers (validation jobs, send jobs, messages, global suppressions, `webhooks/test` = 501), `/healthz`, minimal `/dashboard` login. |
 | `src/Logging/ContractFormatter.php` | `ts`, `level`, `service`, `msg` plus context. |
 | `tests/Unit/` | D-18 normalisation (including the shared D-32 vectors), request hashing, keyring, configuration rules, log format. |
 | `tests/Contract/` | `/v1` routes equal the OpenAPI operations; OpenAPI enums equal the PHP enums. |
 | `tests/Schema/` | Reference-schema equivalence, migration up/down/up, ORM mapping vs database, vocabulary CHECKs, the grant matrix parsed from `schema.md`, least privilege, critical constraints. |
-| `tests/Integration/` | Authentication, client status (D-31), tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit. Every response is validated against the OpenAPI contract. |
+| `tests/Integration/` | Authentication, client status (D-31), tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API (`GlobalSuppressionApiTest`) and the Phase 5 operator commands (`Phase5OperatorCommandTest`). Every response is validated against the OpenAPI contract. |
 | `tests/Phase3/e2e.php` | Phase 3 end-to-end driver (`prepare`, `verify`): creates jobs through `/v1` and checks results, counters, usage and the outbox after the worker run. |
 | `tests/Support/`, `tests/bin/request.php` | Test base class, direct database connections, catalog comparison, DNS stub, and the concurrent-request worker. |
 
@@ -361,16 +369,22 @@ flowchart LR
     G -- yes --> H["completed + webhook_events(validation.completed)"]
 ```
 
-### 3.4 Inbound DSN and reconciliation (target behaviour, Phases 4–5)
+### 3.4 Inbound DSN, global suppression and reconciliation (Phases 4–5)
 
 ```mermaid
 flowchart TD
-    R["Remote MTA"] -- "port 25 (no milter)" --> P["Postfix: bounce domain only"]
+    R["Remote MTA / feedback loop"] -- "port 25 (no milter)" --> P["Postfix: bounce domain only"]
     P -- "virtual(8) as delivery UID" --> M["Maildir inbound/new"]
-    M -- "rename (atomic claim)" --> G["Go parser"]
-    G -- matched --> E["message_events (dsn_spool key) + suppression policy"]
+    M -- "rename (atomic claim) to processing/" --> G["Go: DSN / ARF parser, correlation"]
+    G -- "matched (one transaction)" --> E["message_events (dsn_spool key), projection, outbox"]
+    E --> SP["global suppression policy (D-30): recipient hard bounce, complaint, repeated soft bounce"]
+    L2["Postfix log hard/soft bounces"] --> SP
+    API["POST /v1/global-suppressions (authorised client)"] --> SUP[("suppressions, client_id NULL")]
+    SP --> SUP
+    SUP -- "checked at message creation and before submission" --> W["Go worker: message_suppressed"]
     G -- unmatched --> U["unmatched_dsns (open)"]
-    U -- "operator picks message" --> Q["match_requested"] --> G
+    U -- "smarthost:dsn:match (operator)" --> Q["match_requested"] --> G
+    G -- "after commit" --> D["done/ (deleted after retention)"]
     S["queue snapshots (postqueue -j)"] --> RC["Go reconciliation"]
     L["Postfix log (generation + position cursor)"] --> RC
     RC -- "absent ≥2 snapshots, no outcome found" --> OU["transport_outcome_unknown"]

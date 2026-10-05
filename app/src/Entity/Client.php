@@ -24,6 +24,10 @@ class Client
     #[ORM\Column(type: 'timestamptz')]
     private \DateTimeImmutable $createdAt;
 
+    /** D-30: operator-granted right to report recipient global opt-outs (default false). */
+    #[ORM\Column(type: 'boolean')]
+    private bool $canSubmitGlobalSuppressions = false;
+
     public function __construct(
         #[ORM\Column(type: 'text')]
         private string $companyName,
@@ -43,6 +47,10 @@ class Client
     public function getStatus(): ClientStatus { return $this->status; }
     public function setStatus(ClientStatus $status): void { $this->status = $status; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
+    public function canSubmitGlobalSuppressions(): bool { return $this->canSubmitGlobalSuppressions; }
+
+    /** Only an operator changes this (smarthost:client:global-suppressions, audited). */
+    public function setCanSubmitGlobalSuppressions(bool $allowed): void { $this->canSubmitGlobalSuppressions = $allowed; }
 
     /**
      * D-31: only active and throttled clients may create or add resource-consuming

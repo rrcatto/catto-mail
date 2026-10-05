@@ -1,0 +1,27 @@
+Delivered-To: {{VERP}}
+Date: Thu, 1 Oct 2026 12:00:00 +0000
+From: MAILER-DAEMON@mx.example.com
+To: {{VERP}}
+Subject: Delayed Mail (still being retried)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="delay"
+
+--delay
+Content-Type: text/plain
+
+This is a delay notification. The message will be retried.
+
+--delay
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mx.example.com
+Original-Envelope-Id: {{ENVID}}
+
+Final-Recipient: rfc822; {{RCPT}}
+Original-Recipient: rfc822; {{RCPT}}
+Action: delayed
+Status: 4.4.1
+Diagnostic-Code: X-Postfix; connect to mail.example.org[192.0.2.20]:25: Connection timed out
+Will-Retry-Until: Mon, 5 Oct 2026 12:00:00 +0000
+
+--delay--

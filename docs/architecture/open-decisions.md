@@ -2,7 +2,7 @@
 
 **This file is a log, not a source of architectural authority.** Every approved decision has been
 incorporated into the canonical specification (`docs/20260908-1644-smarthost-llm-spec.yaml`,
-version 2.3, `revision_history`) and its normative contracts. If this log and the specification
+version 2.4, `revision_history`) and its normative contracts. If this log and the specification
 ever differ, the specification wins.
 
 ## 1. Decisions (all resolved, 2026-10-02)
@@ -55,6 +55,12 @@ ever differ, the specification wins.
 | ID | Decision | Incorporated in spec 2.3 |
 |---|---|---|
 | D-35 | The development pod and its containers are persistent Podman objects: created once, then started, stopped and restarted as the same objects, including from Podman Desktop (`podman pod stop/start`). A systemd user service starts the existing pod at boot and stops it at shutdown and never removes it. Only `smarthostctl recreate` replaces pod and containers (named volumes kept); `destroy-volumes --yes` is the only data-deleting operation. This replaces the Quadlet `.pod`/`.container` runtime, whose units delete their containers and pod on every stop. | `podman_environment.process_management`, `repository_strategy` |
+
+### Decision before Phase 5 (owner decision 2026-10-04, incorporated in spec 2.4)
+
+| ID | Decision | Incorporated in spec 2.4 |
+|---|---|---|
+| D-30 | Automatic transport suppressions are **global** across the installation (`client_id` NULL) and apply to every current and future client. They are created only for an authoritative recipient-specific hard bounce (`failure_scope` recipient), a verified (correlated) complaint, the repeated recipient soft-bounce rule (evaluated globally; the suppression expires after the configured window), and an explicit **recipient global opt-out** (`recipient_global_opt_out`) reported by a client an operator authorised (`clients.can_submit_global_suppressions`, default false) through `POST /v1/global-suppressions`. Temporary, provider-policy, reputation, domain, DNS, connection, TLS, infrastructure, ambiguous and `outcome_unknown` outcomes never suppress. Provenance is explicit (`source_message_id`, `source_event_id`, `source_client_id`, audit log). Lifting sets `lifted_at`, never deletes, and never overrides an independent suppression. An ordinary unsubscribe remains client business state. | `suppression_and_reputation.global_suppression_policy`, `api.authentication.capabilities`, `api.endpoints_initial`, `inbound_bounce_handling`, `schema.tables.suppressions`, vocabulary, OpenAPI, reference schema |
 
 ## 2. Implementation choices made while incorporating the decisions
 
@@ -142,12 +148,36 @@ architecture; details are in `docs/architecture/postfix-integration.md` §9 and 
 | Ingestion holds for up to 60 s at the cleanup record of a submission whose queue id is being recorded; it checks those messages before correlating queue ids, so a commit between the two statements cannot let a record slip past both. | `delivery/internal/store/logevents.go` |
 | `submission_failed` is keyed as a `delivery_daemon` lifecycle event (`submission_failed:<message_id>`), since the `postfix_submission` key needs a queue id. | `delivery/internal/store` |
 | `send_jobs.summary_counts_json` (messages per status, the API's `summary_counts`) is maintained by Go in the transaction of every status change, under the job row lock; transactions lock job rows before message rows. | `delivery/internal/store` |
-| Synchronous Postfix bounces in the log (`status=bounced`/`expired`) are recorded as `hard_bounce`/`soft_bounce` (vocabulary source `postfix_log`) with `message.hard_bounced` in the outbox; no suppression is created (Phase 5, D-30). | `delivery/internal/postfixlog`, `store` |
+| Synchronous Postfix bounces in the log (`status=bounced`/`expired`) are recorded as `hard_bounce`/`soft_bounce` (vocabulary source `postfix_log`) with `message.hard_bounced` in the outbox; no suppression is created (superseded in Phase 5: they now feed the D-30 global suppression policy). | `delivery/internal/postfixlog`, `store` |
 | Provider pressure: recipient domains with at least 3 messages currently deferred are backed off for `DELIVERY_DEFERRAL_BACKOFF_SECONDS`. | `delivery/internal/worker` |
 | Reconciliation does not conclude `outcome_unknown` while an open or match-requested unmatched DSN names the message's VERP token or queue id. | `delivery/internal/reconcile` |
 | `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS` is also consumed by delivery (snapshot freshness, three intervals). | environment contract |
 | Symfony's submit sends `NOTIFY smarthost_send_work, '<job id>'`; the daemon `LISTEN`s and also polls. | `app/src/Sending/SendJobService.php` |
 | The delivery binary is `smarthost-delivery` (`run`, `health` and the Phase 1 probes `identity`, `check-db`, `check-observability`, `check-spool`). | `delivery/cmd/smarthost-delivery` |
+
+### Phase 5 implementation choices
+
+Made while implementing Phase 5 within specification 2.4. None changes the architecture; details
+are in `docs/architecture/postfix-integration.md` §5 and §10 and `delivery/README.md`.
+
+| Choice | Where |
+|---|---|
+| One failure-scope classifier (`internal/smtpclass`) serves Postfix log and DSN evidence. It is conservative: policy/reputation/DNS/connection wording wins over the code; only x.1.0/1/3/6 and x.2.0/1/2 (and, without a usable code, unambiguous mailbox wording) are `recipient`; x.4.7 (expired) is `unknown` (Phase 4 called it `connection`; neither counts). | `delivery/internal/smtpclass` |
+| The VERP token is read only from the **topmost** `Delivered-To`/`X-Original-To` header (prepended by the receiving Postfix); lower ones may be forged by the sender of the DSN. | `delivery/internal/dsn` |
+| Recipient-level correlation (the weakest level) requires exactly one message to the address within 7 days, with a queue id, whose job sender equals the returned `From`. Identifiers naming different messages are a conflict (unmatched). | `delivery/internal/store/dsn.go` |
+| A correlated report that cannot be reconciled (no block for the recipient, a different `Original-Recipient`, no status, malformed ARF) appends `dsn_unmatched` to the message; `Action: delivered/relayed/expanded` and non-`abuse` ARF types record nothing. Only ARF `Feedback-Type: abuse` is a complaint. | `delivery/internal/dsn/interpret.go` |
+| A DSN's event time is its `Last-Attempt-Date`, else `Date`, else the Maildir receipt time; an implausible time (before the message existed, or more than 5 minutes after receipt) is replaced by the receipt time. | `delivery/internal/store/dsn.go` |
+| Repeated soft bounces count distinct messages; a `remote_accepted` resets the sequence only if the same message was not soft-bounced afterwards (a relay may accept a message whose final mailbox then returns a DSN — observed in the end-to-end run). | `delivery/internal/store/policy.go` |
+| Concurrency of the policy: a transaction-scoped advisory lock per address, taken at commit in address order (no deadlock), plus partial unique indexes for hard bounce, complaint and opt-outs. | `delivery/internal/store/policy.go`, migration |
+| Go re-checks suppressions immediately before each submission (one indexed query per message), so a suppression created after a job was staged or expanded still prevents the submission. | `delivery/internal/worker` |
+| Stale `processing/` claims (older than `DELIVERY_LEASE_SECONDS`) are reclaimed by renaming to `<key>#<worker>-<nonce>`; the key ignores everything after `:` or `#`. Unreadable files go to `failed/`; a transient database error keeps the claim for an in-process retry. | `delivery/internal/dsnspool` |
+| The stored `raw_message` is at most 512 KiB, valid UTF-8 without NUL (flags in `detail_json`); the spool file keeps the exact bytes until retention. | `delivery/internal/store/dsn.go` |
+| Feedback-loop reports are accepted at the plain base address `<SMARTHOST_VERP_LOCAL_PART>@<bounce domain>` (already accepted by the Phase 1 recipient table) or at a VERP return path; no new variable. | spec `inbound_bounce_handling.feedback_loop_address` |
+| Opt-out API: 403 is checked before the body (capability and D-31 status); a new key for an address the client already opted out returns that row with 200 (its key is not stored); the representation never shows other suppressions of the address. Pending-approval and suspended clients may neither create nor lift. | `app/src/Suppression/GlobalSuppressionService.php` |
+| A tenant sees through the ORM only its client-scoped suppressions and the global opt-outs it reported (tightened tenant filter). | `app/src/Tenant/TenantFilter.php` |
+| Operator commands (`smarthost:client:global-suppressions`, `smarthost:suppression:{list,create,lift}`, `smarthost:dsn:{list,show,match,dismiss}`) require `--operator=<login email>` of an enabled operator, who is the audit actor (and `resolution_requested_by`); capability changes and lifts require a `--note`. | `app/src/Command` |
+| A match request Go cannot apply returns the row to `open` with `detail_json.resolution_failures`. | `delivery/internal/store/dsn.go` |
+| Phase 1 verification T16 stops the delivery daemon while it observes raw Maildir delivery (the daemon now consumes the spool), runs the claim probe in a throwaway container, and then proves the running daemon ingests a new DSN. | `infra/tests/phase1-verify.sh` |
 
 ## 3. Verification tasks (not architecture decisions)
 
@@ -168,11 +198,10 @@ None of them required an architectural change.
 
 ## 4. Remaining open decisions
 
-| ID | Topic | Blocks |
-|---|---|---|
-| D-30 | Whether automatically created suppressions (hard bounce, complaint, repeated soft bounce) are client-scoped or global. The schema supports both. | Phase 5 only |
+None. D-31 to D-34 were resolved on 2026-10-03, D-35 and D-30 on 2026-10-04 (see §1).
 
-D-31 to D-34 were resolved on 2026-10-03 and D-35 on 2026-10-04 (see §1). D-30 must be decided
-before Phase 5 implements automatic suppressions. Points to confirm before production (not
-blocking Phase 5): a CA file variable so Go can verify Postfix's submission certificate, and an
-index for reconciliation candidates at production volume.
+Points to confirm before production (not blocking Phase 6): a CA file variable so Go can verify
+Postfix's submission certificate; an index for reconciliation candidates at production volume
+(Phase 5 query-plan review found no Phase 5 query that needs it); retention commands for the
+configured `APP_RETENTION_SUPPRESSIONS_DAYS` / `APP_RETENTION_UNMATCHED_DSN_DAYS` periods (empty,
+so no deletion, until the compliance policy sets them).

@@ -1,6 +1,7 @@
 // Package worker executes sealed send jobs (spec go_delivery, sending):
 // lease a job, create one message per staged recipient (retry-safe), honour
-// existing suppressions, build MIME with the job's tracking, submit each
+// active suppressions (global ones for every client, D-30) when a message is
+// created and again just before it is submitted, build MIME with the job's tracking, submit each
 // message to Postfix under the pacing limits, and record every outcome in
 // fenced transactions. Memory is bounded by the page size and the number of
 // submissions in flight, never by the job size.
@@ -51,6 +52,7 @@ const (
 type Stats struct {
 	JobsClaimed, JobsDispatched, JobsFailed, MessagesCreated, Suppressed                    atomic.Int64
 	Submitted, Failed, TempFailures, Ambiguous, Recovered, LeaseLost, AcceptedButUnrecorded atomic.Int64
+	SuppressedBeforeSubmission                                                              atomic.Int64
 }
 
 // Worker processes send jobs.
@@ -521,6 +523,20 @@ func (w *Worker) submit(ctx context.Context, job *store.Job, ls *lease, it *item
 	}
 	if c.Purged { // impossible by construction: content is purged only with a recorded acceptance
 		mlog.Error("queued message has purged content; left for the operator")
+		return result{it: it}
+	}
+	// A suppression may have become active since the message was created (for
+	// example a global hard bounce or opt-out caused through another client,
+	// D-30): check again immediately before submitting.
+	if sups, err := w.Store.ActiveSuppressions(ctx, job.ClientID, []string{c.Address}, []string{address.Domain(c.Address)}); err != nil {
+		mlog.Warning("suppression check failed; will retry", "error", err)
+		return result{it: it, retry: retryBase}
+	} else if len(sups) > 0 {
+		if _, err := w.Store.RecordSuppressed(ctx, job, w.Me, it.p.ID, sups[0]); err != nil {
+			return w.writeFailed(it, err, mlog)
+		}
+		w.Stats.SuppressedBeforeSubmission.Add(1)
+		mlog.Info("suppressed before submission", "suppression_id", sups[0].ID, "reason", sups[0].Reason)
 		return result{it: it}
 	}
 	html := c.HTML

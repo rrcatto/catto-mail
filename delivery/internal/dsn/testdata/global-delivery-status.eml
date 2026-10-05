@@ -1,0 +1,19 @@
+Delivered-To: {{VERP}}
+From: MAILER-DAEMON@mx.example.org
+Subject: Undeliverable (internationalised)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=global-delivery-status; boundary="g"
+
+--g
+Content-Type: message/global-delivery-status
+
+Reporting-MTA: dns; mx.example.org
+Original-Envelope-Id: {{ENVID}}
+
+Original-Recipient: utf-8; {{RCPT}}
+Final-Recipient: utf-8; {{RCPT}}
+Action: failed
+Status: 5.1.1
+Diagnostic-Code: smtp; 550 5.1.1 mailbox unavailable
+
+--g--

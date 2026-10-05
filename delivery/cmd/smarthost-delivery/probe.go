@@ -111,8 +111,9 @@ func checkObservability() error {
 }
 
 // checkSpool reads DSN spool files and, with claim, renames each to processing/
-// then done/ and proves a second claim fails (exactly-one-winner). DSN parsing
-// itself is Phase 5; the daemon does not touch the spool in Phase 4.
+// then done/ and proves a second claim fails (exactly-one-winner). It is the
+// Phase 1 permission probe; the running daemon (Phase 5) claims spool files
+// itself, so the verification suite runs this probe while the daemon is paused.
 func checkSpool(claim bool) error {
 	dir := os.Getenv("SMARTHOST_DSN_SPOOL_DIR")
 	newDir := filepath.Join(dir, "inbound", "new")

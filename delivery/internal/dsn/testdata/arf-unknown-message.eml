@@ -1,0 +1,22 @@
+Delivered-To: bounce@{{BOUNCE}}
+From: <staff@feedback.example.net>
+Subject: Abuse report
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=feedback-report; boundary="u"
+
+--u
+Content-Type: message/feedback-report
+
+Feedback-Type: abuse
+User-Agent: ExampleFBL/1.0
+Version: 1
+Original-Rcpt-To: <{{RCPT}}>
+
+--u
+Content-Type: text/rfc822-headers
+
+From: <someone-else@unrelated.example>
+To: <{{RCPT}}>
+Message-ID: <not-a-smarthost-id@unrelated.example>
+
+--u--

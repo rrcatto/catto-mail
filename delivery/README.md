@@ -1,4 +1,4 @@
-# delivery/ — Go delivery/control daemon (Phase 4)
+# delivery/ — Go delivery/control daemon (Phases 4 and 5)
 
 A long-running Go 1.26 daemon (`cmd/smarthost-delivery`) that executes sealed send jobs through
 Postfix and records what Postfix does with them. It connects only as `smarthost_delivery`
@@ -27,6 +27,13 @@ Symfony /v1 (submit, NOTIFY smarthost_send_work)
   -> dispatched; Postfix log -> postfix_queued / deferred / connection_failure / delivery_attempt /
      remote_accepted / soft_bounce / hard_bounce -> completed (+ send.completed outbox)
   -> queue snapshots -> reconciliation -> transport_outcome_unknown when nothing is recoverable
+
+Remote MTA / feedback loop -> Postfix :25 -> virtual(8) -> DSN spool inbound/new   (Phase 5)
+  -> claim (rename to processing/) -> parse (RFC 3464/6533 DSN, RFC 5965 ARF, other)
+  -> correlate (VERP, ENVID, Message-ID, queue id, corroborated recipient) -> one transaction:
+     dsn_spool event + projection + outbox + global suppression policy (D-30) | unmatched_dsns row
+  -> done/ (deleted after DELIVERY_DSN_RETENTION_DAYS)
+Operator match request (NOTIFY smarthost_unmatched_dsn_work) -> re-interpret -> event (matched)
 ```
 
 | Package | Responsibility |
@@ -45,6 +52,10 @@ Symfony /v1 (submit, NOTIFY smarthost_send_work)
 | `internal/ingest` | Follows the log with the `delivery_ingest_cursors` cursor; survives restart and rotation. |
 | `internal/snapshot`, `internal/reconcile` | `postqueue -j` snapshots, freshness, D-27 reconciliation. |
 | `internal/status` | Status ranks and event → status projection from the vocabulary. |
+| `internal/smtpclass` | The one failure-scope classifier (D-18, D-30) for Postfix log and DSN evidence; only mailbox-specific evidence is `recipient`. |
+| `internal/dsn` | Bounded parsing of DSNs (RFC 3464, RFC 6533), ARF complaints (RFC 5965) and non-standard bounces; interpretation for a message; correlation evidence. Content is data only. |
+| `internal/dsnspool` | The spool processor (claim by rename, inotify + polling, stale-claim reclaim, `failed/`, retention) and the unmatched-DSN match-request resolver. |
+| `internal/store` (`dsn.go`, `policy.go`) | DSN ingestion and correlation in one transaction; the global suppression policy applied at commit to every new authoritative event (advisory lock per address, partial unique indexes); the pre-submission suppression check. |
 | `internal/testsmtp` | Scripted in-process submission server for tests (STARTTLS, AUTH, 4xx/5xx, drops, milter tempfail). |
 
 ## Safety rules
@@ -70,15 +81,25 @@ Symfony /v1 (submit, NOTIFY smarthost_send_work)
   absence is never success; the log is re-scanned first; an open unmatched DSN prevents a
   conclusion; `outcome_unknown` is superseded by any later authoritative event.
 
-Not in Phase 4: DSN parsing, ARF complaints, automatic suppressions (Phase 5); the spool probes
-only prove permissions.
+* **Global suppression (D-30).** A new `hard_bounce` with failure scope `recipient`, a `complaint`,
+  or the third consecutive recipient `soft_bounce` of an address (all clients, distinct messages,
+  within the window) creates one global suppression with source message and event, whatever the
+  evidence source. Other scopes never suppress. Suppressions are checked at message creation and
+  again immediately before each submission.
+* **DSN idempotency.** The Maildir unique file name is the `dsn_spool` source key and the
+  `unmatched_dsns.spool_ingest_key`; a claim, crash, reclaim, retry or duplicate file never creates
+  a second event, row or suppression.
 
 ## Tests
 
-* `infra/bin/smarthostctl test phase4` (`infra/tests/phase4-test.sh`): `gofmt` and `go vet`
+* `infra/bin/smarthostctl test phase4` or `test phase5` (`infra/tests/phase4-test.sh`): `gofmt` and `go vet`
   (image build), Go unit tests without network, then the integration tests
   (`internal/integration`, build tag `integration`) against PostgreSQL 16 with the real
   migrations and grants, as `smarthost_delivery`, in a throwaway network-less pod.
 * `infra/bin/smarthostctl test phase4-e2e` (`infra/tests/phase4-e2e.sh`): the running pod's real
   Postfix, OpenDKIM and Mailpit (scenarios A–E: headers and DKIM, OpenDKIM down, deferral, crash,
   10,000 recipients).
+* `infra/bin/smarthostctl test phase5-e2e` (`infra/tests/phase5-e2e.sh`, driver `phase5_e2e.py`):
+  DSNs and ARF reports sent to the running pod's Postfix port 25 (fixtures in
+  `internal/dsn/testdata`), scenarios A–G: cross-client hard bounce, opt-out API, correlation,
+  complaint, excluded scopes and repeated soft bounces, operator workflow, crash and retention.

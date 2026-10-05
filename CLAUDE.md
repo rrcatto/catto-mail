@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.3) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.4) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -27,7 +27,13 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
   `infra/bin/smarthostctl test phase4` runs the Go unit and PostgreSQL
   integration tests in a throwaway pod; `test phase4-e2e` runs against the running pod's Postfix,
   OpenDKIM and Mailpit.
-- Do not start Phase 5 or later work unless the user explicitly asks for it.
+- **Phase 5** (inbound DSN, complaint and global suppression processing, D-30, spec 2.4):
+  complete (v0.1.5). `infra/bin/smarthostctl test phase5` runs the Go suite (DSN parser,
+  suppression policy, spool, PostgreSQL integration); `test phase5-e2e` sends DSNs and ARF reports
+  through the running pod's Postfix port 25 and DSN spool. Operator workflows are console commands
+  (`smarthost:dsn:*`, `smarthost:suppression:*`, `smarthost:client:global-suppressions`, each with
+  `--operator`).
+- Do not start Phase 6 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -64,6 +70,11 @@ This is a public repository. Documentation, comments, examples, tests, configura
   `docs/contracts/environment.md`. Regenerate the template with
   `python3 infra/lib/smarthost_render.py env-example`, then run
   `python3 scripts/check-contracts.py`.
+- **Suppressions (D-30).** Automatic suppressions and recipient global opt-outs are global
+  (`client_id` NULL); the opt-out reporter is `source_client_id`. Only Go creates `hard_bounce`,
+  `complaint` and `repeated_soft_bounce`, through the one policy in `delivery/internal/store/policy.go`;
+  only `failure_scope = recipient` counts. Unsuppress by setting `lifted_at`, never by deleting.
+  An ordinary unsubscribe is never Smarthost state.
 - **Never commit secrets.** `infra/.env` and `infra/.generated/` (env files, rendered units,
   development TLS material) are gitignored. Development DKIM private keys live only in the
   `smarthost-opendkim-keys` Podman volume.

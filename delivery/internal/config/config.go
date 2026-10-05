@@ -52,6 +52,11 @@ type Config struct {
 	ReconcileGrace    time.Duration
 	ReconcileMinSnaps int
 	SnapshotInterval  time.Duration
+
+	// Phase 5 (D-18, D-30): global suppression policy and DSN spool retention.
+	SoftBounceThreshold int
+	SoftBounceWindow    time.Duration
+	DSNRetention        time.Duration
 }
 
 type reader struct {
@@ -123,41 +128,44 @@ func FromEnv() (*Config, error) { return Load(os.Getenv) }
 func Load(get func(string) string) (*Config, error) {
 	r := &reader{get: get}
 	c := &Config{
-		Env:                r.required("SMARTHOST_ENV"),
-		PublicBaseURL:      strings.TrimRight(r.required("SMARTHOST_PUBLIC_BASE_URL"), "/"),
-		LogLevel:           r.optional("SMARTHOST_LOG_LEVEL", "info"),
-		LogFormat:          r.optional("SMARTHOST_LOG_FORMAT", "json"),
-		LiveDelivery:       r.boolean("SMARTHOST_LIVE_DELIVERY_ENABLED"),
-		AllowUnverified:    r.boolean("SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS"),
-		BounceDomain:       strings.ToLower(r.required("SMARTHOST_BOUNCE_DOMAIN")),
-		VERPLocalPart:      r.required("SMARTHOST_VERP_LOCAL_PART"),
-		VERPDelimiter:      r.required("SMARTHOST_VERP_DELIMITER"),
-		SubmissionUser:     r.required("SMARTHOST_SUBMISSION_USERNAME"),
-		SubmissionPassword: r.required("SMARTHOST_SUBMISSION_PASSWORD"),
-		SubmissionHost:     r.required("DELIVERY_POSTFIX_SUBMISSION_HOST"),
-		SubmissionPort:     r.integer("DELIVERY_POSTFIX_SUBMISSION_PORT", 1),
-		ObservabilityDir:   r.required("SMARTHOST_POSTFIX_OBSERVABILITY_DIR"),
-		DSNSpoolDir:        r.required("SMARTHOST_DSN_SPOOL_DIR"),
-		DBHost:             r.required("SMARTHOST_DB_HOST"),
-		DBPort:             r.required("SMARTHOST_DB_PORT"),
-		DBName:             r.required("SMARTHOST_DB_NAME"),
-		DBSSLMode:          r.required("SMARTHOST_DB_SSLMODE"),
-		DBUser:             r.required("DELIVERY_DB_USER"),
-		DBPassword:         r.required("DELIVERY_DB_PASSWORD"),
-		WorkerID:           r.optional("DELIVERY_WORKER_ID", ""),
-		PollInterval:       r.seconds("DELIVERY_POLL_INTERVAL_SECONDS", 1),
-		Lease:              r.seconds("DELIVERY_LEASE_SECONDS", 10),
-		GlobalConcurrency:  r.integer("DELIVERY_GLOBAL_CONCURRENCY", 1),
-		DomainConcurrency:  r.integer("DELIVERY_PER_DOMAIN_CONCURRENCY", 1),
-		DomainRatePerMin:   r.integer("DELIVERY_PER_DOMAIN_RATE_PER_MINUTE", 1),
-		DeferralBackoff:    r.seconds("DELIVERY_DEFERRAL_BACKOFF_SECONDS", 1),
-		DSNNotify:          r.required("DELIVERY_DSN_NOTIFY"),
-		DSNRet:             r.required("DELIVERY_DSN_RET"),
-		FilePollInterval:   r.seconds("DELIVERY_FILE_POLL_INTERVAL_SECONDS", 1),
-		ReconcileInterval:  r.seconds("DELIVERY_RECONCILE_INTERVAL_SECONDS", 1),
-		ReconcileGrace:     r.seconds("DELIVERY_RECONCILE_GRACE_SECONDS", 0),
-		ReconcileMinSnaps:  r.integer("DELIVERY_RECONCILE_MIN_SNAPSHOTS", 2),
-		SnapshotInterval:   r.seconds("POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS", 1),
+		Env:                 r.required("SMARTHOST_ENV"),
+		PublicBaseURL:       strings.TrimRight(r.required("SMARTHOST_PUBLIC_BASE_URL"), "/"),
+		LogLevel:            r.optional("SMARTHOST_LOG_LEVEL", "info"),
+		LogFormat:           r.optional("SMARTHOST_LOG_FORMAT", "json"),
+		LiveDelivery:        r.boolean("SMARTHOST_LIVE_DELIVERY_ENABLED"),
+		AllowUnverified:     r.boolean("SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS"),
+		BounceDomain:        strings.ToLower(r.required("SMARTHOST_BOUNCE_DOMAIN")),
+		VERPLocalPart:       r.required("SMARTHOST_VERP_LOCAL_PART"),
+		VERPDelimiter:       r.required("SMARTHOST_VERP_DELIMITER"),
+		SubmissionUser:      r.required("SMARTHOST_SUBMISSION_USERNAME"),
+		SubmissionPassword:  r.required("SMARTHOST_SUBMISSION_PASSWORD"),
+		SubmissionHost:      r.required("DELIVERY_POSTFIX_SUBMISSION_HOST"),
+		SubmissionPort:      r.integer("DELIVERY_POSTFIX_SUBMISSION_PORT", 1),
+		ObservabilityDir:    r.required("SMARTHOST_POSTFIX_OBSERVABILITY_DIR"),
+		DSNSpoolDir:         r.required("SMARTHOST_DSN_SPOOL_DIR"),
+		DBHost:              r.required("SMARTHOST_DB_HOST"),
+		DBPort:              r.required("SMARTHOST_DB_PORT"),
+		DBName:              r.required("SMARTHOST_DB_NAME"),
+		DBSSLMode:           r.required("SMARTHOST_DB_SSLMODE"),
+		DBUser:              r.required("DELIVERY_DB_USER"),
+		DBPassword:          r.required("DELIVERY_DB_PASSWORD"),
+		WorkerID:            r.optional("DELIVERY_WORKER_ID", ""),
+		PollInterval:        r.seconds("DELIVERY_POLL_INTERVAL_SECONDS", 1),
+		Lease:               r.seconds("DELIVERY_LEASE_SECONDS", 10),
+		GlobalConcurrency:   r.integer("DELIVERY_GLOBAL_CONCURRENCY", 1),
+		DomainConcurrency:   r.integer("DELIVERY_PER_DOMAIN_CONCURRENCY", 1),
+		DomainRatePerMin:    r.integer("DELIVERY_PER_DOMAIN_RATE_PER_MINUTE", 1),
+		DeferralBackoff:     r.seconds("DELIVERY_DEFERRAL_BACKOFF_SECONDS", 1),
+		DSNNotify:           r.required("DELIVERY_DSN_NOTIFY"),
+		DSNRet:              r.required("DELIVERY_DSN_RET"),
+		FilePollInterval:    r.seconds("DELIVERY_FILE_POLL_INTERVAL_SECONDS", 1),
+		ReconcileInterval:   r.seconds("DELIVERY_RECONCILE_INTERVAL_SECONDS", 1),
+		ReconcileGrace:      r.seconds("DELIVERY_RECONCILE_GRACE_SECONDS", 0),
+		ReconcileMinSnaps:   r.integer("DELIVERY_RECONCILE_MIN_SNAPSHOTS", 2),
+		SnapshotInterval:    r.seconds("POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS", 1),
+		SoftBounceThreshold: r.integer("DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD", 1),
+		SoftBounceWindow:    time.Duration(r.integer("DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS", 1)) * 24 * time.Hour,
+		DSNRetention:        time.Duration(r.integer("DELIVERY_DSN_RETENTION_DAYS", 1)) * 24 * time.Hour,
 	}
 	switch c.Env {
 	case "development", "test", "production":

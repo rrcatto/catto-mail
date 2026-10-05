@@ -216,7 +216,7 @@ func TestSuppressionsAreHonoured(t *testing.T) {
  (gen_random_uuid(), $1, 'Blocked@rcpt.test', 'address', 'hard_bounce'),
  (gen_random_uuid(), NULL, 'blocked-domain.test', 'domain', 'operator_block'),
  (gen_random_uuid(), $2, 'other-client@rcpt.test', 'address', 'complaint')`, e.client, other)
-	e.exec(`INSERT INTO suppressions (id, client_id, address_or_domain, scope_type, reason, expires_at) VALUES (gen_random_uuid(), NULL, 'expired@rcpt.test', 'address', 'hard_bounce', now() - interval '1 day')`)
+	e.exec(`INSERT INTO suppressions (id, client_id, address_or_domain, scope_type, reason, expires_at) VALUES (gen_random_uuid(), NULL, 'expired@rcpt.test', 'address', 'repeated_soft_bounce', now() - interval '1 day')`)
 	e.exec(`INSERT INTO suppressions (id, client_id, address_or_domain, scope_type, reason, lifted_at) VALUES (gen_random_uuid(), NULL, 'lifted@rcpt.test', 'address', 'hard_bounce', now())`)
 	job := e.newJob(jobOpts{}, []rcpt{{addr: "Blocked@RCPT.test"}, {addr: "blocked@rcpt.test"}, {addr: "x@blocked-domain.test"},
 		{addr: "other-client@rcpt.test"}, {addr: "expired@rcpt.test"}, {addr: "lifted@rcpt.test"}})

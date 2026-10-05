@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"smarthost.local/delivery/internal/smtpclass"
 )
 
 // Kind of a parsed record.
@@ -121,9 +123,6 @@ var (
 	saidCode    = regexp.MustCompile(`said: (\d{3})[ -]`)
 	leadingCode = regexp.MustCompile(`^(\d{3})[ -]`)
 	hostRe      = regexp.MustCompile(`^([^\[\s]+)(?:\[[^\]]*\])?`)
-	connRe      = regexp.MustCompile(`(?i)connect to |connection refused|connection timed out|connection reset|no route to host|network is unreachable|lost connection with .* while (connecting|receiving the initial server greeting|performing the EHLO handshake)|conversation with .* timed out|tls handshake|cannot start tls|unable to look up`)
-	dnsRe       = regexp.MustCompile(`(?i)host or domain name not found|name service error|domain not found|no mx host`)
-	policyRe    = regexp.MustCompile(`(?i)rate limit|too many (connections|messages|recipients)|try again later|temporarily deferred|reputation|spamhaus|blocked|throttl`)
 )
 
 // Classify maps a Delivery record to its event. QueueActive and MessageID
@@ -145,13 +144,9 @@ func Classify(r Record) (Event, bool) {
 	case "sent":
 		e.Type = "remote_accepted"
 	case "deferred":
-		switch {
-		case dnsRe.MatchString(r.Text):
-			e.Type, e.FailureScope = "deferred", "dns"
-		case connRe.MatchString(r.Text):
-			e.Type, e.FailureScope = "connection_failure", "connection"
-		default:
-			e.Type, e.FailureScope = "deferred", Scope(r.DSN, r.Text)
+		e.Type, e.FailureScope = "deferred", Scope(r.DSN, r.Text)
+		if e.FailureScope == smtpclass.Connection {
+			e.Type = "connection_failure"
 		}
 	case "bounced":
 		if strings.HasPrefix(r.DSN, "4.") {
@@ -174,32 +169,11 @@ func Classify(r Record) (Event, bool) {
 	return e, true
 }
 
-// Scope classifies the failure scope of a deferral or bounce (D-18). Only
-// "recipient" counts towards repeated-soft-bounce suppression (Phase 5).
-func Scope(dsn, text string) string {
-	switch {
-	case dnsRe.MatchString(text):
-		return "dns"
-	case connRe.MatchString(text):
-		return "connection"
-	case strings.HasPrefix(dsn[min(2, len(dsn)):], "7.") || policyRe.MatchString(text):
-		return "provider_policy"
-	case strings.HasPrefix(dsn[min(2, len(dsn)):], "1.") || strings.HasPrefix(dsn[min(2, len(dsn)):], "2."):
-		return "recipient"
-	case strings.HasPrefix(dsn[min(2, len(dsn)):], "4."):
-		return "connection"
-	case strings.HasPrefix(dsn[min(2, len(dsn)):], "3."):
-		return "infrastructure"
-	case dsn != "":
-		return "domain"
-	default:
-		return "unknown"
-	}
-}
+// Scope classifies the failure scope of a deferral or bounce (D-18) with the
+// classifier shared by every evidence source (internal/smtpclass, D-30).
+func Scope(dsn, text string) string { return smtpclass.Scope(dsn, text) }
 
-var enhancedRe = regexp.MustCompile(`^[245]\.\d{1,3}\.\d{1,3}$`)
-
-func validEnhanced(s string) bool { return enhancedRe.MatchString(s) }
+func validEnhanced(s string) bool { return smtpclass.Valid(s) }
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

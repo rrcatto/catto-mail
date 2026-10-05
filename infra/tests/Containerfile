@@ -1,10 +1,12 @@
 # Phase 1 verification tool image: runs throwaway test clients on the
 # smarthost-internal network (submission, DSN injection, DKIM verification,
-# PostgreSQL privilege and inotify checks; the Phase 4 end-to-end driver).
+# PostgreSQL privilege and inotify checks; the Phase 4 and Phase 5 end-to-end
+# drivers).
 # Not a service image.
 FROM docker.io/library/python:3.14-slim-trixie
 COPY requirements.txt /opt/tests/requirements.txt
 RUN pip install --no-cache-dir -r /opt/tests/requirements.txt
 COPY phase1_client.py /opt/tests/phase1_client.py
 COPY phase4_e2e.py /opt/tests/phase4_e2e.py
+COPY phase5_e2e.py /opt/tests/phase5_e2e.py
 ENTRYPOINT ["python", "/opt/tests/phase1_client.py"]

@@ -1,6 +1,6 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.3. This is a documentation revision, not a software release version.
+**Specification version:** 2.4. This is a documentation revision, not a software release version.
 **Revision date:** 4 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
@@ -58,7 +58,7 @@ A client application owns mailing-list business logic:
 - subscriber fields;
 - consent history;
 - confirmation state;
-- unsubscribe state and the unsubscribe endpoint;
+- unsubscribe state and the unsubscribe endpoint (ordinary list, newsletter, campaign and client unsubscribes stay here);
 - campaign creation;
 - campaign templates, merge fields and **rendering**;
 - segmentation;
@@ -67,6 +67,10 @@ A client application owns mailing-list business logic:
 The client produces the **fully rendered, recipient-specific** subject, HTML body and plain-text
 body for every recipient, and the opaque per-recipient unsubscribe URL. Smarthost receives
 finished messages and never merges, renders or substitutes variables.
+
+A trusted client application may also report a **recipient global opt-out** to Smarthost: the
+recipient explicitly asked not to receive email from any source using the Smarthost installation
+(§13.4). That narrow instruction becomes Smarthost state; an ordinary unsubscribe never does.
 
 Every client application, including the first one, **communicates with Smarthost through the same
 public API that a future paying customer would use**. No client ever connects directly to the
@@ -669,7 +673,43 @@ A DSN that cannot be associated with any message cannot be a normal message even
 3. Go interprets the DSN and creates the appropriate message transport event.
 4. The original unmatched record is kept, with who resolved it, when, and which message it matched.
 
-Irrelevant DSNs, such as backscatter, can be dismissed.
+Irrelevant DSNs, such as backscatter, can be dismissed with a written reason. If Go cannot interpret
+the DSN for the requested message (it reports no failure for it), the record returns to open with
+the reason, and no event is created. Until the Phase 6 operator dashboard exists, operators use
+audited console commands (`smarthost:dsn:list`, `smarthost:dsn:show`, `smarthost:dsn:match`,
+`smarthost:dsn:dismiss`); each records the operator's identity.
+
+## 9.4.1 Inbound DSN and complaint processing
+
+Go parses each spool file as an RFC 3464 delivery status notification (including the RFC 6533
+international form), an RFC 5965 ARF feedback report, or a non-standard bounce. The content is
+untrusted data: it is never executed, rendered or followed, and sizes and MIME structure are
+bounded. A malformed file never fails processing; it becomes an unmatched DSN.
+
+Correlation uses the strongest evidence first:
+
+1. the VERP token of the envelope recipient (the `Delivered-To` header the receiving Postfix adds);
+2. `Original-Envelope-Id` (the Smarthost message id sent as ENVID);
+3. `X-Smarthost-Message-ID`, or a Smarthost `Message-ID`, in the returned headers;
+4. the Postfix queue id (`X-Postfix-Queue-ID`);
+5. the recipient address **combined with other evidence**: exactly one message to that address in
+   the previous seven days, with a queue id, whose sender is the `From` of the returned headers.
+
+An identifier that names no message is not evidence; identifiers naming different messages are a
+conflict. Smarthost never guesses: an uncorrelated report becomes an unmatched DSN. A report
+correlated to a message but impossible to reconcile with it (several recipient reports, none for
+the message's recipient; no interpretable status) appends `dsn_unmatched` to that message.
+
+Classification is conservative. `Action: failed` with a 5.x.x status is a `hard_bounce`, with a
+4.x.x status a `soft_bounce`; `Action: delayed` is `deferred` (or `connection_failure`); delivered,
+relayed and expanded reports record nothing; a temporary failure never becomes permanent. An ARF
+report of type `abuse` correlated to an exact message is a `complaint`. One failure-scope
+classifier serves Postfix log and DSN evidence alike.
+
+Everything for one file (event, state projection, webhook outbox row, suppression policy) is one
+transaction, keyed by the Maildir unique file name, so crashes, retries, restarts and duplicate
+notifications never duplicate anything. Processed files stay in `done/` for
+`DELIVERY_DSN_RETENTION_DAYS` (7 by default); the database record is the durable one.
 
 ## 9.5 Transport reconciliation
 
@@ -893,7 +933,66 @@ Only mailbox-specific temporary failures count, such as a full or temporarily di
 
 Each of these is recorded with its own failure scope, because none of them shows that a specific mailbox should be suppressed.
 
-Whether automatic suppressions are client-scoped or global is to be decided before Phase 5. The schema supports both.
+The rule is evaluated **globally** (§13.3): across every client's messages to the same normalised
+address. Each message counts once, and soft bounces of other scopes neither count nor reset the
+sequence. Because a full or disabled mailbox is a temporary condition, the resulting
+`repeated_soft_bounce` suppression is **temporary**: it expires after the configured window
+(`DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS`, 30 days by default).
+
+## 13.3 Global suppression policy (D-30)
+
+Automatic transport suppressions are **global across the whole Smarthost installation**
+(`suppressions.client_id` is NULL). They apply to every current and future client. A global
+address suppression is created for:
+
+1. an authoritative, **recipient-specific** permanent failure (`hard_bounce` with failure scope
+   `recipient`, for example 5.1.1 unknown mailbox), whether the evidence came from the Postfix log,
+   an inbound DSN or an operator-resolved unmatched DSN;
+2. a verified recipient **complaint** (an ARF report correlated to an exact message);
+3. the repeated recipient soft-bounce rule (§13.2);
+4. an explicit **recipient global opt-out** reported by an authorised client (§13.4).
+
+No global suppression is created for a single soft bounce, provider-wide throttling, sender or IP
+reputation rejections, domain-level policy failures, DNS, connection or TLS failures, remote
+infrastructure failures, general domain deferrals, ambiguous outcomes, `outcome_unknown`,
+validation results alone, or a DSN or complaint that is not confidently correlated.
+
+A suppression is active while it is not lifted and not expired. Address suppressions match the
+exact normalised address (the local part is never case-folded); domain suppressions, which only an
+operator creates, match the lower-cased domain. Any active applicable suppression stops
+submission: Go checks when it creates a message and again just before submitting it, and records
+`message_suppressed`. Mail that Postfix has already accepted is not recalled. Independent
+suppressions (different reasons or reporters) coexist as separate rows; lifting one never makes
+the address sendable while another is active. Hard-bounce, complaint and opt-out suppressions are
+indefinite until explicitly lifted.
+
+Provenance is explicit: system suppressions name their source message and event; a client-reported
+opt-out names its reporting client in `source_client_id` (never in `client_id`), with its creation
+time, an optional client reference and an audit-log entry; operator actions are in the audit log
+with the operator's identity.
+
+## 13.4 Recipient global opt-out
+
+An ordinary unsubscribe from a list, newsletter, campaign or client is client business state and is
+never copied into Smarthost. Only when the recipient explicitly says *"do not send me email from
+any source using this Smarthost installation"* may a client report it, with
+`POST /v1/global-suppressions`. Smarthost then creates a global `recipient_global_opt_out`
+suppression for the normalised address.
+
+Because a multi-tenant Smarthost must not let any tenant suppress any address globally, the API is
+available only to clients that an operator has granted the `can_submit_global_suppressions`
+capability (default false for every client; changed only with an audited console command). Other
+clients receive 403. The API accepts only an address and an optional external reference: a client
+cannot create any other reason or a domain suppression. Requests are idempotent
+(`Idempotency-Key`) and concurrency safe, and the response shows only the client's own opt-out.
+
+## 13.5 Lifting suppressions
+
+Suppressions are never deleted to unsuppress an address; `lifted_at` is set and the history kept.
+The reporting client may lift its own opt-out (`POST /v1/global-suppressions/{id}/lift`) when the
+recipient withdraws it; this is idempotent and audited, and does not affect any other suppression of
+the address. An operator may lift any suppression with an audited console command and a written
+note.
 
 ---
 
@@ -980,6 +1079,10 @@ GET  /v1/send-jobs/{id}/messages
 GET  /v1/messages/{id}/events
 
 POST /v1/webhooks/test
+
+POST /v1/global-suppressions           (trusted clients only: recipient global opt-out)
+GET  /v1/global-suppressions/{id}
+POST /v1/global-suppressions/{id}/lift
 ```
 
 Job processing is asynchronous. The client either polls or receives a signed webhook when a job changes state.
@@ -1039,7 +1142,8 @@ Required controls include:
 - DKIM keys held only by OpenDKIM;
 - encrypted webhook signing secrets;
 - operator audit log;
-- global suppression capability.
+- global suppression capability;
+- recipient global opt-outs accepted only from clients an operator has explicitly authorised.
 
 Before the service is offered publicly, it will also require an acceptable use policy and abuse-handling process.
 
@@ -1173,7 +1277,8 @@ The operator requires a separate view containing:
 - Postfix queue depth and queue-snapshot freshness;
 - Python validation backlog;
 - Go and webhook-worker health;
-- unmatched DSNs and their resolution;
+- unmatched DSNs and their resolution (console commands until this dashboard exists);
+- global suppressions and their provenance, with audited lifting;
 - `outcome_unknown` messages and log gaps;
 - failed webhooks;
 - audit history.
@@ -1354,13 +1459,20 @@ Implement:
 - hard-bounce classification;
 - soft-bounce classification with failure scope;
 - suppression policy, including the repeated-soft-bounce rule;
-- unmatched DSN recording and operator resolution.
+- unmatched DSN recording and operator resolution;
+- ARF complaint parsing;
+- global suppressions with provenance (D-30), the trusted-client recipient global opt-out API and
+  its operator-granted capability, and audited lifting;
+- processed spool retention.
 
 Exit criteria:
 
 - synthetic DSNs map to the exact intended message;
 - hard bounces create transport suppressions;
-- temporary failures do not immediately create permanent suppressions.
+- temporary failures do not immediately create permanent suppressions;
+- recipient-specific hard bounces and complaints create global suppressions, non-recipient failures
+  do not, and a global suppression stops submission for every client;
+- DSN processing is idempotent across crash, retry and restart.
 
 ---
 
@@ -1508,6 +1620,7 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.4 | 4 October 2026 | Incorporates D-30: automatic transport suppressions (recipient-specific hard bounces, verified complaints, repeated recipient soft bounces) are global across the installation and apply to every client; non-recipient, temporary and ambiguous outcomes never create one; the repeated-soft-bounce suppression is temporary. Adds the `recipient_global_opt_out` reason, reported only by clients an operator authorised (`can_submit_global_suppressions`) through `/v1/global-suppressions`, with explicit provenance and audited lifting that never deletes history or overrides independent suppressions. Ordinary unsubscribes remain client state. Details inbound DSN/ARF parsing, correlation, classification, the unmatched-DSN workflow and spool retention. |
 | 2.3 | 4 October 2026 | Incorporates D-35: a persistent pod lifecycle replaces the Quadlet pod/container units. The pod and containers are created once and then started and stopped as the same objects (also from Podman Desktop); a systemd user service starts the existing pod at boot; only an explicit recreate replaces them, and volume destruction stays separate. |
 | 2.2 | 3 October 2026 | Incorporates D-31 (403 for work creation by pending-approval and suspended clients; workers claim only active or throttled clients' work), D-32 (exact address-normalisation rule with UTS #46 IDNA and shared test vectors), D-33 (validation usage metered by the validator on completion) and D-34 (idempotent-replay semantics). |
 | 2.1 | 2 October 2026 | Incorporates the Phase 0 architecture decisions and resolves the mail-merge, tracking, unsubscribe, send-ingestion, webhook, DKIM and transport-reconciliation contracts. Main changes: fully rendered recipient content from client applications; batched recipient ingestion with `collecting`/`dispatched`/`completed` semantics; random tracking tokens; RFC 8058 one-click unsubscribe for subscription messages; webhook outbox and Symfony worker; nginx with PHP-FPM; OpenDKIM; sending-domain verification; transient rendered content; Postfix reconciliation with `outcome_unknown`; unmatched-DSN resolution; work leasing; event de-duplication; database role bootstrap; the live-sending compliance gate. The unsubscribe-signal event was removed. |

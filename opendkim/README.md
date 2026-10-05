@@ -12,5 +12,7 @@ is its only client.
   signed.
 - If OpenDKIM fails, Postfix tempfails and Go retries. Mail is never sent unsigned.
 
-Empty until Phase 1 (container with a development test key). Production keys arrive in Phase 8.
+Files: `Containerfile`, `entrypoint.sh` (configuration from the environment contract) and
+`dev-key.sh` (generates a disposable development key, refused outside `development`/`test`; run by
+`smarthostctl dkim-dev-key`). Production keys arrive in Phase 8.
 Contract: `docs/architecture/postfix-integration.md` §2.

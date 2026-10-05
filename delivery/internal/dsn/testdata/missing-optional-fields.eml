@@ -1,0 +1,15 @@
+Delivered-To: postmaster@{{BOUNCE}}
+From: postmaster@mx.example.org
+Subject: failure notice
+Content-Type: multipart/report; report-type=delivery-status; boundary=x
+
+--x
+Content-Type: message/delivery-status
+
+Original-Envelope-Id: {{ENVID}}
+
+Final-Recipient: rfc822;{{RCPT}}
+Action: failed
+Status: 5.1.1
+
+--x--

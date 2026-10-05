@@ -65,6 +65,24 @@ abstract class AdminCommand extends Command
         return $this->userProvider->findByEmail($email) ?? throw new DomainRuleViolation("No user with login email $email.");
     }
 
+    /**
+     * The operator performing an audited D-30/D-05 action (--operator=<login email>):
+     * an enabled user with the global operator role. Their user id is the audit actor
+     * and, for unmatched-DSN match requests, resolution_requested_by.
+     */
+    protected function operator(?string $email): User
+    {
+        if (null === $email || '' === trim($email)) {
+            throw new DomainRuleViolation('--operator=<operator login email> is required for this action.');
+        }
+        $user = $this->user(trim($email));
+        if (!$user->isOperator() || $user->isDisabled()) {
+            throw new DomainRuleViolation("$email is not an enabled operator.");
+        }
+
+        return $user;
+    }
+
     protected function webhookEndpoint(string $id): WebhookEndpoint
     {
         return $this->find(WebhookEndpoint::class, $id) ?? throw new DomainRuleViolation("No webhook endpoint $id.");

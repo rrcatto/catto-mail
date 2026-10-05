@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.3 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.4 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -21,6 +21,7 @@ Enum values come from [`../contracts/status-vocabulary.yaml`](../contracts/statu
 | `send_job_recipients` is immutable once its job leaves `collecting`, except for purging rendered content. | `schema.integrity_rules` |
 | Webhook signing secrets are encrypted at rest. | `api.webhooks` |
 | Address normalisation (D-18): trim whitespace, preserve the local part, lower-case the domain. It is used for duplicate detection and suppression matching. | `suppression_and_reputation.address_matching` |
+| Automatic suppressions and recipient global opt-outs are global (`suppressions.client_id` NULL, D-30). `client_id` only scopes a row; the client that reported an opt-out is `source_client_id`. Suppressions are lifted (`lifted_at`), never deleted, except by configured retention. | `suppression_and_reputation.global_suppression_policy` |
 | `users.email` is unique case-insensitively. This is a login rule only. | `schema.integrity_rules` |
 | Leased work uses `claimed_by`, `lease_expires_at`, `attempt_count`, `next_attempt_at` and `last_error`. | `architecture.work_claiming` |
 | Rendered content is transient and is purged on Postfix acceptance. Other retention periods are configurable. | `compliance.retention` |
@@ -40,6 +41,7 @@ erDiagram
     clients ||--o{ webhook_endpoints : "registers"
     clients ||--o{ webhook_events : "outbox"
     clients |o--o{ suppressions : "client-scoped (NULL = global)"
+    clients |o--o{ suppressions : "reported opt-out (source_client_id)"
     clients |o--o{ domain_reputation : "client-scoped (NULL = platform)"
 
     validation_jobs ||--|{ validation_addresses : "contains"
@@ -54,6 +56,7 @@ erDiagram
     messages ||--o{ message_events : "append-only history"
     messages ||--o{ message_links : "click map"
     messages |o--o{ suppressions : "source_message"
+    message_events |o--o{ suppressions : "source_event"
     messages |o--o{ unmatched_dsns : "later matched to"
     message_events |o--o| unmatched_dsns : "resolution event"
     users |o--o{ unmatched_dsns : "requested resolution"
@@ -65,6 +68,7 @@ erDiagram
         uuid id PK
         text company_name
         text status
+        boolean can_submit_global_suppressions "operator-granted (D-30)"
     }
     users {
         uuid id PK
@@ -183,10 +187,15 @@ erDiagram
     }
     suppressions {
         uuid id PK
-        uuid client_id FK "nullable"
+        uuid client_id FK "nullable (NULL = global)"
         text address_or_domain
         text scope_type
         text reason
+        uuid source_message_id FK
+        uuid source_event_id FK
+        uuid source_client_id FK "opt-out reporter"
+        timestamptz expires_at
+        timestamptz lifted_at
     }
     disposable_domains {
         text domain PK
@@ -235,7 +244,7 @@ erDiagram
 | `send_job_recipient_batches`, `send_job_recipients`, `messages` | tenant | via `send_jobs.client_id` |
 | `message_links`, `message_events` | tenant | via `messages → send_jobs.client_id` |
 | `users` | global identity | client data is reached only through `client_memberships`, or as an operator |
-| `suppressions` | tenant or global | `client_id`, where NULL = global |
+| `suppressions` | tenant or global | `client_id`, where NULL = global. A tenant sees its own client-scoped rows and the global opt-outs it reported (`source_client_id`); other global rows are not tenant data (D-30). |
 | `domain_reputation` | tenant or platform | `client_id`, where NULL = platform |
 | `disposable_domains` | global reference data | none |
 | `unmatched_dsns` | operator only | none until matched |
@@ -255,7 +264,11 @@ memberships, and operators act through `global_role`.
 | `messages.verp_token_unique` | `messages_verp_token_uq` |
 | `messages.postfix_queue_id` | `messages_postfix_queue_id_idx` (partial, non-unique) |
 | `message_events.message_id_occurred_at` | `message_events_message_occurred_idx` |
-| `suppressions.address_or_domain_scope` | `suppressions_address_or_domain_scope_idx` |
+| `suppressions.address_or_domain_scope` | `suppressions_address_or_domain_scope_idx`. Active-suppression lookup at message creation and before submission. |
+| `suppressions.global_address_reason_active_unique` | `suppressions_global_address_reason_active_uq` (partial: global, address, not lifted, hard_bounce/complaint). One active row per address and reason under concurrent evidence (D-30). |
+| `suppressions.source_client_id_idempotency_key_unique` | `suppressions_source_client_idempotency_uq` (partial). Opt-out idempotency per reporting client. |
+| `suppressions.source_client_id_address_active_opt_out_unique` | `suppressions_source_client_address_active_uq` (partial: active opt-outs). One active opt-out per reporting client and address. |
+| `messages.recipient_address` | `messages_recipient_address_idx`. Global repeated-soft-bounce evaluation and recipient-based DSN correlation (D-30). |
 | `api_keys.key_hash_unique` | `api_keys_key_hash_uq` |
 | `send_jobs.client_id_status` | `send_jobs_client_status_idx` |
 | `validation_jobs.client_id_status` | `validation_jobs_client_status_idx` |
@@ -277,7 +290,8 @@ memberships, and operators act through `global_role`.
 Other indexes:
 * claimable-work indexes;
 * reconciliation candidates (`messages_unresolved_idx`);
-* soft-bounce rule evaluation;
+* soft-bounce rule evaluation (`message_events_soft_bounce_idx`, used with `messages_recipient_address_idx`);
+* suppressions by source message (`suppressions_source_message_idx`, partial), which also serves the foreign key;
 * unpurged content;
 * abandoned collecting jobs;
 * the webhook outbox (pending fan-out, once-only).
@@ -291,7 +305,8 @@ Other indexes:
 | `send_job_recipients` | Content is either present and unpurged (subject plus at least one body), or fully purged (all NULL with `content_purged_at`). `unsubscribe_url` must be HTTPS. |
 | `messages` | `tracking_token` is ≥ 32 base64url characters (192 bits) when present. |
 | `message_events` | Transport sources always carry `source_event_key`. `tracking_endpoint` events never do, because repeated opens are legitimate. `failure_scope` is allowed only on deferral and bounce events. |
-| `unmatched_dsns` | `match_requested`/`matched` require the matched message and the requesting operator. `matched` requires the resolution event and time. |
+| `unmatched_dsns` | `match_requested`/`matched` require the matched message and the requesting operator. `matched` requires the resolution event and time. `dismissed` requires the time and a written reason (`resolution_note`). |
+| `suppressions` | D-18 normalisation (local part never case-folded). A `recipient_global_opt_out` row, and only it, carries `source_client_id`, `idempotency_key` and `request_hash` (and may carry `external_reference`), and is global and address-scoped. `hard_bounce`, `complaint` and `recipient_global_opt_out` never expire; `repeated_soft_bounce` is the temporary reason. `source_event_id` requires `source_message_id`. |
 | `validation_addresses` | A suggestion has both a reason code and a confidence. A claimed row has a lease. |
 | `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. |
 
@@ -336,6 +351,12 @@ is set.
 (the purge).
 
 ³ Open/click events from the tracking endpoints only.
+
+Suppressions (D-30): Symfony creates only client-reported `recipient_global_opt_out` rows (API)
+and operator blocks (console), and lifts by setting `lifted_at`. Go creates the system
+suppressions (`hard_bounce`, `complaint`, `repeated_soft_bounce`) and never updates or deletes a
+suppression: repeated or concurrent evidence finds the active row and inserts nothing. Phase 5
+adds no table, so the matrix is unchanged.
 
 Neither Python nor Go can read webhook endpoints or secrets, or write deliveries. Only the
 Symfony webhook worker performs HTTP webhook delivery.
