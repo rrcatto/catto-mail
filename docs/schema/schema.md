@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.4 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.5 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -57,6 +57,8 @@ erDiagram
     messages ||--o{ message_links : "click map"
     messages |o--o{ suppressions : "source_message"
     message_events |o--o{ suppressions : "source_event"
+    clients ||--o{ global_suppression_requests : "opt-out requests (D-38)"
+    suppressions ||--o{ global_suppression_requests : "result of"
     messages |o--o{ unmatched_dsns : "later matched to"
     message_events |o--o| unmatched_dsns : "resolution event"
     users |o--o{ unmatched_dsns : "requested resolution"
@@ -197,6 +199,15 @@ erDiagram
         timestamptz expires_at
         timestamptz lifted_at
     }
+    global_suppression_requests {
+        uuid id PK
+        uuid client_id FK
+        text operation
+        text idempotency_key "UK with client_id, operation"
+        text request_hash
+        uuid suppression_id FK
+        smallint response_status
+    }
     disposable_domains {
         text domain PK
     }
@@ -239,6 +250,7 @@ erDiagram
 | Table | Ownership | Scoping path |
 |---|---|---|
 | `clients` | tenant root | `id` |
+| `global_suppression_requests` | tenant | `client_id` (the reporting client; D-38) |
 | `client_memberships`, `sending_domains`, `api_keys`, `validation_jobs`, `send_jobs`, `usage_records`, `webhook_endpoints`, `webhook_events`, `webhook_deliveries` | tenant | `client_id` |
 | `validation_addresses`, `validation_evidence` | tenant | via `validation_jobs.client_id` |
 | `send_job_recipient_batches`, `send_job_recipients`, `messages` | tenant | via `send_jobs.client_id` |
@@ -266,7 +278,7 @@ memberships, and operators act through `global_role`.
 | `message_events.message_id_occurred_at` | `message_events_message_occurred_idx` |
 | `suppressions.address_or_domain_scope` | `suppressions_address_or_domain_scope_idx`. Active-suppression lookup at message creation and before submission. |
 | `suppressions.global_address_reason_active_unique` | `suppressions_global_address_reason_active_uq` (partial: global, address, not lifted, hard_bounce/complaint). One active row per address and reason under concurrent evidence (D-30). |
-| `suppressions.source_client_id_idempotency_key_unique` | `suppressions_source_client_idempotency_uq` (partial). Opt-out idempotency per reporting client. |
+| `global_suppression_requests.client_id_operation_idempotency_key_unique` | `global_suppression_requests_client_operation_key_uq`. Durable opt-out request idempotency per reporting client (D-38). |
 | `suppressions.source_client_id_address_active_opt_out_unique` | `suppressions_source_client_address_active_uq` (partial: active opt-outs). One active opt-out per reporting client and address. |
 | `messages.recipient_address` | `messages_recipient_address_idx`. Global repeated-soft-bounce evaluation and recipient-based DSN correlation (D-30). |
 | `api_keys.key_hash_unique` | `api_keys_key_hash_uq` |
@@ -292,6 +304,7 @@ Other indexes:
 * reconciliation candidates (`messages_unresolved_idx`);
 * soft-bounce rule evaluation (`message_events_soft_bounce_idx`, used with `messages_recipient_address_idx`);
 * suppressions by source message (`suppressions_source_message_idx`, partial), which also serves the foreign key;
+* opt-out requests by suppression (`global_suppression_requests_suppression_idx`), which serves the foreign key;
 * unpurged content;
 * abandoned collecting jobs;
 * the webhook outbox (pending fan-out, once-only).
@@ -306,7 +319,8 @@ Other indexes:
 | `messages` | `tracking_token` is ≥ 32 base64url characters (192 bits) when present. |
 | `message_events` | Transport sources always carry `source_event_key`. `tracking_endpoint` events never do, because repeated opens are legitimate. `failure_scope` is allowed only on deferral and bounce events. |
 | `unmatched_dsns` | `match_requested`/`matched` require the matched message and the requesting operator. `matched` requires the resolution event and time. `dismissed` requires the time and a written reason (`resolution_note`). |
-| `suppressions` | D-18 normalisation (local part never case-folded). A `recipient_global_opt_out` row, and only it, carries `source_client_id`, `idempotency_key` and `request_hash` (and may carry `external_reference`), and is global and address-scoped. `hard_bounce`, `complaint` and `recipient_global_opt_out` never expire; `repeated_soft_bounce` is the temporary reason. `source_event_id` requires `source_message_id`. |
+| `suppressions` | D-18 normalisation (local part never case-folded). A `recipient_global_opt_out` row, and only it, carries `source_client_id` (and may carry `external_reference`), and is global and address-scoped; its requests and their idempotency keys are in `global_suppression_requests`. `hard_bounce`, `complaint` and `recipient_global_opt_out` never expire; `repeated_soft_bounce` is the temporary reason. `source_event_id` requires `source_message_id`. |
+| `global_suppression_requests` | One row per (`client_id`, `operation`, `idempotency_key`); `operation` from the vocabulary (`create_global_opt_out`); `response_status` is 201 (created) or 200 (already active). |
 | `validation_addresses` | A suggestion has both a reason code and a confidence. A claimed row has a lease. |
 | `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. |
 
@@ -337,6 +351,7 @@ grants below. No runtime role has DDL rights.
 | unmatched_dsns | S U D¹ | – | – | S I U |
 | delivery_ingest_cursors | – | – | – | S I U |
 | suppressions | S I U D¹ | – | – | S I |
+| global_suppression_requests | S I D¹ | – | – | – |
 | domain_reputation | S | – | – | S I U |
 | usage_records | S I D¹ | – | I | I |
 | webhook_endpoints | S I U | S | – | – |
@@ -355,8 +370,9 @@ is set.
 Suppressions (D-30): Symfony creates only client-reported `recipient_global_opt_out` rows (API)
 and operator blocks (console), and lifts by setting `lifted_at`. Go creates the system
 suppressions (`hard_bounce`, `complaint`, `repeated_soft_bounce`) and never updates or deletes a
-suppression: repeated or concurrent evidence finds the active row and inserts nothing. Phase 5
-adds no table, so the matrix is unchanged.
+suppression: repeated or concurrent evidence finds the active row and inserts nothing.
+`global_suppression_requests` (D-38) is written only by Symfony and never updated: an accepted
+opt-out request is history.
 
 Neither Python nor Go can read webhook endpoints or secrets, or write deliveries. Only the
 Symfony webhook worker performs HTTP webhook delivery.

@@ -1,6 +1,6 @@
 # Smarthost Architecture Overview
 
-**Status:** summary of specification 2.4. The authoritative sources are
+**Status:** summary of specification 2.5. The authoritative sources are
 `docs/20260908-1644-smarthost-llm-spec.yaml` and its human-readable companion
 `docs/20260908-1644-smarthost-human-specification.md`. If this page disagrees with them, they win.
 It adds no architecture of its own. It maps the specification onto the contract files and shows

@@ -1,7 +1,7 @@
 project:
   name: Smarthost
-  specification_version: "2.4"
-  specification_date: "2026-10-04"
+  specification_version: "2.5"
+  specification_date: "2026-10-05"
   original_specification_date: "2026-09-08"
   version_note: >-
     The specification version is a documentation/specification revision number. It is not a
@@ -351,6 +351,7 @@ project_boundaries:
       - unmatched_dsns
       - delivery_ingest_cursors
       - suppressions
+      - global_suppression_requests
       - disposable_domains
       - domain_reputation
       - usage_records
@@ -529,8 +530,15 @@ api:
         - POST /v1/send-jobs
         - POST /v1/send-jobs/{id}/recipients
         - POST /v1/send-jobs/{id}/submit
-        - POST /v1/global-suppressions
         - POST /v1/global-suppressions/{id}/lift
+      not_work_creation:
+        # D-37
+        - >-
+          POST /v1/global-suppressions (a recipient global opt-out) is a recipient-safety,
+          do-not-contact operation, not work creation: a client holding
+          can_submit_global_suppressions may create one in any status that authenticates,
+          including pending_approval and suspended; lifting one makes an address sendable again
+          and is forbidden (403) for pending_approval and suspended clients
       reads: >-
         suspended and pending_approval clients still authenticate and may read their existing
         resources (pending_approval may also perform non-work onboarding operations where supported)
@@ -547,16 +555,34 @@ api:
           false for every client, including existing ones; development bootstrap may enable it
           for the disposable development client
         without_capability: 403 for creating or lifting a global opt-out
+        client_status: >-
+          creation is allowed in every status that authenticates (D-37); lifting requires an
+          active or throttled client; closed clients fail authentication
   idempotency:
     required_for:
       - validation job creation
       - send job creation
       - send-job recipient batch upload
-      - recipient global opt-out creation (D-30)
+      - recipient global opt-out creation (D-30; durable request records, D-38)
     naturally_idempotent:
       - send-job submit (submitting an already sealed job returns its current state)
       - global opt-out lift (lifting an already lifted opt-out returns its current state)
     mechanism: Idempotency-Key header persisted with the created resource
+    global_opt_out_mechanism:
+      # D-38
+      store: >-
+        global_suppression_requests: one row per accepted (authenticated source client,
+        operation, Idempotency-Key) with the canonical request hash, the resulting suppression and
+        the original status (201 created, 200 this client's opt-out of the address was already
+        active); independent of the suppression row and never updated
+      rules:
+        - same key and same request is a replay of the recorded result (same resource and status, Idempotent-Replayed)
+        - same key with a different request is rejected (422)
+        - concurrent requests with the same key have exactly one effect (in-flight 409; unique index as the final guarantee)
+        - >-
+          a later change of the suppression (for example a lift) never changes what an
+          already-used key means: replaying it returns the recorded resource and never creates a
+          new suppression
     semantics:
       # D-34
       - >-
@@ -1038,13 +1064,14 @@ inbound_bounce_handling:
       - Original-Envelope-Id (ENVID = Smarthost message id)
       - X-Smarthost-Message-ID or a Smarthost Message-ID in the returned headers
       - X-Postfix-Queue-ID
-      - >-
-        the recipient address combined with other evidence: exactly one message to that
-        D-18-normalised recipient created within the previous 7 days, with a Postfix queue id,
-        whose job sender equals the From of the returned headers
     rules:
+      - only these Smarthost-issued identifiers correlate a DSN or complaint automatically
       - a VERP token, envelope id or message id that names no message is not correlation evidence
-      - never guess from the recipient address alone; several candidates mean no correlation
+      - >-
+        D-36: the recipient address, even combined with a matching returned From/sender, never
+        correlates automatically, because suppressions are global and such evidence can be
+        forged; it is stored with the unmatched DSN as operator candidate information
+        (detail_json.candidates) and can only lead to an event through an operator match request
       - an uncorrelated DSN becomes an unmatched_dsns row; it never becomes a guessed message event
       - >-
         a DSN correlated to a message whose per-recipient report cannot be reconciled (several
@@ -1328,7 +1355,8 @@ suppression_and_reputation:
       client_opt_out: >-
         source_client_id (the reporting client; client_id stays NULL and never means the
         reporter), created_at, the normalised address, the reason, an optional client
-        external_reference, and an audit_log entry
+        external_reference, the durable request records (global_suppression_requests, D-38) and
+        audit_log entries
       operator: the audit_log entry names the operator (actor user) and the written note
     lifting:
       mechanism: set lifted_at; rows are never deleted as the normal unsuppression mechanism (only configured retention deletes)
@@ -1597,7 +1625,20 @@ schema:
         - source_event_id
         - source_client_id
         - external_reference
+    global_suppression_requests:
+      purpose: >-
+        durable idempotency of recipient global opt-out requests (D-38): one row per accepted
+        (client, operation, Idempotency-Key), independent of the suppression row
+      key_fields:
+        - id
+        - client_id
+        - operation
         - idempotency_key
+        - request_hash
+        - suppression_id
+        - response_status
+        - external_reference
+        - created_at
     disposable_domains:
       key_fields:
         - domain
@@ -1678,7 +1719,7 @@ schema:
     - message_events.message_id_occurred_at
     - suppressions.address_or_domain_scope
     - suppressions.global_address_reason_active_unique
-    - suppressions.source_client_id_idempotency_key_unique
+    - global_suppression_requests.client_id_operation_idempotency_key_unique
     - suppressions.source_client_id_address_active_opt_out_unique
     - messages.recipient_address
     - api_keys.key_hash_unique
@@ -2233,4 +2274,21 @@ revision_history:
       correlation, classification, unmatched-DSN workflow and spool retention.
     decisions_incorporated:
       - D-30
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.5"
+    date: "2026-10-05"
+    summary: >-
+      Phase 5 corrections. D-36: DSNs and complaints correlate automatically only through
+      Smarthost-issued identifiers (VERP token, envelope id, Smarthost Message-ID, Postfix queue
+      id); recipient address plus returned sender is forgeable and, with global suppressions, is
+      stored only as operator candidate information on an unmatched DSN. D-37: a trusted client
+      may create a recipient global opt-out while pending_approval or suspended (a do-not-contact
+      operation, not work creation) but may lift one only while active or throttled. D-38:
+      durable opt-out request idempotency in global_suppression_requests, independent of the
+      suppression row, so a used key keeps its meaning after a lift. ARF abuse-only complaints
+      and the D-30 global policy are unchanged.
+    decisions_incorporated:
+      - D-36
+      - D-37
+      - D-38
     decision_log: docs/architecture/open-decisions.md

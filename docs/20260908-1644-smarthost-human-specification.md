@@ -1,7 +1,7 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.4. This is a documentation revision, not a software release version.
-**Revision date:** 4 October 2026 (original: 8 September 2026)
+**Specification version:** 2.5. This is a documentation revision, not a software release version.
+**Revision date:** 5 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
 The canonical, machine-readable specification is `docs/20260908-1644-smarthost-llm-spec.yaml`.
@@ -686,17 +686,19 @@ international form), an RFC 5965 ARF feedback report, or a non-standard bounce. 
 untrusted data: it is never executed, rendered or followed, and sizes and MIME structure are
 bounded. A malformed file never fails processing; it becomes an unmatched DSN.
 
-Correlation uses the strongest evidence first:
+Correlation uses only Smarthost-issued identifiers, strongest first:
 
 1. the VERP token of the envelope recipient (the `Delivered-To` header the receiving Postfix adds);
 2. `Original-Envelope-Id` (the Smarthost message id sent as ENVID);
 3. `X-Smarthost-Message-ID`, or a Smarthost `Message-ID`, in the returned headers;
-4. the Postfix queue id (`X-Postfix-Queue-ID`);
-5. the recipient address **combined with other evidence**: exactly one message to that address in
-   the previous seven days, with a queue id, whose sender is the `From` of the returned headers.
+4. the Postfix queue id (`X-Postfix-Queue-ID`).
 
 An identifier that names no message is not evidence; identifiers naming different messages are a
-conflict. Smarthost never guesses: an uncorrelated report becomes an unmatched DSN. A report
+conflict. Smarthost never guesses: an uncorrelated report becomes an unmatched DSN. The recipient
+address is never enough, not even with a matching returned `From`/sender (D-36): suppressions are
+global, so a forged DSN must not be able to suppress an address. Recent messages to the reported
+recipient are stored with the unmatched DSN only as candidates for the operator, who can request
+a match. A report
 correlated to a message but impossible to reconcile with it (several recipient reports, none for
 the message's recipient; no interpretable status) appends `dsn_unmatched` to that message.
 
@@ -983,8 +985,18 @@ Because a multi-tenant Smarthost must not let any tenant suppress any address gl
 available only to clients that an operator has granted the `can_submit_global_suppressions`
 capability (default false for every client; changed only with an audited console command). Other
 clients receive 403. The API accepts only an address and an optional external reference: a client
-cannot create any other reason or a domain suppression. Requests are idempotent
-(`Idempotency-Key`) and concurrency safe, and the response shows only the client's own opt-out.
+cannot create any other reason or a domain suppression. The response shows only the client's own
+opt-out.
+
+Creating an opt-out is a do-not-contact operation, not work creation: a trusted client may report
+one even while `pending_approval` or `suspended` (D-37). Lifting one makes an address sendable
+again, so only an `active` or `throttled` trusted client may lift its own opt-outs. Closed clients
+cannot authenticate.
+
+Requests are idempotent (`Idempotency-Key`) and concurrency safe. Each accepted request is recorded
+durably, independently of the suppression row (D-38): the same key with the same request always
+returns the recorded result, even after the opt-out was lifted, and never creates a new
+suppression; the same key with a different request is rejected.
 
 ## 13.5 Lifting suppressions
 
@@ -1620,6 +1632,7 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.5 | 5 October 2026 | Phase 5 corrections: DSNs and complaints correlate automatically only through Smarthost-issued identifiers; recipient-plus-sender evidence is only an operator candidate (D-36). Trusted clients may create recipient global opt-outs while pending approval or suspended, but lift them only while active or throttled (D-37). Durable opt-out request idempotency independent of the suppression row (D-38). |
 | 2.4 | 4 October 2026 | Incorporates D-30: automatic transport suppressions (recipient-specific hard bounces, verified complaints, repeated recipient soft bounces) are global across the installation and apply to every client; non-recipient, temporary and ambiguous outcomes never create one; the repeated-soft-bounce suppression is temporary. Adds the `recipient_global_opt_out` reason, reported only by clients an operator authorised (`can_submit_global_suppressions`) through `/v1/global-suppressions`, with explicit provenance and audited lifting that never deletes history or overrides independent suppressions. Ordinary unsubscribes remain client state. Details inbound DSN/ARF parsing, correlation, classification, the unmatched-DSN workflow and spool retention. |
 | 2.3 | 4 October 2026 | Incorporates D-35: a persistent pod lifecycle replaces the Quadlet pod/container units. The pod and containers are created once and then started and stopped as the same objects (also from Podman Desktop); a systemd user service starts the existing pod at boot; only an explicit recreate replaces them, and volume destruction stays separate. |
 | 2.2 | 3 October 2026 | Incorporates D-31 (403 for work creation by pending-approval and suspended clients; workers claim only active or throttled clients' work), D-32 (exact address-normalisation rule with UTS #46 IDNA and shared test vectors), D-33 (validation usage metered by the validator on completion) and D-34 (idempotent-replay semantics). |

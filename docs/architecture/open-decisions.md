@@ -2,7 +2,7 @@
 
 **This file is a log, not a source of architectural authority.** Every approved decision has been
 incorporated into the canonical specification (`docs/20260908-1644-smarthost-llm-spec.yaml`,
-version 2.4, `revision_history`) and its normative contracts. If this log and the specification
+version 2.5, `revision_history`) and its normative contracts. If this log and the specification
 ever differ, the specification wins.
 
 ## 1. Decisions (all resolved, 2026-10-02)
@@ -61,6 +61,16 @@ ever differ, the specification wins.
 | ID | Decision | Incorporated in spec 2.4 |
 |---|---|---|
 | D-30 | Automatic transport suppressions are **global** across the installation (`client_id` NULL) and apply to every current and future client. They are created only for an authoritative recipient-specific hard bounce (`failure_scope` recipient), a verified (correlated) complaint, the repeated recipient soft-bounce rule (evaluated globally; the suppression expires after the configured window), and an explicit **recipient global opt-out** (`recipient_global_opt_out`) reported by a client an operator authorised (`clients.can_submit_global_suppressions`, default false) through `POST /v1/global-suppressions`. Temporary, provider-policy, reputation, domain, DNS, connection, TLS, infrastructure, ambiguous and `outcome_unknown` outcomes never suppress. Provenance is explicit (`source_message_id`, `source_event_id`, `source_client_id`, audit log). Lifting sets `lifted_at`, never deletes, and never overrides an independent suppression. An ordinary unsubscribe remains client business state. | `suppression_and_reputation.global_suppression_policy`, `api.authentication.capabilities`, `api.endpoints_initial`, `inbound_bounce_handling`, `schema.tables.suppressions`, vocabulary, OpenAPI, reference schema |
+
+### Phase 5 corrections (owner decisions 2026-10-05, incorporated in spec 2.5)
+
+| ID | Decision | Incorporated in spec 2.5 |
+|---|---|---|
+| D-36 | A DSN or complaint is correlated automatically only through Smarthost-issued identifiers: VERP token, envelope id, Smarthost Message-ID or Postfix queue id. The recipient address, even with a matching returned `From`/sender, is forgeable and, because suppressions are global, never creates a message event or suppression; it is stored with the unmatched DSN as operator candidate information (`detail_json.candidates`). Supersedes the Phase 5 recipient-level correlation. | `inbound_bounce_handling.correlation` |
+| D-37 | A client holding `can_submit_global_suppressions` may **create** a `recipient_global_opt_out` while `pending_approval` or `suspended` (a recipient-safety, do-not-contact operation, not work creation); it may **lift** its own opt-outs only while `active` or `throttled`. Closed clients fail authentication. | `api.authentication.client_status_rule`, `api.authentication.capabilities` |
+| D-38 | Opt-out request idempotency is durable and independent of the suppression row: `global_suppression_requests` maps (source client, operation, Idempotency-Key) to the canonical request hash, the resulting suppression and the original status. Same key + same request replays the recorded result; same key + different request is 422; concurrent same-key requests have one effect; a later lift never changes what a used key means. Supersedes the Phase 5 behaviour that returned an active opt-out for a new key without storing the key. | `api.idempotency.global_opt_out_mechanism`, `schema.tables.global_suppression_requests` |
+
+ARF `abuse`-only complaints and the D-30 global suppression policy are unchanged.
 
 ## 2. Implementation choices made while incorporating the decisions
 
@@ -164,7 +174,7 @@ are in `docs/architecture/postfix-integration.md` §5 and §10 and `delivery/REA
 |---|---|
 | One failure-scope classifier (`internal/smtpclass`) serves Postfix log and DSN evidence. It is conservative: policy/reputation/DNS/connection wording wins over the code; only x.1.0/1/3/6 and x.2.0/1/2 (and, without a usable code, unambiguous mailbox wording) are `recipient`; x.4.7 (expired) is `unknown` (Phase 4 called it `connection`; neither counts). | `delivery/internal/smtpclass` |
 | The VERP token is read only from the **topmost** `Delivered-To`/`X-Original-To` header (prepended by the receiving Postfix); lower ones may be forged by the sender of the DSN. | `delivery/internal/dsn` |
-| Recipient-level correlation (the weakest level) requires exactly one message to the address within 7 days, with a queue id, whose job sender equals the returned `From`. Identifiers naming different messages are a conflict (unmatched). | `delivery/internal/store/dsn.go` |
+| ~~Recipient-level correlation~~ (superseded by D-36): recent messages to the reported recipient, with whether their sender matches the returned `From`, are only operator candidates on the unmatched DSN. Identifiers naming different messages are a conflict (unmatched). | `delivery/internal/store/dsn.go` |
 | A correlated report that cannot be reconciled (no block for the recipient, a different `Original-Recipient`, no status, malformed ARF) appends `dsn_unmatched` to the message; `Action: delivered/relayed/expanded` and non-`abuse` ARF types record nothing. Only ARF `Feedback-Type: abuse` is a complaint. | `delivery/internal/dsn/interpret.go` |
 | A DSN's event time is its `Last-Attempt-Date`, else `Date`, else the Maildir receipt time; an implausible time (before the message existed, or more than 5 minutes after receipt) is replaced by the receipt time. | `delivery/internal/store/dsn.go` |
 | Repeated soft bounces count distinct messages; a `remote_accepted` resets the sequence only if the same message was not soft-bounced afterwards (a relay may accept a message whose final mailbox then returns a DSN — observed in the end-to-end run). | `delivery/internal/store/policy.go` |
@@ -173,7 +183,7 @@ are in `docs/architecture/postfix-integration.md` §5 and §10 and `delivery/REA
 | Stale `processing/` claims (older than `DELIVERY_LEASE_SECONDS`) are reclaimed by renaming to `<key>#<worker>-<nonce>`; the key ignores everything after `:` or `#`. Unreadable files go to `failed/`; a transient database error keeps the claim for an in-process retry. | `delivery/internal/dsnspool` |
 | The stored `raw_message` is at most 512 KiB, valid UTF-8 without NUL (flags in `detail_json`); the spool file keeps the exact bytes until retention. | `delivery/internal/store/dsn.go` |
 | Feedback-loop reports are accepted at the plain base address `<SMARTHOST_VERP_LOCAL_PART>@<bounce domain>` (already accepted by the Phase 1 recipient table) or at a VERP return path; no new variable. | spec `inbound_bounce_handling.feedback_loop_address` |
-| Opt-out API: 403 is checked before the body (capability and D-31 status); a new key for an address the client already opted out returns that row with 200 (its key is not stored); the representation never shows other suppressions of the address. Pending-approval and suspended clients may neither create nor lift. | `app/src/Suppression/GlobalSuppressionService.php` |
+| Opt-out API: 403 is checked before the body; the representation never shows other suppressions of the address. (Superseded by D-37 and D-38: creation needs only the capability; lifting also needs an active or throttled client; a new key for an already active opt-out returns it with 200 **and** is recorded in `global_suppression_requests`; a reaffirming request is audited as `suppression.global_opt_out_reaffirmed`.) | `app/src/Suppression/GlobalSuppressionService.php` |
 | A tenant sees through the ORM only its client-scoped suppressions and the global opt-outs it reported (tightened tenant filter). | `app/src/Tenant/TenantFilter.php` |
 | Operator commands (`smarthost:client:global-suppressions`, `smarthost:suppression:{list,create,lift}`, `smarthost:dsn:{list,show,match,dismiss}`) require `--operator=<login email>` of an enabled operator, who is the audit actor (and `resolution_requested_by`); capability changes and lifts require a `--note`. | `app/src/Command` |
 | A match request Go cannot apply returns the row to `open` with `detail_json.resolution_failures`. | `delivery/internal/store/dsn.go` |
@@ -198,7 +208,8 @@ None of them required an architectural change.
 
 ## 4. Remaining open decisions
 
-None. D-31 to D-34 were resolved on 2026-10-03, D-35 and D-30 on 2026-10-04 (see §1).
+None. D-31 to D-34 were resolved on 2026-10-03, D-35 and D-30 on 2026-10-04, D-36 to D-38 on
+2026-10-05 (see §1).
 
 Points to confirm before production (not blocking Phase 6): a CA file variable so Go can verify
 Postfix's submission certificate; an index for reconciliation candidates at production volume

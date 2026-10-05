@@ -366,8 +366,8 @@ messages to Mailpit and then injects synthetic DSNs and ARF reports over SMTP to
 | Scenario | Proves |
 |---|---|
 | A | Client A's recipient-specific 5.1.1 DSN (VERP) supersedes `remote_accepted` with `hard_bounced`, writes `message.hard_bounced` once and a global suppression with source message and event; client B's later message to the same address is suppressed and never reaches Postfix; the file is kept in `done/` |
-| B | Opt-out API: 403 without the capability; 201 for the trusted client, idempotent replay, 200 for an existing opt-out; global row with `source_client_id`; client B suppressed; only the reporter can lift; audited; sending works after the lift |
-| C | Correlation through the real spool by ENVID, returned Message-ID, Postfix queue id and corroborated recipient |
+| B | Opt-out API: 403 without the capability; 201 for the trusted client, idempotent replay, 200 for an existing opt-out; global row with `source_client_id`; client B suppressed; only the reporter can lift; audited; sending works after the lift; a key that found the opt-out active replays its result after the lift and creates nothing (D-38); a suspended trusted client creates but cannot lift (D-37) |
+| C | Correlation through the real spool by ENVID, returned Message-ID and Postfix queue id; recipient + sender evidence alone stays an open unmatched DSN with an operator candidate (D-36) |
 | D | ARF complaint to the feedback-loop address: `complained`, `message.complained`, global suppression; an uncorrelated complaint stays an unmatched DSN |
 | E | Provider-policy, domain and DELAY DSNs never suppress; three recipient soft bounces across two clients give a 30-day `repeated_soft_bounce` |
 | F | Unmatched DSN → `smarthost:dsn:show` → `smarthost:dsn:match` → Go resolution (event, operator, suppression); dismissal requires a reason |

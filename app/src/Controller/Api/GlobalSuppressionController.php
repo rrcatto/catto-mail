@@ -34,7 +34,7 @@ final class GlobalSuppressionController
     public function create(Request $request): JsonResponse
     {
         $client = $this->tenant->client();
-        GlobalSuppressionService::assertMayReport($client);
+        GlobalSuppressionService::assertMayCreate($client);
         $key = IdempotencyKey::fromRequest($request);
         ['data' => $data, 'hash' => $hash] = $this->json->decode($request, 'GlobalOptOutCreateRequest');
         [$optOut, $status, $replayed] = $this->suppressions->create($client, $this->actor(), $key, $hash, $data);
@@ -59,7 +59,7 @@ final class GlobalSuppressionController
     public function lift(string $id): JsonResponse
     {
         $client = $this->tenant->client();
-        GlobalSuppressionService::assertMayReport($client);
+        GlobalSuppressionService::assertMayLift($client);
         $optOut = $this->suppressions->ownOptOut($client, $id) ?? throw ApiProblem::notFound();
 
         return ApiResponse::json(Presenter::globalOptOut($this->suppressions->lift($client, $this->actor(), $optOut)));

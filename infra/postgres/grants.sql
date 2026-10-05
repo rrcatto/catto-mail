@@ -54,6 +54,8 @@ GRANT SELECT, INSERT, UPDATE ON delivery_ingest_cursors TO :"delivery";
 -- Suppression and reputation
 GRANT SELECT, INSERT, UPDATE, DELETE ON suppressions TO :"app";
 GRANT SELECT, INSERT ON suppressions TO :"delivery";
+-- D-38: durable opt-out request idempotency (Symfony only; DELETE for configured retention).
+GRANT SELECT, INSERT, DELETE ON global_suppression_requests TO :"app";
 GRANT SELECT ON domain_reputation TO :"app";
 GRANT SELECT, INSERT, UPDATE ON domain_reputation TO :"delivery";
 

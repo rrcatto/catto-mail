@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.4) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.5) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`

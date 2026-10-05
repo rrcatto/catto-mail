@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.4 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.5 · **Template:** [`infra/.env.example`](../../infra/.env.example)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and

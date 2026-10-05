@@ -31,7 +31,7 @@ Both are gitignored.
 │   ├── bin/console, bin/phpunit
 │   ├── public/index.php           The only front controller (nginx → FastCGI)
 │   ├── config/                    Framework, Doctrine, security, monolog, routes, services
-│   ├── migrations/                6 Doctrine migrations (the schema authority)
+│   ├── migrations/                7 Doctrine migrations (the schema authority)
 │   ├── src/
 │   │   ├── Api/                   Problems, OpenAPI validation, idempotency key, cursors, representations, work permission (D-31)
 │   │   ├── Audit/                 Audit log writer
@@ -43,8 +43,8 @@ Both are gitignored.
 │   │   ├── Doctrine/Type/         timestamptz and jsonb_map types
 │   │   ├── Domain/                Sending domains and DNS TXT verification
 │   │   ├── Dsn/                   Unmatched-DSN operator workflow (match request, dismissal)
-│   │   ├── Entity/                24 entities, one per table
-│   │   ├── Enum/                  32 vocabulary enums
+│   │   ├── Entity/                25 entities, one per table
+│   │   ├── Enum/                  33 vocabulary enums
 │   │   ├── Idempotency/           In-flight lock
 │   │   ├── Logging/               Contract log format
 │   │   ├── Security/              API-key and dashboard authentication, voter
@@ -251,15 +251,16 @@ Both are gitignored.
 | `config/packages/monolog.yaml` | JSON lines to stderr in the contract format; Doctrine only at warning. |
 | `config/services.yaml` | Parameters from the environment contract; the test DNS stub. |
 | `migrations/Version20261003000100…000500.php` | Tenancy; validation; sending; suppression/reputation; metering, webhooks and audit. |
-| `migrations/Version20261004000100.php` | Phase 5 / D-30: client capability, suppression provenance, `recipient_global_opt_out`, partial unique indexes, `messages_recipient_address_idx`, dismissal reason. With the five above it reproduces `docs/schema/reference-schema.sql`; each has a `down()`. |
+| `migrations/Version20261004000100.php` | Phase 5 / D-30: client capability, suppression provenance, `recipient_global_opt_out`, partial unique indexes, `messages_recipient_address_idx`, dismissal reason. |
+| `migrations/Version20261005000100.php` | Spec 2.5 / D-38: `global_suppression_requests` (durable opt-out request idempotency), backfilled from existing opt-outs; removes the per-row key columns from `suppressions`. With the six above it reproduces `docs/schema/reference-schema.sql`; each has a `down()`. |
 | `src/Kernel.php` | Runs the fail-closed safety guard on every boot. |
 | `src/Config/` | `SafetyGuard` (SMARTHOST_ENV values; unverified domains forbidden in production), `SecretEnvVarProcessor` (`X` or `X_FILE`, never both), `Limits` (configuration may lower, never raise, the contract ceilings). |
 | `src/Doctrine/Type/` | `timestamptz` (microseconds, UTC) and `jsonb_map` (`{}` stays an object). |
-| `src/Entity/` | One entity per table (24). Tables written only by Python or Go are mapped read-only. |
-| `src/Enum/` | The 32 vocabularies of `status-vocabulary.yaml` as PHP enums. |
+| `src/Entity/` | One entity per table (25; `GlobalSuppressionRequest` since D-38). Tables written only by Python or Go are mapped read-only. |
+| `src/Enum/` | The 33 vocabularies of `status-vocabulary.yaml` as PHP enums. |
 | `src/Security/` | `ApiKeyManager` (raw key `shk_…`, 256 bits, shown once; SHA-256 stored), `ApiKeyAuthenticator` (Bearer; revoked keys and closed clients rejected; last-used tracking; failure rate limit), `ApiClientUser`, dashboard user provider and checker, login listener, `ClientVoter`. |
 | `src/Tenant/` | `TenantScope` (the only way API code loads tenant resources; foreign = missing), `TenantFilter` (Doctrine SQL filter, deny-by-default per table; a client sees only its own suppressions and the global opt-outs it reported), and the listener that enables it for the authenticated client. |
-| `src/Suppression/` | `GlobalSuppressionService` (D-30 opt-out API: capability and D-31 check, normalisation, idempotency, per-address lock, audited create and lift) and `SuppressionAdministration` (operator capability changes, operator blocks, audited lifting, search). |
+| `src/Suppression/` | `GlobalSuppressionService` (D-30 opt-out API: capability check, creation allowed in any authenticated status and lifting only when active/throttled (D-37), normalisation, durable request idempotency in `global_suppression_requests` (D-38), per-address lock, audited create, reaffirm and lift) and `SuppressionAdministration` (operator capability changes, operator blocks, audited lifting, search). |
 | `src/Dsn/UnmatchedDsnAdministration.php` | Operator match requests (status `match_requested`, NOTIFY `smarthost_unmatched_dsn_work`; Go applies them) and dismissals with a reason; audited. |
 | `src/Api/` | `WorkPermission` (D-31: 403 for work-creating operations of `pending_approval`/`suspended` clients), RFC 9457 problems and their renderer, exception mapping for `/v1`, body-size and per-key rate limits, `OpenApiContract` (validates requests against the normative OpenAPI), `JsonRequest`, `RequestHasher` (canonical idempotency hash), `IdempotencyKey`, `Cursor`, `Presenter`. |
 | `src/Idempotency/IdempotencyLock.php` | Transaction-scoped advisory lock that turns a concurrent retry into 409. |

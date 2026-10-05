@@ -30,7 +30,7 @@ Symfony /v1 (submit, NOTIFY smarthost_send_work)
 
 Remote MTA / feedback loop -> Postfix :25 -> virtual(8) -> DSN spool inbound/new   (Phase 5)
   -> claim (rename to processing/) -> parse (RFC 3464/6533 DSN, RFC 5965 ARF, other)
-  -> correlate (VERP, ENVID, Message-ID, queue id, corroborated recipient) -> one transaction:
+  -> correlate (VERP, ENVID, Message-ID, queue id only; D-36) -> one transaction:
      dsn_spool event + projection + outbox + global suppression policy (D-30) | unmatched_dsns row
   -> done/ (deleted after DELIVERY_DSN_RETENTION_DAYS)
 Operator match request (NOTIFY smarthost_unmatched_dsn_work) -> re-interpret -> event (matched)

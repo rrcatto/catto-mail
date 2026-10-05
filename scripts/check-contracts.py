@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smarthost contract consistency check (specification 2.4).
+"""Smarthost contract consistency check (specification 2.5).
 
 Cross-checks the canonical YAML specification, the human specification and the
 normative contract files so they cannot drift silently:
@@ -49,10 +49,10 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.4"
-EXPECTED_SPEC_DATE = "2026-10-04"
-# Decisions that must be incorporated across the revision history (all of D-01..D-35).
-EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 36)}
+EXPECTED_SPEC_VERSION = "2.5"
+EXPECTED_SPEC_DATE = "2026-10-05"
+# Decisions that must be incorporated across the revision history (all of D-01..D-38).
+EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
 
 # vocabulary key -> path of the enumerating list in the spec
 SPEC_LISTS = {
@@ -130,6 +130,7 @@ DDL_ENUMS = {
     ("webhook_deliveries", "event_type"): "webhook_event_type",
     ("webhook_deliveries", "status"): "webhook_delivery_status",
     ("audit_log", "actor_type"): "audit_actor_type",
+    ("global_suppression_requests", "operation"): "global_suppression_request_operation",
 }
 
 ENV_CONSUMERS = {"app", "webhook-worker", "validator", "delivery", "postfix", "opendkim",

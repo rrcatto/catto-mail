@@ -35,6 +35,7 @@ final class VocabularyConstraintTest extends TestCase
         'webhook_event_type' => ['webhook_events.event_type', 'webhook_deliveries.event_type'],
         'webhook_subject_type' => ['webhook_events.subject_type'], 'webhook_delivery_status' => ['webhook_deliveries.status'],
         'audit_actor_type' => ['audit_log.actor_type'],
+        'global_suppression_request_operation' => ['global_suppression_requests.operation'],
     ];
 
     /** @return array<string, list<string>> */

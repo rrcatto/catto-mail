@@ -1,5 +1,5 @@
 -- =============================================================================
--- Smarthost reference schema — specification 2.4 (PostgreSQL 16; D-30 changes in 2.4)
+-- Smarthost reference schema — specification 2.5 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5)
 -- =============================================================================
 --
 -- THIS IS NOT A MIGRATION. Symfony/Doctrine migrations (Phase 2) are the sole
@@ -422,9 +422,7 @@ CREATE TABLE suppressions (
     -- Provenance (D-30)
     source_event_id    uuid        NULL REFERENCES message_events (id),  -- authoritative event of a system suppression
     source_client_id   uuid        NULL REFERENCES clients (id),     -- client that reported a global opt-out
-    external_reference text        NULL,                             -- optional opaque reference of that client
-    idempotency_key    text        NULL,                             -- Idempotency-Key of the opt-out request
-    request_hash       text        NULL,
+    external_reference text        NULL,                             -- optional opaque reference of the creating request
     -- D-18: only the domain is lower-cased; the local part is never case-folded.
     CONSTRAINT suppressions_normalised CHECK (
         (scope_type = 'domain'  AND address_or_domain = lower(address_or_domain)
@@ -432,12 +430,10 @@ CREATE TABLE suppressions (
      OR (scope_type = 'address' AND address_or_domain ~ '@[^@]+$'
                                 AND substring(address_or_domain FROM '@([^@]+)$')
                                     = lower(substring(address_or_domain FROM '@([^@]+)$')))),
-    -- A client-reported opt-out (and only it) names its reporter and request; it is
-    -- always a global address suppression.
+    -- A client-reported opt-out (and only it) names its reporter; it is always a
+    -- global address suppression. Its requests are in global_suppression_requests.
     CONSTRAINT suppressions_opt_out_provenance CHECK (
         (reason = 'recipient_global_opt_out') = (source_client_id IS NOT NULL)
-        AND (source_client_id IS NULL) = (idempotency_key IS NULL)
-        AND (idempotency_key IS NULL) = (request_hash IS NULL)
         AND (external_reference IS NULL OR source_client_id IS NOT NULL)
         AND (reason <> 'recipient_global_opt_out' OR (client_id IS NULL AND scope_type = 'address'))),
     -- Indefinite reasons never expire; repeated_soft_bounce is the temporary one.
@@ -450,12 +446,29 @@ CREATE INDEX suppressions_client_idx ON suppressions (client_id);
 -- One active global hard_bounce / complaint row per address (concurrent evidence cannot duplicate it).
 CREATE UNIQUE INDEX suppressions_global_address_reason_active_uq ON suppressions (address_or_domain, reason)
     WHERE client_id IS NULL AND scope_type = 'address' AND lifted_at IS NULL AND reason IN ('hard_bounce', 'complaint');
--- Opt-out idempotency and one active opt-out per reporting client and address.
-CREATE UNIQUE INDEX suppressions_source_client_idempotency_uq ON suppressions (source_client_id, idempotency_key)
-    WHERE source_client_id IS NOT NULL;
+-- One active opt-out per reporting client and address.
 CREATE UNIQUE INDEX suppressions_source_client_address_active_uq ON suppressions (source_client_id, address_or_domain)
     WHERE reason = 'recipient_global_opt_out' AND lifted_at IS NULL;
 CREATE INDEX suppressions_source_message_idx ON suppressions (source_message_id) WHERE source_message_id IS NOT NULL;
+
+-- D-38: durable idempotency of recipient global opt-out requests, independent of
+-- the suppression row. One row per accepted (client, operation, Idempotency-Key):
+-- the canonical request hash, the suppression it resulted in and the original
+-- status (201 created, 200 already active). Never updated, so a key keeps its
+-- meaning after the suppression is lifted.
+CREATE TABLE global_suppression_requests (
+    id                  uuid        PRIMARY KEY,
+    client_id           uuid        NOT NULL REFERENCES clients (id),     -- the authenticated reporting client
+    operation           text        NOT NULL CHECK (operation IN ('create_global_opt_out')),
+    idempotency_key     text        NOT NULL,
+    request_hash        text        NOT NULL,                             -- canonical JSON hash (as other idempotent requests)
+    suppression_id      uuid        NOT NULL REFERENCES suppressions (id),
+    response_status     smallint    NOT NULL CHECK (response_status IN (200, 201)),
+    external_reference  text        NULL,                                 -- this request's optional client reference
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX global_suppression_requests_client_operation_key_uq ON global_suppression_requests (client_id, operation, idempotency_key);
+CREATE INDEX global_suppression_requests_suppression_idx ON global_suppression_requests (suppression_id);
 
 CREATE TABLE domain_reputation (
     id                  uuid        PRIMARY KEY,

@@ -236,16 +236,11 @@ func TestCorrelationLevels(t *testing.T) {
 		{"envelope id", "missing-optional-fields.eml", "envelope_id", []string{"ENVID"}},
 		{"returned message id", "message-id-only.eml", "message_id", []string{"MSGID"}},
 		{"postfix queue id", "queue-id-only.eml", "queue_id", []string{"QID"}},
-		{"recipient and sender", "message-id-only.eml", "recipient", []string{"FROM"}},
 		{"message id quoted in a non-standard bounce", "nonstandard-bounce.eml", "message_id", []string{"MSGID"}},
 	}
 	for _, c := range cases {
 		s := e.sendTo(e.client, e.domain, "corr-"+tag()+"@rcpt.test")[0]
-		v := only(vars(s), c.keep...)
-		if c.method == "recipient" {
-			v["MSGID"] = "none" // returned headers without a Smarthost id: only recipient + sender remain
-		}
-		key := e.deliver(p, c.fixture, v)
+		key := e.deliver(p, c.fixture, only(vars(s), c.keep...))
 		e.pass(p)
 		got := e.str(`SELECT metadata_json->>'correlation' FROM message_events WHERE event_source = 'dsn_spool' AND source_event_key = $1 AND message_id = $2`, key, s.ID)
 		if got != c.method {
@@ -254,25 +249,30 @@ func TestCorrelationLevels(t *testing.T) {
 		}
 	}
 
-	// Never a guess: two candidate messages to the same recipient, no identifier.
+	// D-36: recipient address plus a matching returned From/sender is weak,
+	// forgeable evidence. It never correlates: a forged DSN sent to postmaster@
+	// naming a real recipient and sender must not create an event or a global
+	// suppression. It stays an open unmatched DSN; the message is only a candidate.
+	single := e.sendTo(e.client, e.domain, "forged-"+tag()+"@rcpt.test")[0]
+	key := e.deliver(p, "message-id-only.eml", only(vars(single), "FROM"))
+	e.pass(p)
+	if e.count(`SELECT count(*) FROM unmatched_dsns WHERE spool_ingest_key = $1 AND status = 'open'
+  AND detail_json->'candidates' @> jsonb_build_array(jsonb_build_object('message_id', $2::text, 'sender_matches_returned_from', true))`, key, single.ID) != 1 {
+		t.Error("recipient + sender evidence must be kept as an operator candidate on an open unmatched DSN")
+	}
+	if e.count(`SELECT count(*) FROM message_events WHERE source_event_key = $1`, key) != 0 ||
+		e.str(`SELECT current_status FROM messages WHERE id = $1`, single.ID) != "submitted" || len(e.suppressions(single.Addr)) != 0 {
+		t.Error("recipient + sender evidence must not create an event, change the message or suppress")
+	}
+	// Several messages to the recipient, no identifier: all are candidates, none is chosen.
 	addr := "twice-" + tag() + "@rcpt.test"
 	m1 := e.sendTo(e.client, e.domain, addr)[0]
 	e.sendTo(e.client, e.domain, addr)
-	key := e.deliver(p, "message-id-only.eml", only(vars(m1), "FROM"))
+	key = e.deliver(p, "message-id-only.eml", only(vars(m1), "FROM"))
 	e.pass(p)
-	if e.count(`SELECT count(*) FROM unmatched_dsns WHERE spool_ingest_key = $1 AND status = 'open' AND detail_json->>'reason' LIKE 'several candidate%'`, key) != 1 ||
-		e.count(`SELECT count(*) FROM message_events WHERE source_event_key = $1`, key) != 0 {
-		t.Error("an ambiguous recipient must become an unmatched DSN, never a guessed event")
-	}
-	if len(e.suppressions(addr)) != 0 {
-		t.Error("an unmatched DSN must not suppress")
-	}
-	// A recipient without corroborating sender is not enough either.
-	single := e.sendTo(e.client, e.domain, "alone-"+tag()+"@rcpt.test")[0]
-	key = e.deliver(p, "message-id-only.eml", only(vars(single)))
-	e.pass(p)
-	if e.count(`SELECT count(*) FROM unmatched_dsns WHERE spool_ingest_key = $1`, key) != 1 {
-		t.Error("recipient alone must not correlate")
+	if e.count(`SELECT jsonb_array_length(detail_json->'candidates') FROM unmatched_dsns WHERE spool_ingest_key = $1 AND status = 'open'`, key) != 2 ||
+		e.count(`SELECT count(*) FROM message_events WHERE source_event_key = $1`, key) != 0 || len(e.suppressions(addr)) != 0 {
+		t.Error("an ambiguous recipient must become an unmatched DSN with candidates, never a guessed event or suppression")
 	}
 	// Conflicting identifiers (VERP of one message, envelope id of another).
 	x := e.sendTo(e.client, e.domain, "conflict-a-"+tag()+"@rcpt.test")[0]
@@ -811,7 +811,7 @@ func TestEveryActiveSuppressionReasonStopsSubmission(t *testing.T) {
 		"repeated_soft_bounce":     `INSERT INTO suppressions (id, address_or_domain, scope_type, reason, expires_at) VALUES ($1, $2, 'address', 'repeated_soft_bounce', now() + interval '1 day')`,
 		"operator_block":           `INSERT INTO suppressions (id, address_or_domain, scope_type, reason) VALUES ($1, $2, 'address', 'operator_block')`,
 		"client_abuse_block":       `INSERT INTO suppressions (id, address_or_domain, scope_type, reason) VALUES ($1, $2, 'address', 'client_abuse_block')`,
-		"recipient_global_opt_out": `INSERT INTO suppressions (id, address_or_domain, scope_type, reason, source_client_id, idempotency_key, request_hash) VALUES ($1, $2, 'address', 'recipient_global_opt_out', '` + e.client + `', gen_random_uuid()::text, 'h')`,
+		"recipient_global_opt_out": `INSERT INTO suppressions (id, address_or_domain, scope_type, reason, source_client_id) VALUES ($1, $2, 'address', 'recipient_global_opt_out', '` + e.client + `')`,
 	}
 	before := len(e.smtp.Messages())
 	for reason, sql := range reasons {
@@ -871,8 +871,8 @@ func TestSuppressionCreatedAfterStagingStopsSubmission(t *testing.T) {
 	}
 	// Another client's trusted opt-out arrives while the messages wait for a slot.
 	other, _ := e.otherClient()
-	e.exec(`INSERT INTO suppressions (id, address_or_domain, scope_type, reason, source_client_id, idempotency_key, request_hash)
-VALUES ($1, $2, 'address', 'recipient_global_opt_out', $3, gen_random_uuid()::text, 'h')`, ids.UUIDv7(), addr, other)
+	e.exec(`INSERT INTO suppressions (id, address_or_domain, scope_type, reason, source_client_id)
+VALUES ($1, $2, 'address', 'recipient_global_opt_out', $3)`, ids.UUIDv7(), addr, other)
 	<-done
 	if st := e.str(`SELECT current_status FROM messages WHERE send_job_id = $1 AND recipient_address = $2`, job, addr); st != "suppressed" {
 		t.Fatalf("message %s (must be suppressed before submission)", st)

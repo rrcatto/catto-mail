@@ -65,11 +65,6 @@ class Suppression
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $externalReference = null;
 
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $idempotencyKey = null;
-
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $requestHash = null;
 
     private function __construct(string $addressOrDomain, SuppressionScopeType $scopeType, SuppressionReason $reason)
     {
@@ -80,13 +75,15 @@ class Suppression
         $this->createdAt = Clock::now();
     }
 
-    /** A recipient global opt-out reported by a trusted client (D-30): global, address-scoped, indefinite. */
-    public static function recipientGlobalOptOut(Client $source, string $normalizedAddress, string $idempotencyKey, string $requestHash, ?string $externalReference): self
+    /**
+     * A recipient global opt-out reported by a trusted client (D-30): global,
+     * address-scoped, indefinite. The request that created it (and any later one
+     * that found it active) is recorded in global_suppression_requests (D-38).
+     */
+    public static function recipientGlobalOptOut(Client $source, string $normalizedAddress, ?string $externalReference): self
     {
         $s = new self($normalizedAddress, SuppressionScopeType::Address, SuppressionReason::RecipientGlobalOptOut);
         $s->sourceClient = $source;
-        $s->idempotencyKey = $idempotencyKey;
-        $s->requestHash = $requestHash;
         $s->externalReference = $externalReference;
 
         return $s;
@@ -132,8 +129,6 @@ class Suppression
     public function getSourceEvent(): ?MessageEvent { return $this->sourceEvent; }
     public function getSourceClient(): ?Client { return $this->sourceClient; }
     public function getExternalReference(): ?string { return $this->externalReference; }
-    public function getIdempotencyKey(): ?string { return $this->idempotencyKey; }
-    public function getRequestHash(): ?string { return $this->requestHash; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function getExpiresAt(): ?\DateTimeImmutable { return $this->expiresAt; }
     public function getLiftedAt(): ?\DateTimeImmutable { return $this->liftedAt; }

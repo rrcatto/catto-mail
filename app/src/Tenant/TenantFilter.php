@@ -28,7 +28,8 @@ final class TenantFilter extends SQLFilter
         return match ($targetEntity->getTableName()) {
             'clients' => "$a.id = $c",
             'client_memberships', 'sending_domains', 'api_keys', 'validation_jobs', 'send_jobs', 'usage_records',
-            'webhook_endpoints', 'webhook_events', 'webhook_deliveries', 'domain_reputation' => "$a.client_id = $c",
+            'webhook_endpoints', 'webhook_events', 'webhook_deliveries', 'domain_reputation',
+            'global_suppression_requests' => "$a.client_id = $c",
             // A client sees its own client-scoped rows and the global opt-outs it reported;
             // other global suppressions (system, operator, other reporters) are not tenant data (D-30).
             'suppressions' => "($a.client_id = $c OR ($a.client_id IS NULL AND $a.source_client_id = $c))",

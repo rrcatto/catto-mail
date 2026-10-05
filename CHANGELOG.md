@@ -2,7 +2,30 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.4.
+the *specification* version, which is 2.5.
+
+## [Unreleased]
+
+Phase 5 corrections (specification 2.5, decisions D-36 to D-38). No version change.
+
+### Changed
+- D-36: inbound DSNs and complaints are correlated automatically only through Smarthost-issued
+  identifiers (VERP token, envelope id, Smarthost Message-ID, Postfix queue id). Recipient address
+  plus a matching returned sender no longer correlates (with global suppressions it is forgeable);
+  such reports stay open unmatched DSNs whose recent messages to the recipient are stored as
+  operator candidates (`detail_json.candidates`, with `sender_matches_returned_from`).
+- D-37: a client holding `can_submit_global_suppressions` may create a recipient global opt-out
+  while `pending_approval` or `suspended` (a do-not-contact operation, not work creation); lifting
+  requires an `active` or `throttled` client. Closed clients still fail authentication.
+- D-38: durable opt-out request idempotency. New table `global_suppression_requests` (migration
+  `Version20261005000100`, backfilled from existing opt-outs) maps (source client, operation,
+  Idempotency-Key) to the canonical request hash, the resulting suppression and the original status;
+  the per-row `suppressions.idempotency_key`/`request_hash` columns are removed. A key that found an
+  active opt-out (200) is now recorded, so retrying it after a lift replays its result instead of
+  creating a suppression; such a request is audited as `suppression.global_opt_out_reaffirmed`.
+  Vocabulary 2.3.0 (`global_suppression_request_operation`), OpenAPI 1.0.0-draft.6, grant matrix
+  (`smarthost_app`: S I D), tenant filter.
+- Unchanged: only confidently correlated ARF `abuse` reports are complaints; the D-30 global policy.
 
 ## [0.1.5] - 2026-10-05
 

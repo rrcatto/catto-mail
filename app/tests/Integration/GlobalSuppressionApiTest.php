@@ -50,12 +50,36 @@ final class GlobalSuppressionApiTest extends ApiTestCase
         self::assertFalse($this->newClient()->canSubmitGlobalSuppressions());
     }
 
-    public function testSuspendedOrPendingTrustedClientsAreForbidden(): void
+    /**
+     * D-37: creating an opt-out is a recipient-safety operation, allowed to a trusted
+     * client in any status that authenticates; lifting needs an active or throttled
+     * client; closed clients cannot authenticate at all.
+     */
+    public function testPendingOrSuspendedTrustedClientsMayCreateButNotLift(): void
     {
+        // Fetched per call: the HTTP kernel reboots between requests (a held service would use a stale entity manager).
+        $setStatus = fn ($client, ClientStatus $status) => $this->service(\App\Client\AccountAdministration::class)
+            ->setClientStatus($this->reload($client), $status, self::actor());
         foreach ([ClientStatus::Suspended, ClientStatus::PendingApproval] as $status) {
             [$client, $key] = $this->trustedClient();
-            $this->service(\App\Client\AccountAdministration::class)->setClientStatus($this->reload($client), $status, self::actor());
-            $this->assertProblem($this->optOut($key, ['email_address' => self::address()]), 403, 'forbidden');
+            $before = $this->assertContract($this->optOut($key, ['email_address' => self::address()]), 201, '/global-suppressions', 'post');
+            $setStatus($client, $status);
+            $created = $this->assertContract($this->optOut($key, ['email_address' => self::address()]), 201, '/global-suppressions', 'post');
+            self::assertSame('active', $created['status'], "$status->value client creates an opt-out");
+            foreach ([$before['id'], $created['id']] as $id) {
+                $p = $this->assertProblem($this->api('POST', "/v1/global-suppressions/$id/lift", $key), 403, 'forbidden');
+                self::assertStringContainsString('may not lift', $p['detail']);
+            }
+            self::assertSame(0, (int) Db::owner()->fetchOne('SELECT count(*) FROM suppressions WHERE id IN (?, ?) AND lifted_at IS NOT NULL',
+                [$before['id'], $created['id']]), 'nothing was lifted');
+            $this->assertContract($this->api('GET', '/v1/global-suppressions/'.$created['id'], $key), 200, '/global-suppressions/{id}', 'get');
+
+            $setStatus($client, ClientStatus::Throttled);
+            self::assertSame('lifted', $this->assertContract($this->api('POST', "/v1/global-suppressions/{$created['id']}/lift", $key),
+                200, '/global-suppressions/{id}/lift', 'post')['status'], 'a throttled trusted client may lift');
+
+            $setStatus($client, ClientStatus::Closed);
+            $this->assertProblem($this->optOut($key, ['email_address' => self::address()]), 401, 'unauthorized');
         }
     }
 
@@ -98,10 +122,51 @@ final class GlobalSuppressionApiTest extends ApiTestCase
         $this->assertProblem($this->optOut($key, ['email_address' => 'other'.$address], $idem), 422, 'idempotency-key-reused');
 
         // A new key for an address this client already opted out returns the existing row (200), no duplicate.
-        $again = $this->optOut($key, ['email_address' => $address]);
+        $keyB = self::key();
+        $again = $this->optOut($key, ['email_address' => $address], $keyB);
         self::assertSame($first['id'], $this->assertContract($again, 200, '/global-suppressions', 'post')['id']);
-        self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM suppressions WHERE reason = 'recipient_global_opt_out' AND address_or_domain = ?",
-            [explode('@', $address)[0].'@example.com']));
+        $normalized = explode('@', $address)[0].'@example.com';
+        $count = fn () => (int) Db::owner()->fetchOne("SELECT count(*) FROM suppressions WHERE reason = 'recipient_global_opt_out' AND address_or_domain = ?", [$normalized]);
+        self::assertSame(1, $count());
+    }
+
+    /**
+     * D-38: a key's meaning is durable and independent of the suppression's later
+     * state. Key A creates; key B finds it active (200); after the lift, retrying B
+     * replays B's historical result (no new suppression) and retrying A replays A's.
+     */
+    public function testIdempotencyKeysKeepTheirMeaningAfterALift(): void
+    {
+        [$client, $key] = $this->trustedClient();
+        $address = self::address();
+        $normalized = explode('@', $address)[0].'@example.com';
+        [$keyA, $keyB, $keyC] = [self::key(), self::key(), self::key()];
+        $a = $this->assertContract($this->optOut($key, ['email_address' => $address], $keyA), 201, '/global-suppressions', 'post');
+        $b = $this->assertContract($this->optOut($key, ['email_address' => $address, 'external_reference' => 'second report'], $keyB), 200, '/global-suppressions', 'post');
+        self::assertSame($a['id'], $b['id']);
+        self::assertSame('lifted', $this->assertContract($this->api('POST', "/v1/global-suppressions/{$a['id']}/lift", $key), 200, '/global-suppressions/{id}/lift', 'post')['status']);
+
+        $retryB = $this->optOut($key, ['email_address' => $address, 'external_reference' => 'second report'], $keyB);
+        $rb = $this->assertContract($retryB, 200, '/global-suppressions', 'post');
+        self::assertSame([$a['id'], 'lifted', 'true'], [$rb['id'], $rb['status'], $retryB->headers->get('Idempotent-Replayed')],
+            'retrying key B after the lift replays its result and creates nothing');
+        $retryA = $this->optOut($key, ['email_address' => $address], $keyA);
+        self::assertSame([201, $a['id'], 'true'], [$retryA->getStatusCode(), self::json($retryA)['id'], $retryA->headers->get('Idempotent-Replayed')]);
+        $this->assertProblem($this->optOut($key, ['email_address' => $address], $keyB), 422, 'idempotency-key-reused');
+        $count = fn () => (int) Db::owner()->fetchOne("SELECT count(*) FROM suppressions WHERE reason = 'recipient_global_opt_out' AND address_or_domain = ?", [$normalized]);
+        self::assertSame(1, $count(), 'replays never create a suppression');
+
+        // A new key after the lift is a new report: a new opt-out.
+        $c = $this->assertContract($this->optOut($key, ['email_address' => $address], $keyC), 201, '/global-suppressions', 'post');
+        self::assertNotSame($a['id'], $c['id']);
+        self::assertSame(2, $count());
+
+        // The durable request records: one per key, with the original status and resource.
+        $rows = Db::owner()->fetchAllAssociative('SELECT idempotency_key, suppression_id::text AS s, response_status, operation, external_reference
+            FROM global_suppression_requests WHERE client_id = ? ORDER BY created_at', [$client->getId()->toRfc4122()]);
+        self::assertSame([[$keyA, $a['id'], 201, 'create_global_opt_out', null], [$keyB, $a['id'], 200, 'create_global_opt_out', 'second report'],
+            [$keyC, $c['id'], 201, 'create_global_opt_out', null]], array_map(fn ($r) => array_values($r), $rows));
+        self::assertNotFalse(Db::owner()->fetchOne("SELECT 1 FROM audit_log WHERE action = 'suppression.global_opt_out_reaffirmed' AND target_id = ?", [$a['id']]));
     }
 
     public function testInFlightDuplicateIsAConflict(): void

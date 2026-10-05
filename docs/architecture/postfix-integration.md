@@ -1,6 +1,6 @@
 # Postfix Integration Contract
 
-**Status:** normative contract for specification 2.4 (spec `go_delivery.initial_integration_strategy`,
+**Status:** normative contract for specification 2.5 (spec `go_delivery.initial_integration_strategy`,
 `service_topology.opendkim`, `transport_reconciliation`). This document describes the
 mechanics. It does not change the architecture.
 
@@ -233,9 +233,11 @@ why Go must run as `SMARTHOST_DELIVERY_UID`: a group member could not read them.
    2. `Original-Envelope-Id`
    3. `X-Smarthost-Message-ID` or a Smarthost `Message-ID` in the returned headers
    4. `X-Postfix-Queue-ID`
-   5. `Original-Recipient`/`Final-Recipient` (or ARF `Original-Rcpt-To`) combined with other
-      evidence: exactly one message to that normalised address within 7 days, with a queue id, whose
-      job sender equals the returned `From`
+
+   Nothing else correlates automatically (D-36). The recipient address, even with a matching
+   returned `From`, is forgeable and suppressions are global: recent messages to the reported
+   recipient (with whether their sender matches) are stored only as operator candidates in
+   `unmatched_dsns.detail_json.candidates`.
 
    An identifier that names no message is not evidence; two identifiers naming different messages
    are a conflict. Anything not correlated with certainty becomes an `unmatched_dsns` row.

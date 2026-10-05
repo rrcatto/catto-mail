@@ -9,8 +9,10 @@
 #   A  cross-client hard bounce: client A's recipient-specific 5.1.1 DSN suppresses
 #      the address globally; client B's later message is suppressed, never submitted
 #   B  trusted-client global opt-out: 403 without the capability; client A's opt-out
-#      suppresses client B's send; idempotent; lifting it restores sending
-#   C  correlation by ENVID, returned Message-ID, Postfix queue id and recipient+sender
+#      suppresses client B's send; idempotent, also after a lift (D-38); lifting it
+#      restores sending; a suspended trusted client may create but not lift (D-37)
+#   C  correlation by ENVID, returned Message-ID and Postfix queue id; recipient+sender
+#      evidence alone stays an unmatched DSN with an operator candidate (D-36)
 #   D  ARF complaint to the feedback-loop address: complained, global suppression,
 #      message.complained in the outbox
 #   E  excluded scopes (provider policy, domain, DELAY) never suppress; three
@@ -102,19 +104,46 @@ if [[ " $SCEN " == *" B "* ]]; then
   [[ "$(sql "SELECT count(*) FROM audit_log WHERE target_id = '$id' AND action IN ('suppression.global_opt_out_created', 'suppression.global_opt_out_lifted')")" == 2 ]] && pass "creation and lift audited" || fail "audit"
   b2="$(first_id "$(send "$KEY_B" "$addr")")"
   [[ "$(sql "SELECT current_status FROM messages WHERE id = '$b2'")" == remote_accepted ]] && pass "after the lift client B can send again" || fail "still suppressed after lift"
+  # D-38: the key that found the opt-out active keeps its meaning after the lift.
+  [[ "$(drv optout "$KEY_A" "$addr" "$idem-b" | jget "d['code']")" == 201 ]] && pass "a new key after the lift is a new report: a new opt-out (201)" || fail "new key after lift"
+  id2="$(sql "SELECT id FROM suppressions WHERE address_or_domain = '$addr' AND lifted_at IS NULL")"
+  [[ "$(drv optout "$KEY_A" "$addr" "$idem-c" | jget "(d['code'], d['body']['id'])")" == "(200, '$id2')" ]] && pass "a second key for the active opt-out returns it (200)" || fail "second key"
+  drv lift "$KEY_A" "$id2" >/dev/null
+  n_before="$(sql "SELECT count(*) FROM suppressions WHERE address_or_domain = '$addr'")"
+  [[ "$(drv optout "$KEY_A" "$addr" "$idem-c" | jget "(d['code'], d['body']['id'], d['body']['status'])")" == "(200, '$id2', 'lifted')" \
+     && "$(sql "SELECT count(*) FROM suppressions WHERE address_or_domain = '$addr'")" == "$n_before" ]] \
+    && pass "after the lift, retrying that key replays its result and creates no suppression (durable idempotency)" || fail "key meaning changed after lift"
+  # D-37: a suspended trusted client may create an opt-out but not lift one.
+  CLIENT_T="$(console smarthost:client:create --company "Phase5 E2E trusted $T" --contact-email t@smarthost-dev.test --status active | field client_id)"
+  console smarthost:client:global-suppressions "$CLIENT_T" enable --operator "$OPERATOR" --note "e2e trusted client" >/dev/null
+  KEY_T="$(console smarthost:api-key:create "$CLIENT_T" --name e2e | field api_key)"
+  console smarthost:client:set-status "$CLIENT_T" suspended >/dev/null
+  ot="$(drv optout "$KEY_T" "suspended.$T@example.net")"; tid="$(jget "d['body'].get('id', '')" <<<"$ot")"
+  [[ "$(jget "d['code']" <<<"$ot")" == 201 ]] && pass "a suspended trusted client creates an opt-out (do-not-contact)" || fail "suspended create: $ot"
+  [[ "$(drv lift "$KEY_T" "$tid" | jget "d['code']")" == 403 ]] && pass "a suspended trusted client cannot lift it" || fail "suspended lift"
+  console smarthost:client:set-status "$CLIENT_T" active >/dev/null
+  [[ "$(drv lift "$KEY_T" "$tid" | jget "d['code']")" == 200 ]] && pass "once active again it can lift its own opt-out" || fail "active lift"
 fi
 
 if [[ " $SCEN " == *" C "* ]]; then
   echo "== C correlation through the real spool"
-  for mode in envid msgid qid recipient; do
+  for mode in envid msgid qid; do
     fx=postfix-hard-5.1.1.eml; [[ "$mode" == envid ]] && fx=missing-optional-fields.eml; [[ "$mode" == qid ]] && fx=queue-id-only.eml
-    [[ "$mode" == msgid || "$mode" == recipient ]] && fx=message-id-only.eml
+    [[ "$mode" == msgid ]] && fx=message-id-only.eml
     m="$(first_id "$(send "$KEY_A" "corr-$mode-$T@example.com")")"
     drv inject "$fx" "$m" "$mode" >/dev/null
     want="$mode"; [[ "$mode" == envid ]] && want=envelope_id; [[ "$mode" == msgid ]] && want=message_id; [[ "$mode" == qid ]] && want=queue_id
     waitsql "SELECT metadata_json->>'correlation' FROM message_events WHERE message_id = '$m' AND event_source = 'dsn_spool'" "$want" 60 \
       && pass "correlated by $want" || fail "correlation by $want"
   done
+  # D-36: a (forgeable) DSN to postmaster@ with only the recipient and the real sender.
+  m="$(first_id "$(send "$KEY_A" "corr-recipient-$T@example.com")")"
+  drv inject message-id-only.eml "$m" recipient >/dev/null
+  waitsql "SELECT count(*) FROM unmatched_dsns WHERE final_recipient = 'corr-recipient-$T@example.com' AND status = 'open' AND detail_json->'candidates' @> '[{\"message_id\": \"$m\", \"sender_matches_returned_from\": true}]'" 1 60 \
+    && [[ "$(sql "SELECT count(*) FROM message_events WHERE message_id = '$m' AND event_source = 'dsn_spool'")" == 0 \
+          && "$(sql "SELECT current_status FROM messages WHERE id = '$m'")" == remote_accepted && "$(sups "corr-recipient-$T@example.com")" == "0:" ]] \
+    && pass "recipient + sender evidence: open unmatched DSN with the message as operator candidate; no event, no suppression" \
+    || fail "recipient + sender evidence must not correlate"
 fi
 
 if [[ " $SCEN " == *" D "* ]]; then

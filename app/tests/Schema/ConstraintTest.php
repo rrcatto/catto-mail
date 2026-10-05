@@ -210,8 +210,7 @@ final class ConstraintTest extends TestCase
         $addr = 'Global'.bin2hex(random_bytes(3)).'@example.com';
         $s = fn (array $o) => fn (Connection $c) => $c->insert('suppressions', $o + ['id' => SchemaFixtures::id(),
             'address_or_domain' => $addr, 'scope_type' => 'address', 'reason' => 'hard_bounce']);
-        $optOut = fn (array $o) => $s($o + ['reason' => 'recipient_global_opt_out', 'source_client_id' => $client,
-            'idempotency_key' => SchemaFixtures::id(), 'request_hash' => 'h']);
+        $optOut = fn (array $o) => $s($o + ['reason' => 'recipient_global_opt_out', 'source_client_id' => $client]);
 
         // One active global hard_bounce / complaint per address; lifted rows and other reasons coexist.
         self::assertNull($this->violation($s([])));
@@ -230,9 +229,18 @@ final class ConstraintTest extends TestCase
         self::assertSame('suppressions_opt_out_provenance', $this->violation($s(['reason' => 'recipient_global_opt_out', 'address_or_domain' => 'b'.$addr])));
         self::assertSame('suppressions_opt_out_provenance', $this->violation($s(['source_client_id' => $client, 'address_or_domain' => 'c'.$addr])));
         self::assertSame('suppressions_opt_out_provenance', $this->violation($s(['external_reference' => 'r', 'address_or_domain' => 'd'.$addr])));
-        $key = SchemaFixtures::id();
-        self::assertNull($this->violation($optOut(['idempotency_key' => $key, 'address_or_domain' => 'e'.$addr])));
-        self::assertSame('suppressions_source_client_idempotency_uq', $this->violation($optOut(['idempotency_key' => $key, 'address_or_domain' => 'f'.$addr])));
+
+        // D-38: durable opt-out request idempotency, one row per (client, operation, key).
+        $sid = SchemaFixtures::id();
+        $this->c->insert('suppressions', ['id' => $sid, 'address_or_domain' => 'h'.$addr, 'scope_type' => 'address',
+            'reason' => 'recipient_global_opt_out', 'source_client_id' => $client]);
+        $req = fn (array $o) => fn (Connection $c) => $c->insert('global_suppression_requests', $o + ['id' => SchemaFixtures::id(), 'client_id' => $client,
+            'operation' => 'create_global_opt_out', 'idempotency_key' => 'key-1', 'request_hash' => 'h', 'suppression_id' => $sid, 'response_status' => 201]);
+        self::assertNull($this->violation($req([])));
+        self::assertSame('global_suppression_requests_client_operation_key_uq', $this->violation($req([])));
+        self::assertNull($this->violation($req(['idempotency_key' => 'key-2', 'response_status' => 200])));
+        self::assertSame('global_suppression_requests_response_status_check', $this->violation($req(['idempotency_key' => 'key-3', 'response_status' => 409])));
+        self::assertSame('global_suppression_requests_operation_check', $this->violation($req(['idempotency_key' => 'key-4', 'operation' => 'lift'])));
         self::assertSame('suppressions_source_event_has_message', $this->violation($s(['source_event_id' => SchemaFixtures::id(), 'address_or_domain' => 'g'.$addr])));
     }
 

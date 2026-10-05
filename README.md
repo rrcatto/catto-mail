@@ -4,7 +4,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 **bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
 start, so it can later serve third-party clients as a SaaS.
 
-**Version:** 0.1.5 · **Status:** Phases 0–5 complete
+**Version:** 0.1.5 · **Status:** Phases 0–5 complete; Phase 5 corrections (spec 2.5) unreleased
 
 ---
 
@@ -70,7 +70,7 @@ The full file-by-file description and workflow diagrams are in
 
 | Start here | Purpose |
 |---|---|
-| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.4) |
+| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.5) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
 | [docs/development-environment.md](docs/development-environment.md) | Running the Podman environment, the application and the test suites |
@@ -117,12 +117,12 @@ python3 scripts/check-contracts.py
 
 | Phase | Status |
 |---|---|
-| 0: Architecture and contracts | **Complete** (specification 2.4) |
+| 0: Architecture and contracts | **Complete** (specification 2.5) |
 | 1: Rootless Podman development environment | **Complete.** `smarthostctl verify` passes all 176 checks (including the persistent pod lifecycle and the DSN spool with the Phase 5 daemon); `verify --clean` additionally proves a start from destroyed volumes. |
 | 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 177/177 tests pass (including the Phase 5 opt-out API and operator commands). |
 | 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 295 pytest tests and the 10,000-address end-to-end run pass. |
 | 4: Go/Postfix delivery pipeline | **Complete.** Leased send-job claiming, exactly-once message creation, suppression lookup, VERP, tracking, MIME and RFC 8058 headers, authenticated submission through OpenDKIM, queue-id capture with content purge and `message_submitted` metering, Postfix log ingestion with persistent cursors, D-27 reconciliation, pacing. `smarthostctl test phase4` (Go unit + PostgreSQL integration) and `test phase4-e2e` (real Postfix/OpenDKIM/Mailpit, crash/restart, 10,000 recipients) pass. |
-| 5: Inbound DSN, complaint and global suppression processing | **Complete.** D-30 (spec 2.4): global suppressions with provenance, the trusted-client opt-out API and operator capability, RFC 3464/6533 DSN and ARF parsing, correlation (VERP, ENVID, Message-ID, queue id, corroborated recipient), conservative classification, the unmatched-DSN operator workflow, spool claim/reclaim/retention. `smarthostctl test phase5` and `test phase5-e2e` (real Postfix :25 and spool) pass. |
+| 5: Inbound DSN, complaint and global suppression processing | **Complete** (v0.1.5; the spec 2.5 corrections D-36–D-38 are unreleased). D-30: global suppressions with provenance, the trusted-client opt-out API with durable request idempotency and operator capability, RFC 3464/6533 DSN and ARF parsing, correlation only by Smarthost identifiers (VERP, ENVID, Message-ID, queue id; never by recipient), conservative classification, the unmatched-DSN operator workflow, spool claim/reclaim/retention. `smarthostctl test phase5` and `test phase5-e2e` (real Postfix :25 and spool) pass. |
 | 6–9 | Not started |
 
 See [CHANGELOG.md](CHANGELOG.md).

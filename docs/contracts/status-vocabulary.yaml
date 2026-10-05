@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.4). Every enum value used in the database, the /v1 API,
+# (specification 2.5). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.2.0"
-specification_version: "2.4"
+vocabulary_version: "2.3.0"
+specification_version: "2.5"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -360,7 +360,7 @@ event_source:
       key_rule: null (repeated opens/clicks are legitimate distinct events)
   event_metadata: >-
     DSN-derived events (dsn_spool, unmatched_dsn_resolution) carry metadata_json.correlation
-    (verp | envelope_id | message_id | queue_id | recipient | operator), the DSN action,
+    (verp | envelope_id | message_id | queue_id | operator), the DSN action,
     reporting_mta and the spool key; complaint events carry the ARF feedback_type.
 
 failure_scope:
@@ -475,6 +475,13 @@ suppression_reason:
         The recipient explicitly asked not to receive email from any source using this
         Smarthost installation, reported by a trusted client (source_client_id). Never an
         ordinary list, newsletter, campaign or client unsubscribe.
+
+global_suppression_request_operation:
+  description: >-
+    global_suppression_requests.operation (D-38): the idempotent client operation an
+    Idempotency-Key was used for. Lifting is naturally idempotent and records no request row.
+  values:
+    create_global_opt_out: {origin: contract, meaning: "POST /v1/global-suppressions (201 created, or 200 when this client's opt-out of the address was already active)."}
 
 suppression_scope_type:
   values:

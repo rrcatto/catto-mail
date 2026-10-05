@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.5
-  summary: Email validation and tracked delivery API (specification 2.4 contract).
+  version: 1.0.0-draft.6
+  summary: Email validation and tracked delivery API (specification 2.5 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.4), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.5), which wins on
     any conflict. Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
 
@@ -374,11 +374,15 @@ paths:
         list or newsletter unsubscribe. The address is normalised (D-18/D-32) and
         suppressed globally with reason `recipient_global_opt_out`; no other
         reason and no domain scope can be requested. Requires the operator-granted
-        capability (403 without it, and for `pending_approval` or `suspended`
-        clients). Returns 201 with the new opt-out, 201 with
-        `Idempotent-Replayed: true` for a replay, or 200 with the existing opt-out
-        when this client already has an active one for the address. The
-        representation never reveals other suppressions of the address.
+        capability (403 without it). As a do-not-contact operation it is accepted
+        in every client status that authenticates, including `pending_approval`
+        and `suspended` (D-37). Returns 201 with the new opt-out, or 200 with the
+        existing opt-out when this client already has an active one for the
+        address. Each accepted request is recorded durably (D-38): replaying the
+        same Idempotency-Key with the same body returns that request's original
+        status and opt-out with `Idempotent-Replayed: true`, even after the
+        opt-out was lifted, and never creates a new opt-out. The representation
+        never reveals other suppressions of the address.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -388,9 +392,12 @@ paths:
             schema: {$ref: '#/components/schemas/GlobalOptOutCreateRequest'}
       responses:
         '200':
-          description: This client already has an active opt-out for the address; it is returned unchanged.
+          description: >-
+            This client already had an active opt-out for the address; it is returned
+            unchanged (or an idempotent replay of such a request).
           headers:
             Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/GlobalOptOut'}
@@ -439,7 +446,8 @@ paths:
         returns it unchanged. Only the opt-out is lifted: any other active
         suppression of the address (a hard bounce, a complaint, an operator block
         or another client's opt-out) still prevents sending. Requires the
-        capability (403 without it).
+        capability and an `active` or `throttled` client (403 otherwise, including
+        for `pending_approval` and `suspended` clients; D-37).
       parameters:
         - $ref: '#/components/parameters/ResourceId'
       responses:
@@ -569,8 +577,7 @@ components:
     GlobalSuppressionForbidden:
       description: >-
         The client does not hold the operator-granted global-opt-out capability,
-        or may not create work in its current status (`pending_approval` or
-        `suspended`).
+        or (lifting only) is `pending_approval` or `suspended`.
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}

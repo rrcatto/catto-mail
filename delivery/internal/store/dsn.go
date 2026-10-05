@@ -22,7 +22,7 @@ import (
 // DSNs far smaller).
 const maxStoredRaw = 512 << 10
 
-// recipientWindow bounds the recipient-based correlation (the weakest level).
+// recipientWindow bounds the recipient-based candidate list of an unmatched DSN.
 const recipientWindow = 7 * 24 * time.Hour
 
 // DSNInput is one claimed spool file.
@@ -51,6 +51,7 @@ type DSNResult struct {
 	EventType    string
 	Correlation  string
 	Reason       string
+	Candidates   int // recipient-based operator hints stored with an unmatched DSN
 	Suppressions []CreatedSuppression
 }
 
@@ -78,14 +79,24 @@ func (t *tx) messagesWhere(ctx context.Context, where string, args ...any) ([]DS
 	return pgx.CollectRows(rows, scanDSNMessage)
 }
 
-// correlate resolves the evidence to exactly one message, strongest first
-// (VERP token, envelope id, Smarthost Message-ID, Postfix queue id). An
-// identifier naming no message is no evidence; identifiers naming different
-// messages are a conflict (never guessed). Only without any such identifier is
-// the recipient address used, and only with corroboration: exactly one message
-// to that address within recipientWindow, with a queue id, whose job sender is
-// the From of the returned original headers.
-func (t *tx) correlate(ctx context.Context, e dsn.Evidence, received time.Time) (*DSNMessage, string, string, error) {
+// DSNCandidate is a message an uncorrelated DSN might concern, found only by its
+// recipient address. It is diagnostic information for the operator (stored in
+// unmatched_dsns.detail_json.candidates), never correlation evidence (D-36).
+type DSNCandidate struct {
+	MessageID     string `json:"message_id"`
+	SenderMatches bool   `json:"sender_matches_returned_from"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// correlate resolves the evidence to exactly one message using only strong,
+// Smarthost-issued identifiers, strongest first: VERP token, envelope id,
+// Smarthost Message-ID, Postfix queue id. An identifier naming no message is no
+// evidence; identifiers naming different messages are a conflict (never
+// guessed). The recipient address (even with a matching returned From) is never
+// enough (D-36): suppressions are global, so a forged DSN must not be able to
+// suppress an address. Without a strong identifier the DSN stays unmatched for
+// the operator, with recipient-based candidates as diagnostic information.
+func (t *tx) correlate(ctx context.Context, e dsn.Evidence, received time.Time) (*DSNMessage, string, string, []DSNCandidate, error) {
 	type hit struct {
 		method string
 		msg    DSNMessage
@@ -107,69 +118,70 @@ func (t *tx) correlate(ctx context.Context, e dsn.Evidence, received time.Time) 
 	}
 	if e.VERPToken != "" {
 		if err := try("verp", `WHERE m.verp_token = $1`, e.VERPToken); err != nil {
-			return nil, "", "", err
+			return nil, "", "", nil, err
 		}
 	}
 	if e.EnvelopeID != "" {
 		if err := try("envelope_id", `WHERE m.id = $1::uuid`, e.EnvelopeID); err != nil {
-			return nil, "", "", err
+			return nil, "", "", nil, err
 		}
 	}
 	for _, id := range e.MessageIDs {
 		if err := try("message_id", `WHERE m.id = $1::uuid`, id); err != nil {
-			return nil, "", "", err
+			return nil, "", "", nil, err
 		}
 	}
 	if e.QueueID != "" {
 		if err := try("queue_id", `WHERE m.postfix_queue_id = $1 AND m.created_at <= $2::timestamptz + interval '1 hour'`, e.QueueID, received); err != nil {
-			return nil, "", "", err
+			return nil, "", "", nil, err
 		}
 	}
 	var found *hit
 	for i := range hits {
 		h := &hits[i]
 		if strings.HasSuffix(h.method, "_ambiguous") {
-			return nil, "", "ambiguous " + strings.TrimSuffix(h.method, "_ambiguous") + " correlation", nil
+			return nil, "", "ambiguous " + strings.TrimSuffix(h.method, "_ambiguous") + " correlation", nil, nil
 		}
 		if found == nil {
 			found = h
 		} else if found.msg.ID != h.msg.ID {
-			return nil, "", fmt.Sprintf("conflicting correlation evidence (%s and %s name different messages)", found.method, h.method), nil
+			return nil, "", fmt.Sprintf("conflicting correlation evidence (%s and %s name different messages)", found.method, h.method), nil, nil
 		}
 	}
 	if found != nil {
-		return &found.msg, found.method, "", nil
+		return &found.msg, found.method, "", nil, nil
 	}
-	// Recipient address combined with other evidence (never the address alone).
+	if len(hits) == 0 && e.VERPToken == "" && e.EnvelopeID == "" && len(e.MessageIDs) == 0 && e.QueueID == "" {
+		cands, err := t.candidates(ctx, e, received)
+		return nil, "", "no Smarthost identifier (VERP token, envelope id, Message-ID or queue id)", cands, err
+	}
+	cands, err := t.candidates(ctx, e, received)
+	return nil, "", "the Smarthost identifiers in the DSN name no message", cands, err
+}
+
+// candidates lists, for the operator only, recent messages to the recipient
+// the report names (at most 5, within recipientWindow, with a queue id).
+func (t *tx) candidates(ctx context.Context, e dsn.Evidence, received time.Time) ([]DSNCandidate, error) {
 	if len(e.Recipients) != 1 {
-		if len(e.Recipients) == 0 {
-			return nil, "", "no correlation evidence", nil
-		}
-		return nil, "", "no identifier and several recipients", nil
-	}
-	if e.ReturnedFrom == "" {
-		return nil, "", "no identifier; recipient address without corroborating sender", nil
+		return nil, nil
 	}
 	rows, err := t.Query(ctx, dsnMessageSelect+`
  WHERE m.recipient_address = $1 AND m.postfix_queue_id IS NOT NULL
    AND m.created_at BETWEEN $2::timestamptz - make_interval(secs => $3) AND $2::timestamptz + interval '1 hour'
- LIMIT 2`, e.Recipients[0], received, recipientWindow.Seconds())
+ ORDER BY m.created_at DESC LIMIT 5`, e.Recipients[0], received, recipientWindow.Seconds())
 	if err != nil {
-		return nil, "", "", err
+		return nil, err
 	}
 	ms, err := pgx.CollectRows(rows, scanDSNMessage)
 	if err != nil {
-		return nil, "", "", err
+		return nil, err
 	}
-	switch {
-	case len(ms) == 0:
-		return nil, "", "no message to the reported recipient", nil
-	case len(ms) > 1:
-		return nil, "", "several candidate messages for the reported recipient", nil
-	case !strings.EqualFold(ms[0].SenderEmail, e.ReturnedFrom):
-		return nil, "", "the only candidate message has a different sender", nil
+	out := make([]DSNCandidate, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, DSNCandidate{MessageID: m.ID, CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
+			SenderMatches: e.ReturnedFrom != "" && strings.EqualFold(m.SenderEmail, e.ReturnedFrom)})
 	}
-	return &ms[0], "recipient", "", nil
+	return out, nil
 }
 
 // IngestDSN records one spool file exactly once (key = Maildir unique name):
@@ -193,13 +205,13 @@ SELECT EXISTS (SELECT 1 FROM message_events WHERE event_source = 'dsn_spool' AND
 		res.Result = DSNAlready
 		return res, nil
 	}
-	msg, method, why, err := t.correlate(ctx, in.Evidence, in.ReceivedAt)
+	msg, method, why, cands, err := t.correlate(ctx, in.Evidence, in.ReceivedAt)
 	if err != nil {
 		return res, err
 	}
 	if msg == nil {
-		res.Result, res.Reason = DSNUnmatched, why
-		if err := t.insertUnmatched(ctx, in, why); err != nil {
+		res.Result, res.Reason, res.Candidates = DSNUnmatched, why, len(cands)
+		if err := t.insertUnmatched(ctx, in, why, cands); err != nil {
 			return res, err
 		}
 		return res, t.commit(ctx)
@@ -288,7 +300,7 @@ func occurredAt(r *dsn.Report, out dsn.Outcome, received, created time.Time) tim
 }
 
 // insertUnmatched keeps an uncorrelated report for the operator (D-05).
-func (t *tx) insertUnmatched(ctx context.Context, in DSNInput, why string) error {
+func (t *tx) insertUnmatched(ctx context.Context, in DSNInput, why string, cands []DSNCandidate) error {
 	r := in.Report
 	out := dsn.Interpret(r, "")
 	raw, lossy, truncated := storableRaw(in.Raw)
@@ -323,6 +335,9 @@ func (t *tx) insertUnmatched(ctx context.Context, in DSNInput, why string) error
 	}
 	if len(r.Recipients) > 1 {
 		detail["recipient_blocks"] = len(r.Recipients)
+	}
+	if len(cands) > 0 { // operator hints only (D-36): never applied automatically
+		detail["candidates"] = cands
 	}
 	if lossy {
 		detail["raw_lossy_utf8"] = true
