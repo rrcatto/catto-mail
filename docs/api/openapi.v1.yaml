@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.6
-  summary: Email validation and tracked delivery API (specification 2.7 contract).
+  version: 1.0.0-draft.7
+  summary: Email validation and tracked delivery API (specification 2.8 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.7), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.8), which wins on
     any conflict. Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
 
@@ -330,16 +330,20 @@ paths:
     post:
       tags: [Webhooks]
       operationId: testWebhook
-      summary: Record a `webhook.test` event for the client's webhook endpoint(s).
+      summary: Record a `webhook.test` event for one of the client's webhook endpoints.
       description: >-
-        Endpoints are registered per client through the client dashboard; API
-        management endpoints are not part of the initial v1 set. The test event
-        is written to the transactional outbox and delivered by the Symfony
-        webhook worker. With no body, every enabled endpoint receives it. Until
-        webhook support is implemented (Phase 7) the endpoint returns 501.
+        Endpoints are registered per client through the client dashboard (or the
+        audited console); endpoint management is not part of the public API. The
+        request names exactly one endpoint (`webhook_endpoint_id`, required). The
+        test event is written to the transactional outbox and delivered
+        asynchronously by the Symfony webhook worker to that endpoint only; the
+        response returns its id at once and the request never calls the endpoint.
+        An endpoint that is not this client's is 404 (as if it did not exist); a
+        disabled endpoint is 409 `webhook-endpoint-disabled` and records nothing.
+        `webhook.test` ignores subscriptions.
       x-smarthost-available-from-phase: 7
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/WebhookTestRequest'}
@@ -349,19 +353,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WebhookTestResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409':
-          description: No enabled webhook endpoint is registered for this client.
+          description: The webhook endpoint is disabled (`webhook-endpoint-disabled`); no event is recorded.
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
-        '501':
-          description: Webhook support not yet implemented.
-          content:
-            application/problem+json:
-              schema: {$ref: '#/components/schemas/Problem'}
 
   /global-suppressions:
     post:
@@ -467,18 +468,31 @@ webhooks:
       operationId: receiveSmarthostEvent
       summary: Signed event delivered to a registered client webhook endpoint.
       description: |
-        Delivered as an HTTPS POST by the Smarthost webhook worker. Headers:
+        Delivered as an HTTPS POST by the Smarthost webhook worker (specification
+        2.8). The body is a `WebhookEvent` in UTF-8 JSON. Headers:
 
-        * `Smarthost-Event-Id`: the event `id` (use for de-duplication; delivery is at-least-once).
+        * `Content-Type: application/json`; `User-Agent: Catto-Mail-Smarthost/<version>`.
+        * `Smarthost-Event-Id`: the event `id`. Delivery is **at-least-once**: a
+          request whose outcome Smarthost could not record (timeout, worker
+          restart) is sent again, so de-duplicate on this id.
+        * `Smarthost-Event-Type`: the event `type`.
+        * `Smarthost-Delivery-Id` and `Smarthost-Delivery-Attempt` (1, 2, ...):
+          diagnostics only; the same event keeps its id across attempts.
         * `Smarthost-Signature`: `t=<unix-seconds>,v1=<hex>` where `v1` is
           HMAC-SHA256 over the exact bytes `<t>.<raw request body>` using the
           endpoint's signing secret. While a rotated-out secret is still within
           its overlap window, a second `v1=` value signed with the previous
-          secret is included; accept the request if any value matches.
-          Receivers should reject timestamps older than 5 minutes.
+          secret is included; accept the request if any value matches. Compare
+          in constant time, verify before parsing the JSON, and reject
+          timestamps more than 5 minutes from your clock.
 
-        Any 2xx response acknowledges delivery. Other responses and timeouts
-        are retried with exponential backoff up to a configured limit.
+        Any 2xx response acknowledges delivery; acknowledge quickly and process
+        asynchronously. 408, 425, 429, 5xx, timeouts and connection failures are
+        retried with exponential backoff (a `Retry-After` within the configured
+        maximum is honoured) up to `APP_WEBHOOK_MAX_ATTEMPTS`; other responses,
+        including other 4xx and any 3xx (redirects are never followed), fail
+        the delivery without retry. Webhooks are only sent to destinations that
+        resolve to public addresses. Endpoints are never disabled automatically.
       parameters:
         - name: Smarthost-Signature
           in: header
@@ -1166,6 +1180,7 @@ components:
     WebhookTestRequest:
       type: object
       additionalProperties: false
+      required: [webhook_endpoint_id]
       properties:
         webhook_endpoint_id: {$ref: '#/components/schemas/Uuid'}
 

@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.7 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.8 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -266,6 +266,7 @@ erDiagram
 | `disposable_domains` | global reference data | none |
 | `unmatched_dsns` | operator only | none until matched |
 | `delivery_ingest_cursors` | internal (Go) | none |
+| `webhook_worker_heartbeats` | internal (webhook worker) | none |
 | `audit_log` | operator | none |
 
 Another client's resource returns **404**. Dashboard access is checked by Symfony voters: client
@@ -315,7 +316,11 @@ Other indexes:
 * opt-out requests by suppression (`global_suppression_requests_suppression_idx`), which serves the foreign key;
 * unpurged content;
 * abandoned collecting jobs;
-* the webhook outbox (pending fan-out, once-only).
+* the webhook outbox (pending fan-out, once-only);
+* webhook dashboards (Phase 7, added after the query-plan review showed whole-table scans):
+  `webhook_deliveries_endpoint_status_idx` (per-endpoint counts), `webhook_deliveries_created_idx`
+  and `webhook_events_created_idx` (cross-client delivery and outbox lists, the bounded summary);
+* worker heartbeats by recency (`webhook_worker_heartbeats_seen_idx`).
 
 ## 5. Key table-level rules (enforced by CHECK)
 
@@ -369,6 +374,7 @@ grants below. No runtime role has DDL rights.
 | webhook_endpoints | S I U | S | – | – |
 | webhook_events | S I | S U | I | I |
 | webhook_deliveries | S | S I U | – | – |
+| webhook_worker_heartbeats | S | S I U | – | – |
 | audit_log | S I D¹ | I | I | I |
 
 ¹ `DELETE` is used only by the configured retention commands, and only when a retention period

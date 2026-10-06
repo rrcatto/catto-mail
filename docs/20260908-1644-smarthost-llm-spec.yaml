@@ -1,6 +1,6 @@
 project:
   name: Smarthost
-  specification_version: "2.7"
+  specification_version: "2.8"
   specification_date: "2026-10-06"
   original_specification_date: "2026-09-08"
   version_note: >-
@@ -364,6 +364,7 @@ project_boundaries:
       - webhook_endpoints
       - webhook_events
       - webhook_deliveries
+      - webhook_worker_heartbeats
       - audit_log
     client_application_owns:
       - mailing_lists
@@ -630,7 +631,7 @@ api:
       purpose: retrieve append-only event history
     - method: POST
       path: /webhooks/test
-      purpose: test client webhook endpoint after webhook support is added
+      purpose: record a webhook.test outbox event for exactly one of the client's endpoints (webhook_endpoint_id required; foreign 404, disabled 409 webhook-endpoint-disabled); 202 with webhook_event_id; never calls the endpoint synchronously
     - method: POST
       path: /global-suppressions
       purpose: report an explicit recipient global opt-out (trusted clients with can_submit_global_suppressions; D-30)
@@ -663,6 +664,71 @@ api:
       Suppressions produce no webhook event of their own; in particular a recipient global
       opt-out produces no unsubscribe event (D-30). message.hard_bounced and message.complained
       are written in the transaction of the message state change that causes them.
+    delivery_contract:
+      body: >-
+        One WebhookEvent {id, type, created_at, data} per request (application/json). data is the
+        subject as the API presents it when the worker fans the event out: the validation job, the
+        send job, {message, event} for message.* (the first hard_bounce or complaint event), {}
+        for webhook.test. Never secrets, API keys, tracking or VERP tokens. The exact bytes are
+        stored once per delivery (payload_hash = SHA-256 of them) and re-sent unchanged.
+      headers: >-
+        Content-Type application/json; User-Agent Catto-Mail-Smarthost/<software version>;
+        Smarthost-Event-Id (the de-duplication key); Smarthost-Event-Type; Smarthost-Delivery-Id
+        and Smarthost-Delivery-Attempt (diagnostics only); Smarthost-Signature
+        t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body bytes>"> with one additional v1 per
+        previous secret during a rotation overlap.
+      receiver_rules: >-
+        verify before parsing; constant-time comparison; reject timestamps more than 300 seconds
+        from the receiver clock; de-duplicate on Smarthost-Event-Id; tolerate out-of-order
+        arrival (created_at) and unknown event types; acknowledge with 2xx quickly.
+      semantics: >-
+        at-least-once. Exactly one delivery record per (event, endpoint), enforced by the unique
+        index; the HTTP request may be repeated when an outcome was not recorded (timeout, worker
+        stop). Smarthost never claims exactly-once delivery.
+      fan_out: >-
+        to the client's endpoints that are enabled and subscribed to the event type at fan-out
+        time; webhook.test only to the one endpoint it names (subject_type webhook_endpoint), if
+        that endpoint is still enabled, regardless of subscriptions. There is no client-wide test.
+      retry: >-
+        2xx delivers. 408, 425, 429, 5xx and transport errors (timeout, refused/reset connection,
+        TLS, DNS temporary failure) retry after min(APP_WEBHOOK_RETRY_MAX_SECONDS,
+        APP_WEBHOOK_RETRY_BASE_SECONDS * 2^(attempt-1)) +-10 percent, or Retry-After clamped to
+        that maximum. Other 4xx and every 3xx fail permanently (redirects are never followed).
+        After APP_WEBHOOK_MAX_ATTEMPTS the delivery is failed. Endpoints are never disabled
+        automatically; failed deliveries remain visible to the client and operator.
+      destinations: >-
+        Resolved before each attempt; refused when any address is loopback, unspecified,
+        private, carrier-grade NAT, link-local (including metadata 169.254.169.254), multicast,
+        reserved, documentation, IPv6 unique-local or IPv4-embedded. The connection is pinned
+        to the checked address; https only in production. APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS
+        (development/test only; a startup error in production) names fixture hosts that may be
+        private and use http.
+      limits: >-
+        APP_WEBHOOK_TIMEOUT_SECONDS per request; at most 64 KiB of the response read and 1 KiB
+        kept (last_response_excerpt); requests of a batch are sent concurrently.
+      worker: >-
+        smarthost:webhook:work in smarthost-webhook-worker, database role smarthost_webhook
+        only. Each round fans out pending events, claims due deliveries with FOR UPDATE SKIP
+        LOCKED and a lease (APP_WEBHOOK_LEASE_SECONDS > APP_WEBHOOK_TIMEOUT_SECONDS), sends with
+        no transaction open, and records each outcome only while still holding the claim (the
+        incremented attempt_count is the fencing token). Expired leases are reclaimed. SIGTERM
+        stops new claims. LISTEN smarthost_webhook_work plus polling
+        (APP_WEBHOOK_POLL_INTERVAL_SECONDS). Liveness file for the container health check and a
+        webhook_worker_heartbeats row per worker for the dashboards.
+      management: >-
+        Client admins (or PLATFORM.CLIENT.MANAGE) create, edit, enable/disable, rotate and test
+        endpoints in the client dashboard, through the same audited service as the console
+        commands; a raw secret is shown once with Cache-Control no-store. Decision
+        (specification 2.8): there is no public /v1 endpoint-management (CRUD) API; endpoint
+        setup is administration (dashboard or audited console), while runtime integration uses
+        the public API and the received webhooks.
+      retention: >-
+        APP_RETENTION_WEBHOOK_DELIVERIES_DAYS; empty means no automatic deletion. Delivery history
+        stays durable until a production retention policy sets a period (compliance.retention).
+      production_settings: >-
+        Production APP_WEBHOOK_* values (attempts, timeouts, lease, backoff) are chosen in Phase 8.
+        Later hardening, not required for correctness now: a distinct connect timeout and a
+        response-header size bound.
     events_initial:
       - validation.completed
       - validation.failed
@@ -1414,6 +1480,12 @@ suppression_and_reputation:
       - address scope only; a client can never create a domain suppression
       - only reason recipient_global_opt_out; system reasons cannot be forged
       - the representation never reveals other clients' or system suppressions of the address
+    no_address_lookup: >-
+      Decision (specification 2.8): there is no API that lets a client ask whether an arbitrary
+      address is suppressed. Smarthost is authoritative for transport suppression and enforces it
+      at send time; the client learns the outcome through its send/message state and events
+      (message_suppressed, suppressed messages). Global suppression state is never exposed as an
+      address-query oracle.
   provider_reputation:
     future_metrics:
       - rolling_bounce_rate
@@ -1768,8 +1840,23 @@ schema:
         - next_attempt_at
         - claimed_by
         - lease_expires_at
+        - last_attempt_at
+        - last_response_status
+        - last_response_excerpt
         - last_error
         - delivered_at
+        - updated_at
+    webhook_worker_heartbeats:
+      purpose: one row per webhook worker process (operator health, Phase 7)
+      key_fields:
+        - worker_id
+        - version
+        - started_at
+        - last_seen_at
+        - stopped_at
+        - attempts
+        - delivered
+        - events_fanned_out
     audit_log:
       key_fields:
         - id
@@ -1855,6 +1942,7 @@ security:
     - sign payloads
     - timestamp signatures
     - allow clients to rotate webhook secrets
+    - deliver only to public destinations with the resolved address pinned and redirects refused (specification 2.8)
     - store signing secrets encrypted at rest with application-managed keys
   dashboard_authentication:
     - human users authenticate as users through Symfony Security, never with API keys
@@ -1895,9 +1983,12 @@ compliance:
       - unmatched DSNs
       - audit logs
       - usage records
+      - webhook delivery history (APP_RETENTION_WEBHOOK_DELIVERIES_DAYS, specification 2.8)
     rule: >-
       Phase 0 hard-codes no final long-term retention period for these categories; each is
       configurable and the operator's compliance specification sets the production policy.
+      Empty means no automatic deletion: webhook deliveries (and their outbox events) stay durable
+      until a production retention policy sets a period. No deletion command exists for them yet.
   explicit_note: >-
     Technical validation does not establish lawful consent. Consent-dependent sending requires the
     operator's own legal/compliance review.
@@ -2059,7 +2150,7 @@ user_interfaces:
       - unmatched DSNs (status and classification filters), detail with parsed evidence and candidates, match request and dismissal
       - suppressions (address, reason, state and scope filters, operator provenance), operator block creation, lifting with a required note
       - audit log (action, actor, target and date filters; secret-like keys redacted on display)
-      - webhook outbox state, labelled as outbox state only until Phase 7 delivers webhooks
+      - webhook deliveries (pending, retrying, delivered, failed; client, endpoint and event filters), outbox events and worker heartbeats (Phase 7; outbox state only before it)
       - users (create, enable/disable, send a sign-in link, grant and revoke roles, add/change/remove client memberships) and roles & permissions (ADMIN only)
     lists: >-
       keyset (cursor) pagination over (sort expression, id); sort names and filter keys are
@@ -2073,7 +2164,7 @@ user_interfaces:
       production error pages are generic
     not_in_phase_6:
       - validation upload in the browser (jobs are created through the API)
-      - API key and webhook endpoint management in the browser (audited console commands remain; users, memberships and roles are managed in the browser since 2.7)
+      - API key management in the browser (audited console commands remain; users, memberships and roles are managed in the browser since 2.7; webhook endpoints since 2.8)
       - Postfix queue depth and snapshot age (the snapshots are read only by the Go daemon; the overview shows the messages Smarthost considers to be in Postfix)
       - LiveComponent (server-rendered GET forms and links did not need it)
 
@@ -2239,16 +2330,23 @@ implementation_phases:
   - phase: 7
     name: first_client_api_integration
     objective: make the first client application a real external Smarthost client
-    deliverables:
-      - client-side Smarthost API client
-      - API-key configuration
-      - validation job submission/polling
+    client_integration_expectations:
+      # Contract-level expectations only; the client application's own repository decides how.
+      - public API with the client's API key, kept as a secret
+      - validation job submission and result retrieval (webhook and/or polling)
       - batched send-job submission with rendered content
-      - webhook receiver
+      - webhook receipt with signature verification and event-id de-duplication
       - external-reference mapping
+      - polling reconciliation when a webhook is missed
     acceptance:
       - the client performs the full workflow without direct Smarthost DB access
       - Smarthost can be restarted/deployed independently of the client
+    smarthost_side: >-
+      Specification 2.8: the real webhook worker (webhooks.delivery_contract), POST
+      /v1/webhooks/test, dashboard webhook management and delivery visibility, proven by a
+      deterministic external test client (API-only driver and an independent webhook receiver,
+      smarthostctl test phase7-e2e). Integration of the real first client application in its own
+      repository remains outstanding.
   - phase: 8
     name: controlled_production_launch
     objective: move from captured mail to live Internet delivery with reputation safeguards
@@ -2438,5 +2536,21 @@ revision_history:
       browser. New tables roles, role_permissions, user_roles, auth_login_tokens; new APP_ADMIN_EMAIL,
       APP_MAIL_*, APP_LOGIN_LINK_TTL_SECONDS settings; the development public URL is
       https://localhost:8443 so emailed links open in a browser.
+    decisions_incorporated: []
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.8"
+    date: "2026-10-06"
+    summary: >-
+      Phase 7 Smarthost side. Adds webhooks.delivery_contract (body, headers, signature input,
+      receiver rules, at-least-once semantics, fan-out timing, webhook.test addressing, retry and
+      permanent-failure rules, SSRF destination policy with address pinning and no redirects,
+      limits, worker leases/fencing/heartbeats, dashboard management). Schema:
+      webhook_deliveries.updated_at, last_attempt_at, last_response_excerpt and claim
+      consistency checks; webhook.test always names exactly one endpoint (webhook_endpoint_id
+      required; a database check ties webhook.test to the webhook_endpoint subject);
+      webhook_worker_heartbeats and dashboard indexes; APP_RETENTION_WEBHOOK_DELIVERIES_DAYS (empty:
+      no automatic deletion). Decisions: no public endpoint-management API, no suppression-lookup
+      API, production APP_WEBHOOK_* values deferred to Phase 8. Environment: APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS. The real
+      first-client integration remains outstanding.
     decisions_incorporated: []
     decision_log: docs/architecture/open-decisions.md

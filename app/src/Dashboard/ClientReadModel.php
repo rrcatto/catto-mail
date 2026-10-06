@@ -55,6 +55,8 @@ final class ClientReadModel
 
     public const USAGE_SORTS = ['occurred' => ['u.occurred_at', 'timestamptz']];
 
+    public const DELIVERY_SORTS = ['created' => ['d.created_at', 'timestamptz']];
+
     /** Columns of the validation result export: exactly the OpenAPI ValidationAddress fields. */
     public const EXPORT_COLUMNS = [
         'id', 'external_address_reference', 'original_address', 'normalized_address', 'syntax_status', 'domain_status',
@@ -385,6 +387,61 @@ final class ClientReadModel
                    dkim_selector, dkim_status, created_at
               FROM sending_domains WHERE client_id = ? ORDER BY domain
             SQL, [$clientId]);
+    }
+
+    /**
+     * The client's webhook endpoints with delivery counts (never secrets).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function webhookEndpoints(string $clientId): array
+    {
+        return $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT e.id::text AS id, e.url, e.status, e.subscribed_event_types, e.signing_secret_created_at, e.created_at, e.updated_at,
+                   e.previous_signing_secret_expires_at IS NOT NULL AND e.previous_signing_secret_expires_at > now() AS rotation_overlap,
+                   e.previous_signing_secret_expires_at,
+                   (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_endpoint_id = e.id AND d.status = 'delivered'
+                                                              AND d.created_at > now() - interval '7 days') AS delivered,
+                   (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_endpoint_id = e.id AND d.status = 'pending') AS pending,
+                   (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_endpoint_id = e.id AND d.status = 'failed'
+                                                              AND d.created_at > now() - interval '7 days') AS failed
+              FROM webhook_endpoints e WHERE e.client_id = ? ORDER BY e.created_at
+            SQL, [$clientId]);
+    }
+
+    /**
+     * This client's webhook deliveries (outbox state and HTTP attempts).
+     *
+     * @param array{status?: string, endpoint?: string} $filters status: pending, retrying, delivered, failed
+     *
+     * @return array{rows: list<array<string, mixed>>, next: ?string}
+     */
+    public function webhookDeliveries(string $clientId, array $filters, Listing $listing): array
+    {
+        $where = ['d.client_id = ?'];
+        $params = [$clientId];
+        self::deliveryStatusFilter($where, $filters['status'] ?? '');
+        if (self::isUuid($filters['endpoint'] ?? '')) {
+            $where[] = 'd.webhook_endpoint_id = ?';
+            $params[] = $filters['endpoint'];
+        }
+
+        return $this->keyset->page(<<<'SQL'
+            d.id::text AS id, d.webhook_event_id::text AS event_id, d.event_type, d.status, d.attempt_count, d.next_attempt_at,
+            d.last_attempt_at, d.last_response_status, d.last_error, d.delivered_at, d.created_at, e.url
+            SQL, 'webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.webhook_endpoint_id', $where, $params, $listing, self::DELIVERY_SORTS, 'd.id');
+    }
+
+    /** @param list<string> $where */
+    public static function deliveryStatusFilter(array &$where, string $status): void
+    {
+        $where[] = match ($status) {
+            'pending' => "d.status = 'pending' AND d.attempt_count = 0",
+            'retrying' => "d.status = 'pending' AND d.attempt_count > 0",
+            'delivered' => "d.status = 'delivered'",
+            'failed' => "d.status = 'failed'",
+            default => 'true',
+        };
     }
 
     /**

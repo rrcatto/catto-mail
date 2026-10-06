@@ -9,7 +9,7 @@ browser would:
      requested through nginx: recorded open and click events, the redirect goes
      exactly to the stored target, open-redirect attempts fail, the unsubscribe
      link is not tracked, unknown tokens get the same pixel / 404;
-  D  dashboard: form login with CSRF, client pages, message timeline with the
+  D  dashboard: passwordless sign-in (emailed link from Mailpit), client pages, message timeline with the
      recorded events, CSV export, tenant isolation (client B's user gets 404 for
      client A's pages), operator-only area (403 for a client user), operator
      pages, the unmatched-DSN workflow (match request recorded, no event made),

@@ -1,5 +1,7 @@
-# Two identities (spec postgres.roles_and_privileges, D-15):
+# Three identities (spec postgres.roles_and_privileges, D-15):
 #   default - smarthost_app: the web process and console commands (DML only);
+#   webhook - smarthost_webhook: the webhook worker only (smarthost:webhook:work), with the
+#             webhook-table DML and read access for payloads of schema.md §6;
 #   owner   - smarthost_owner: Doctrine migrations only (config/packages/doctrine_migrations.yaml).
 # Connections are lazy, so a process only resolves the credentials it actually uses.
 doctrine:
@@ -21,6 +23,16 @@ doctrine:
                 charset: utf8
                 schema_filter: '~^(?!doctrine_migration_versions$)~'
                 profiling_collect_backtrace: '%kernel.debug%'
+            webhook:
+                driver: pdo_pgsql
+                host: '%env(SMARTHOST_DB_HOST)%'
+                port: '%env(int:SMARTHOST_DB_PORT)%'
+                dbname: '%env(SMARTHOST_DB_NAME)%'
+                user: '%env(APP_WEBHOOK_DB_USER)%'
+                password: '%env(secret:APP_WEBHOOK_DB_PASSWORD)%'
+                sslmode: '%env(SMARTHOST_DB_SSLMODE)%'
+                server_version: '16'
+                charset: utf8
             owner:
                 driver: pdo_pgsql
                 host: '%env(SMARTHOST_DB_HOST)%'
@@ -33,8 +45,11 @@ doctrine:
                 charset: utf8
     orm:
         default_entity_manager: default
+        # Controllers take ids, never entities. The entity argument resolver would call
+        # ManagerRegistry::getManagerForClass(), which builds every entity manager - including
+        # the worker-only 'webhook' one, whose credentials the web container does not have.
         controller_resolver:
-            auto_mapping: false
+            enabled: false
         entity_managers:
             default:
                 connection: default
@@ -53,6 +68,17 @@ doctrine:
                     tenant:
                         class: App\Tenant\TenantFilter
                         enabled: false
+            # The webhook worker's read model for payloads (same mapping, its own role).
+            webhook:
+                connection: webhook
+                naming_strategy: doctrine.orm.naming_strategy.underscore
+                mappings:
+                    App:
+                        type: attribute
+                        is_bundle: false
+                        dir: '%kernel.project_dir%/src/Entity'
+                        prefix: 'App\Entity'
+                        alias: App
 
 when@prod:
     doctrine:

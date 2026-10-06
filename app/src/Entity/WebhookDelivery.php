@@ -68,6 +68,16 @@ class WebhookDelivery implements TenantOwned
     #[ORM\Column(type: 'timestamptz')]
     private \DateTimeImmutable $createdAt;
 
+    #[ORM\Column(type: 'timestamptz')]
+    private \DateTimeImmutable $updatedAt;
+
+    #[ORM\Column(type: 'timestamptz', nullable: true)]
+    private ?\DateTimeImmutable $lastAttemptAt = null;
+
+    /** Bounded (≤ 1024 characters) start of the last response body, for diagnostics. */
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $lastResponseExcerpt = null;
+
     private function __construct()
     {
     }
@@ -88,4 +98,7 @@ class WebhookDelivery implements TenantOwned
     public function getLastError(): ?string { return $this->lastError; }
     public function getDeliveredAt(): ?\DateTimeImmutable { return $this->deliveredAt; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
+    public function getUpdatedAt(): \DateTimeImmutable { return $this->updatedAt; }
+    public function getLastAttemptAt(): ?\DateTimeImmutable { return $this->lastAttemptAt; }
+    public function getLastResponseExcerpt(): ?string { return $this->lastResponseExcerpt; }
 }

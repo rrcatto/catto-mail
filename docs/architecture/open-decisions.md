@@ -226,6 +226,37 @@ specification rules; the specification was updated to match.
 | Client memberships can be removed (DELETE grant) so the Users page can manage them. | `infra/postgres/grants.sql` |
 | The development `SMARTHOST_PUBLIC_BASE_URL` is `https://localhost:8443` (the published nginx port) so emailed links open in a browser; nginx `server_name` follows. | environment contract |
 
+### Phase 7 implementation choices (specification 2.8, 2026-10-06)
+
+Made while implementing the Smarthost side of Phase 7. They are recorded in specification 2.8
+(`webhooks.delivery_contract`) and do not change the architecture.
+
+| Choice | Where |
+|---|---|
+| The request body is PostgreSQL's `jsonb` text of the payload. `payload_hash` is computed in SQL from those same bytes when the delivery row is inserted, and checked again before every send, so a retry signs and sends identical bytes. | `app/src/Webhook/WebhookDispatcher.php` |
+| Fan-out uses `INSERT ... ON CONFLICT` on the (event, endpoint) unique index, so concurrent workers never create a second delivery. The event is marked fanned out in the same transaction. | `WebhookDispatcher::fanOut` |
+| A claim increments `attempt_count`, which serves as the fencing token. An outcome is written only `WHERE claimed_by = me AND attempt_count = n AND status = 'pending'`. A delivery whose lease expired at the attempt limit is marked failed ("outcome unknown"). The configuration is rejected when the lease is not longer than the request timeout. | `WebhookDispatcher::claim/finish/failExhaustedLeases` |
+| A 4xx other than 408/425/429 fails permanently, and so does any 3xx. Neither can be fixed by retrying the same bytes. Endpoints are never disabled automatically, so a misconfigured receiver cannot silently lose later events. | `WebhookDispatcher::outcome` |
+| SSRF: the guard resolves A and AAAA records and refuses the target if any answer is non-public. The connection is pinned through the HTTP client's `resolve` option, with `max_redirects` 0. The development allowlist is by host name (`APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`) and is a startup error in production. A failed lookup is retried; a refused target fails without retry. | `app/src/Webhook/WebhookTargetGuard.php` |
+| A batch is sent concurrently through Symfony HttpClient with no database transaction open. At most 64 KiB of each response is read and 1 KiB of it kept. | `WebhookDispatcher::attempt` |
+| The worker has its own Doctrine connection and entity manager as `smarthost_webhook`; its container holds no web-role credentials, and the web container holds none of the worker's. Signing-secret decryption moved to `WebhookSecrets`, so the worker does not depend on the web-side endpoint service. Doctrine's entity argument resolver is disabled: it called `getManagerForClass()`, which built every entity manager and made `/dashboard/login` fail in the web container. Phase 6 e2e found this; `WebProcessIsolationTest` is the regression test. | `config/packages/doctrine.yaml`, `app/src/Webhook/WebhookSecrets.php` |
+| Wake-up is `LISTEN smarthost_webhook_work` (notified by `/v1/webhooks/test` and the dashboard), with polling every `APP_WEBHOOK_POLL_INTERVAL_SECONDS` as the guarantee. Producers in Go and Python need no change. | `app/src/Command/WebhookWorkCommand.php` |
+| Health: a liveness file touched every loop (the container health check requires it to be newer than 120 s) and a `webhook_worker_heartbeats` row per worker for the dashboards. A worker that is gone is shown as stale, never deleted. | `app/docker/webhook-worker-healthcheck.sh`, migration `Version20261007000100` |
+| `webhook.test` names exactly one endpoint. `POST /v1/webhooks/test` requires `webhook_endpoint_id`: a foreign endpoint is 404, a disabled one is 409 `webhook-endpoint-disabled`. A missing id fails validation and never fans out. The fan-out re-checks that the endpoint is still enabled. A database check ties `webhook.test` to the `webhook_endpoint` subject. The client-wide variant briefly present during development was removed by owner decision, with no compatibility layer. | `WebhookTestController`, `WebhookTestService`, migration `Version20261007000100` |
+| Dashboard webhook management requires client ADMIN (or PLATFORM.CLIENT.MANAGE) and goes through the audited `WebhookEndpointService`. The raw secret is rendered once in the POST response with `no-store`. | `app/src/Controller/Dashboard/ClientWebhookController.php` |
+| The end-to-end proof uses a deterministic external receiver (stdlib Python, its own container, no Smarthost code) and an API-only driver. The harness alone uses the console (endpoint registration) and the Phase 5 tool (DSN injection, delivery-state checks). | `tests/webhook-receiver/`, `infra/tests/phase7-e2e.sh` |
+| Query-plan review (`WebhookQueryPlanTest`; 180,000 deliveries, 182,000 events). The worker's statements already used the existing indexes: the fan-out pending index, the partial due index and the primary keys. They take at most 6 ms; claiming 50 of 180 due deliveries takes 4–13 ms. The dashboard statements did not: per-endpoint delivery counts and the cross-client delivery and outbox lists scanned and sorted whole tables, taking 190–670 ms. Three indexes were added: `(webhook_endpoint_id, status, created_at)`, `webhook_deliveries (created_at, id)` and `webhook_events (created_at, id)`. Delivered and failed counts are now time-bounded: 7 days per endpoint, 24 hours in the operator summary; pending counts stay total. Every statement now takes ≤ 16 ms with no whole-table scan, and the test asserts this. | migration `Version20261007000200`, `ClientReadModel`, `OperatorReadModel` |
+
+### Phase 7 closeout decisions (owner, specification 2.8, 2026-10-06)
+
+| Decision | Where recorded |
+|---|---|
+| `POST /v1/webhooks/test` targets exactly one endpoint; `webhook_endpoint_id` is required. | OpenAPI, `webhooks.delivery_contract.fan_out`, `check-contracts.py` |
+| No public `/v1` webhook-endpoint management (CRUD). Setup stays in the client dashboard and the audited console; runtime integration uses the public API and received webhooks. | `webhooks.delivery_contract.management` |
+| No suppression-lookup API. Smarthost is authoritative for transport suppression and enforces it at send time; clients learn outcomes from their message state and events. Global suppression state is never an address-query oracle. | `suppression...no_address_lookup` |
+| Webhook delivery retention: `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS`. Empty means no automatic deletion until a production policy sets a period; no deletion machinery is built now. | `compliance.retention`, environment contract |
+| Production `APP_WEBHOOK_*` values are chosen in Phase 8. These are later hardening, not needed for correctness now: a distinct connect timeout, a response-header bound, public-certificate webhook testing and several live worker containers. | `webhooks.delivery_contract.production_settings` |
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are
@@ -248,7 +279,7 @@ None of them required an architectural change.
 None. D-31 to D-34 were resolved on 2026-10-03, D-35 and D-30 on 2026-10-04, D-36 to D-38 on
 2026-10-05 (see §1).
 
-Points to confirm before production (not blocking Phase 7): a CA file variable so Go can verify
+Points to confirm before production (not blocking Phase 8 planning): a CA file variable so Go can verify
 Postfix's submission certificate; an index for reconciliation candidates at production volume
 (neither the Phase 5 nor the Phase 6 query-plan review found a query that needs it); retention
 commands for the configured `APP_RETENTION_SUPPRESSIONS_DAYS` / `APP_RETENTION_UNMATCHED_DSN_DAYS` /
@@ -257,5 +288,7 @@ tracking expiry is already enforced by the endpoints); whether Go should publish
 depth and snapshot age to the database so the operator overview can show them; an index on
 `suppressions (created_at, id)` if the unfiltered operator suppression list grows large (a sorted
 scan, 33 ms at 20,000 rows in the Phase 6 load test); and whether
-browser-based validation upload, API-key and webhook-endpoint management are wanted (console
-commands and the API cover them today).
+browser-based validation upload and API-key management are wanted (console commands and the API
+cover them today; webhook endpoints are managed in the dashboard since specification 2.8). The
+production webhook settings and the webhook-delivery retention period belong to Phase 8 and the
+compliance policy.

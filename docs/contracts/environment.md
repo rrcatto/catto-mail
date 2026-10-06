@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.7 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.8 · **Template:** [`infra/.env.example`](../../infra/.env.example)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -100,7 +100,7 @@ secret has a value in the template, and that safety switches default to safe val
 |---|---|---|---|---|---|
 | `APP_ENV` | app, webhook-worker | no | 1 | `dev` | Symfony environment: `dev`, `test` or `prod`. |
 | `APP_SECRET` | app, webhook-worker | **yes** | 1 | | Symfony kernel secret (CSRF, signed URIs). |
-| `TRUSTED_PROXIES` | app | no | 1 | `10.89.20.0/24` | CIDR of nginx: the `smarthost-internal` Podman network (created by `infra/podman/smarthost-pod.sh.in`). |
+| `TRUSTED_PROXIES` | app, webhook-worker | no | 1 | `10.89.20.0/24` | CIDR of nginx: the `smarthost-internal` Podman network (created by `infra/podman/smarthost-pod.sh.in`). |
 | `MAILER_DSN` | app | **yes** | 2 | | Symfony Mailer transport for Smarthost's own low-volume notifications only. Never used for tracked sends. |
 | `APP_API_RATE_LIMIT_PER_MINUTE` | app | no | 2 | `600` | Default per-API-key request limit. |
 | `APP_API_MAX_REQUEST_BYTES` | app | no | 2 | `10485760` | Request body limit (10 MiB, 413 above it). It is not raised to fit large send jobs. |
@@ -113,6 +113,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `APP_WEBHOOK_LEASE_SECONDS` | webhook-worker | no | 7 | `60` | Delivery lease. It must exceed the HTTP timeout, and long attempts renew it. |
 | `APP_WEBHOOK_RETRY_BASE_SECONDS` | webhook-worker | no | 7 | `60` | Base for exponential backoff. |
 | `APP_WEBHOOK_RETRY_MAX_SECONDS` | webhook-worker | no | 7 | `21600` | Backoff ceiling. |
+| `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` | webhook-worker | no | 7 | `webhook-receiver` | Development and test only: comma-separated exact host names that may resolve to private addresses (the local client receiver fixture). Every other webhook destination must resolve to public addresses only (SSRF policy). A non-empty value with `SMARTHOST_ENV=production` is a startup error. |
 | `APP_WEBHOOK_SECRET_OVERLAP_HOURS` | app, webhook-worker | no | 2 | `24` | How long a rotated-out signing secret keeps producing a second signature. |
 | `APP_DOMAIN_VERIFICATION_RECHECK_HOURS` | app | no | 2 | `24` | How often pending sending domains are re-checked in DNS. |
 | `APP_RETENTION_STAGED_CONTENT_DAYS` | app | no | 2 | `7` | Purge period for rendered content of abandoned, cancelled, suppressed or permanently failed recipients. Abandoned collecting jobs are cancelled. |
@@ -123,6 +124,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `APP_RETENTION_UNMATCHED_DSN_DAYS` | app | no | 5 | | Resolved or dismissed unmatched DSNs. Empty means no automatic deletion. |
 | `APP_RETENTION_AUDIT_LOG_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
 | `APP_RETENTION_USAGE_RECORDS_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
+| `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` | app | no | 7 | | Webhook delivery history (`webhook_deliveries` and their delivered outbox events). Empty means no automatic deletion: rows stay durable until a production retention policy sets a period. Policy only; nothing deletes them yet. |
 | `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. Empty disables this. |
 | `APP_MAIL_FROM` | app | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail Smarthost"). Its domain should be DKIM-signed by OpenDKIM. |
 | `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |

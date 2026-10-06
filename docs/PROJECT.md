@@ -48,7 +48,7 @@ Both are gitignored.
 │   │   ├── Doctrine/Type/         timestamptz and jsonb_map types
 │   │   ├── Domain/                Sending domains and DNS TXT verification
 │   │   ├── Dsn/                   Unmatched-DSN operator workflow (match request, dismissal)
-│   │   ├── Entity/                29 entities, one per table
+│   │   ├── Entity/                30 entities, one per table
 │   │   ├── Enum/                  32 vocabulary enums
 │   │   ├── Idempotency/           In-flight lock
 │   │   ├── Logging/               Contract log format
@@ -58,17 +58,17 @@ Both are gitignored.
 │   │   ├── Suppression/           Recipient global opt-out API service, operator suppression administration (D-30)
 │   │   ├── Tenant/                Tenant scope and Doctrine tenant filter
 │   │   ├── Validation/            Validation-job creation
-│   │   ├── Webhook/               Endpoint/secret model and transactional outbox
+│   │   ├── Webhook/               Endpoints and secrets, outbox, webhook worker (dispatcher, signer, SSRF guard, payloads)
 │   │   ├── Util/Clock.php
 │   │   └── Kernel.php
 │   ├── tests/                     PHPUnit: Unit, Contract, Schema, Integration, Support, bin
 │   ├── docker/
+│   │   ├── webhook-worker-healthcheck.sh
 │   │   ├── fpm-healthcheck.sh
 │   │   ├── php.ini
 │   │   └── zz-smarthost-fpm.conf
 │   └── phase1-probe/
-│       ├── db-check.php
-│       └── webhook-worker.php
+│       └── db-check.php
 ├── validator/                     Python validation worker (Phase 3)
 │   ├── Containerfile              Stages: base, test, runtime
 │   ├── README.md
@@ -125,11 +125,18 @@ Both are gitignored.
 │       ├── phase5-e2e.sh          Phase 5 end to end against the running pod (DSNs via port 25)
 │       ├── phase5_e2e.py          Phase 5 end-to-end driver (API, DSN/ARF injection, DB)
 │       ├── phase6-e2e.sh          Phase 6 end to end against the running pod (tracking, dashboards, logs)
-│       └── phase6_e2e.py          Phase 6 end-to-end driver (Mailpit HTML, nginx, dashboard browser sessions)
+│       ├── phase6_e2e.py          Phase 6 end-to-end driver (Mailpit HTML, nginx, dashboard browser sessions)
+│       ├── phase7-e2e.sh          Phase 7 end to end: external client via API and signed webhooks only
+│       └── phase7_e2e.py          Phase 7 external-client driver (no database access)
 ├── tests/fake-smtp/               Deterministic SMTP test server
 │   ├── Containerfile
 │   ├── README.md
 │   └── fake_smtp.py
+├── tests/webhook-receiver/        Deterministic external-client webhook receiver (test fixture)
+│   ├── Containerfile
+│   ├── README.md
+│   ├── receiver.py
+│   └── test_receiver.py
 ├── scripts/
 │   ├── README.md
 │   └── check-contracts.py
@@ -165,7 +172,7 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, current phase, WSL Podman-machine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine), 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle) 0.1.5 (Phase 5 complete: inbound DSN, complaint and global suppression processing, D-30) and 0.1.6 (Phase 5 corrections; Phase 6 complete: tracking and dashboards; passwordless sign-in, roles and ACL). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine), 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle) 0.1.5 (Phase 5 complete: inbound DSN, complaint and global suppression processing, D-30) 0.1.6 (Phase 5 corrections; Phase 6 complete: tracking and dashboards; passwordless sign-in, roles and ACL) and 0.1.7 (Phase 7 Smarthost side: webhook worker and delivery contract). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
 | `.containerignore` | The app and validator images build from the repository root so that they can copy the normative contracts; this admits only `app/` (without `vendor/`, `var/`), `validator/` (without caches), those contract files, the D-32 vectors and the fake SMTP server (validator test stage). |
@@ -213,6 +220,7 @@ Both are gitignored.
 | `tests/phase2-test.sh` | Phase 2 harness behind `smarthostctl test phase2`: the test pod, plus the reference schema loaded into a separate database for comparison, then PHPUnit as the application role. Mounts `infra/.generated/test-output/` for test reports (the Phase 6 dashboard observations). |
 | `tests/phase3-test.sh` | Phase 3 harness behind `smarthostctl test phase3`: in the test pod, pytest (unit, database and worker tests as the validator role), then an end-to-end run with the fake DNS and fake SMTP servers: Symfony creates jobs through `/v1` (including 10,000 addresses), the real worker is SIGKILLed mid-job and restarted, and Symfony verifies results, usage and the outbox. Fails if the fake SMTP server ever received `DATA`. `smarthostctl test` runs both harnesses. |
 | `tests/phase4-test.sh` | Phase 4 harness behind `smarthostctl test phase4`: builds the delivery `test` image (gofmt and go vet run during the build), runs the Go unit tests without network, then the integration tests against PostgreSQL in the throwaway test pod as `smarthost_delivery` (claiming, fencing, exactly-once expansion, suppressions, submission outcomes, purge and metering, ambiguity and crash recovery, log ingestion with rotation and the hold rule, reconciliation, pacing, headers and tracking). |
+| `tests/phase7-e2e.sh`, `tests/phase7_e2e.py` | Phase 7 end to end behind `smarthostctl test phase7-e2e`, against the running pod: a fresh client whose driver uses only the public API and the webhooks its external receiver (`tests/webhook-receiver`) verified. It covers validation with results mapped by reference; a 501-recipient batched send through Go/Postfix/OpenDKIM/Mailpit with a replayed batch; tracking; DSN and ARF to `message.*` webhooks; global opt-out without a webhook; `webhook.test` without an endpoint id rejected and not delivered; receiver offline then delivery; worker SIGKILL mid-request then a re-send de-duplicated by the receiver; HTTP 400 permanent failure with polling reconciliation; SSRF refusals; worker command and heartbeat. The harness alone uses the console and the Phase 5 tool. |
 | `tests/phase6-e2e.sh`, `tests/phase6_e2e.py` | Phase 6 end to end behind `smarthostctl test phase6-e2e`, against the running pod through nginx: a tracked subscription message delivered to Mailpit, its pixel and rewritten link requested (events, exact stored redirect, open-redirect attempts, unsubscribe not tracked), the dashboards as two client users and an operator (login, pages, CSV export, tenant isolation, operator-only area, DSN dismissal, operator block and lift, audit, POST sign-out) and token-free nginx/application logs. |
 | `tests/phase5-e2e.sh`, `tests/phase5_e2e.py` | Phase 5 end to end behind `smarthostctl test phase5-e2e`, against the running pod: messages through `/v1` to Mailpit, then the fixtures of `delivery/internal/dsn/testdata` sent to Postfix port 25 (VERP, postmaster or the feedback-loop address). Scenarios A (cross-client hard bounce), B (opt-out API and lift), C (correlation), D (ARF complaint), E (excluded scopes, repeated soft bounces), F (operator workflow), G (crash, reclaim, retention). |
 | `tests/phase4-e2e.sh`, `tests/phase4_e2e.py` | Phase 4 end to end behind `smarthostctl test phase4-e2e`, against the running pod: jobs through `/v1`, the dev daemon or throwaway worker containers, real Postfix/OpenDKIM/Mailpit. Scenarios A (headers, VERP, tracking, DKIM, events, purge, usage, completion), B (OpenDKIM down), C (deferral), D (SIGKILL and reclaim), E (10,000 recipients with a log rotation); duplicates are checked against the Postfix log. |
@@ -236,7 +244,7 @@ Both are gitignored.
 | `app/docker/zz-smarthost-fpm.conf` | Pool overrides: listen 9000, ping path, `clear_env = no`. |
 | `app/docker/fpm-healthcheck.sh` | FastCGI ping readiness check. |
 | `app/phase1-probe/db-check.php` | CLI check: connect as the app, webhook or owner role and verify the CREATE privilege boundary (used by the Phase 1 suite). |
-| `app/phase1-probe/webhook-worker.php` | Placeholder long-running worker with a heartbeat and database check. Delivers no webhooks (Phase 7). |
+| `app/docker/webhook-worker-healthcheck.sh` | Webhook-worker liveness: the worker loop's file must be newer than 120 s. |
 | `validator/Containerfile` | Python 3.14 slim. Stages: `test` (pytest, tests, fake DNS/SMTP, shared vectors) and `runtime` (default; the worker as unprivileged uid 10001). Built from the repository root. |
 | `validator/requirements.txt` | Pinned runtime dependencies: psycopg 3, psycopg-pool, dnspython, idna. `requirements-test.txt`: pytest, pytest-asyncio. |
 | `validator/smarthost_validator/` | The worker (see `validator/README.md`): `__main__` (`run`, `health`, `check-db`, `normalize`), `config`, `worker` (claiming, renewal, chunks, LISTEN/poll), `pipeline`, `normalize` (D-32), `syntax`, `typo` + `typo_data`, `dns_check`, `roles`, `smtp_probe` (never DATA), `limits` (global/domain/MX slots, back-off, accept-all policy), `classify` (rule table), `db` (every SQL statement, fenced), `models`, `logs`. |
@@ -247,6 +255,8 @@ Both are gitignored.
 | `delivery/go.mod`, `go.sum` | Module definition: pgx v5 and `golang.org/x/net` (IDNA, HTML tokenizer). |
 | `tests/fake-smtp/fake_smtp.py` | Stdlib asyncio SMTP server whose reply is chosen by the recipient prefix (`reject-550`, `tempfail-450/451`, `unavailable-421`, `timeout`, otherwise accept) plus the validator scenarios: `accept-all`/`block-all` domain labels and `throttle-421`, `block-554` and accept-all-probe local parts. It logs every command as JSON so tests can prove `DATA` never arrives; DATA is discarded. |
 | `tests/fake-smtp/Containerfile` | Python 3.14 slim, uid 10003. |
+| `tests/webhook-receiver/receiver.py` | Stdlib HTTP server standing in for a client's webhook endpoint (see its README): independent signature verification with rotation, timestamp tolerance, event-id de-duplication, order-tolerant state, scripted responses (200/400/429/500/timeout/drop/delay) and a control API; state persisted across restarts. `test_receiver.py` unit-tests it. |
+| `tests/webhook-receiver/Containerfile` | Python 3.14 slim, uid 10004 (`localhost/smarthost-test-webhook-receiver:dev`, built by the Phase 7 harness). |
 
 ### `app/`: the Symfony application (Phases 2–6)
 
@@ -256,7 +266,7 @@ Both are gitignored.
 | `config/packages/framework.yaml` | Secret, trusted proxies, session (dashboard only), rate limiters (per API key, per IP for failed API authentication, per IP for the tracking endpoints' database writes). |
 | `config/packages/twig.yaml`, `config/packages/asset_mapper.yaml` | Twig (strict variables in debug and test); AssetMapper serving `assets/` through the front controller in every environment (nginx serves no files), es-module-shims CDN polyfill disabled. |
 | `importmap.php`, `assets/` | The import map (`app`, `@hotwired/stimulus` 3.2.2 vendored in `assets/vendor/`, the StimulusBundle loader); `app.js`, `stimulus_bootstrap.js`, `controllers/confirm_controller.js` (confirmation before consequential POSTs; progressive enhancement), `styles/app.css`. |
-| `templates/dashboard/` | `layout.html.twig` (navigation, flash messages, POST sign-out), `_macros.html.twig` (keyset pager, sort links, status text, filters, CSRF field), `_engagement_caveat.html.twig`, `login`, `home`, `client/*` (overview, validation jobs/job, send jobs/job, message timeline, suppressions, domains, usage) and `operator/*` (overview, clients, client, unmatched DSNs, DSN, suppressions, audit, webhook outbox). |
+| `templates/dashboard/` | `layout.html.twig` (navigation, flash messages, POST sign-out), `_macros.html.twig` (keyset pager, sort links, status text, filters, CSRF field), `_engagement_caveat.html.twig`, `login`, `home`, `client/*` (overview, validation jobs/job, send jobs/job, message timeline, suppressions, domains, usage, webhooks and the one-time secret page) and `operator/*` (overview, clients, client, unmatched DSNs, DSN, suppressions, audit, webhook deliveries/outbox/workers); `_webhook_deliveries.html.twig` is shared. |
 | `templates/bundles/TwigBundle/Exception/error.html.twig` | Generic production error page for HTML requests (never names the resource). |
 | `config/packages/doctrine.yaml` | Two lazy connections: `default` as `smarthost_app` (runtime) and `owner` as `smarthost_owner` (migrations only); custom types; the tenant filter. |
 | `config/packages/doctrine_migrations.yaml` | Migrations run on the `owner` connection, transactional. |
@@ -268,6 +278,8 @@ Both are gitignored.
 | `migrations/Version20261005000100.php` | Spec 2.5 / D-38: `global_suppression_requests` (durable opt-out request idempotency), backfilled from existing opt-outs; removes the per-row key columns from `suppressions`. |
 | `migrations/Version20261006000100.php` | Spec 2.6 / Phase 6: partial `message_events_engagement_idx` (recorded opens/clicks), added after the load test showed whole-table scans. |
 | `migrations/Version20261006000200.php` | Spec 2.7: `roles`, `role_permissions`, `user_roles`, `auth_login_tokens`; ADMIN and OPERATOR seeded; operators migrated to OPERATOR; `users.password_hash` and `users.global_role` dropped. With the eight above it reproduces `docs/schema/reference-schema.sql`; each has a `down()`. |
+| `migrations/Version20261007000100.php` | Spec 2.8 / Phase 7: `webhook_deliveries.updated_at`, `last_attempt_at`, `last_response_excerpt` and claim-consistency checks; `webhook.test` tied to the single-endpoint `webhook_endpoint` subject; `webhook_worker_heartbeats`. |
+| `migrations/Version20261007000200.php` | Phase 7 query-plan review: `webhook_deliveries_endpoint_status_idx`, `webhook_deliveries_created_idx`, `webhook_events_created_idx` (per-endpoint counts, cross-client delivery and outbox lists). |
 | `src/Kernel.php` | Runs the fail-closed safety guard on every boot. |
 | `src/Config/` | `SafetyGuard` (SMARTHOST_ENV values; unverified domains forbidden in production), `SecretEnvVarProcessor` (`X` or `X_FILE`, never both), `Limits` (configuration may lower, never raise, the contract ceilings). |
 | `src/Doctrine/Type/` | `timestamptz` (microseconds, UTC) and `jsonb_map` (`{}` stays an object). |
@@ -283,7 +295,9 @@ Both are gitignored.
 | `src/Sending/` | `SendJobService` (create, batch, submit with row locking), `AddressNormalizer` (D-18), `RecipientContent` (size and SHA-256 fingerprint kept after purge). |
 | `src/Domain/` | `SendingDomainService` (registration, TXT verification, re-checks, enable/disable, DKIM status) and the DNS TXT resolver boundary. |
 | `src/Crypto/Keyring.php` | `APP_ENCRYPTION_KEYS` keyring (libsodium secretbox, purpose-bound). |
-| `src/Webhook/` | `WebhookEndpointService` (encrypted secrets, rotation with overlap) and `WebhookOutbox` (transactional outbox writer). |
+| `src/Webhook/` | `WebhookEndpointService` (encrypted secrets, rotation with overlap), `WebhookSecrets` (secrets active at a time), `WebhookOutbox` (transactional outbox writer), `WebhookTestService` (`webhook.test` events), and the worker: `WebhookDispatcher` (fan-out, leased claiming with fencing, concurrent sending, retry policy, outcomes), `WebhookSigner`, `WebhookPayloadFactory` (WebhookEvent bodies via the API presenter), `WebhookTargetGuard` with `HostResolver`/`SystemHostResolver` (SSRF policy and address pinning). |
+| `src/Command/WebhookWorkCommand.php` | `smarthost:webhook:work [--once] [--batch=N]`: the long-running webhook worker (LISTEN plus polling, SIGTERM, liveness file, heartbeats). |
+| `src/Controller/Dashboard/ClientWebhookController.php` | Client › Webhooks: endpoint list, deliveries, create/edit/enable/disable/rotate/test for client admins; the secret page is rendered once with `no-store`. |
 | `src/Audit/` | `AuditLogger` and `AuditActor`. |
 | `src/Client/AccountAdministration.php` | Clients, users (case-insensitive login, display name, enable/disable), client memberships (add, change, remove). No passwords. |
 | `src/Access/` | `PermissionCatalog` (the permission keys), `RoleCatalog` (ADMIN, OPERATOR), `AccessControl` (role/permission resolution per request, the APP_ADMIN_EMAIL bootstrap, audited role grants and role administration with the ADMIN/SYSTEM rules), `PermissionVoter`. |
@@ -291,16 +305,16 @@ Both are gitignored.
 | `config/packages/mailer.yaml`, `templates/email/` | Symfony Mailer to Postfix submission (`null://` in tests) and the sign-in email. |
 | `src/Command/` | `smarthost:client:*` (including `client:global-suppressions`), `smarthost:api-key:*`, `smarthost:user:*`, `smarthost:membership:set`, `smarthost:domain:*`, `smarthost:webhook:*`, `smarthost:suppression:{list,create,lift}`, `smarthost:dsn:{list,show,match,dismiss}`, `smarthost:dev:bootstrap`. Operator actions require `--operator=<login email>`. |
 | `src/Controller/Dashboard/AccessDashboardController.php` | Operator › Users (create, enable/disable, sign-in link, roles, memberships) and Roles & permissions (ADMIN). |
-| `src/Controller/` | `/v1` controllers (validation jobs, send jobs, messages, global suppressions, `webhooks/test` = 501), `/healthz`, `TrackingController` (public `/t/o/{token}.gif`, `/t/c/{token}/{index}` and a `/t/...` 404 fallback) and `Dashboard/` (`DashboardController`: login, home, logout; `ClientDashboardController`: `/dashboard/c/{client}` pages, CSV export, domain check, opt-out lift; `OperatorDashboardController`: `/dashboard/operator` pages and actions through the existing audited services). |
+| `src/Controller/` | `/v1` controllers (validation jobs, send jobs, messages, global suppressions, `webhooks/test` records a test event), `/healthz`, `TrackingController` (public `/t/o/{token}.gif`, `/t/c/{token}/{index}` and a `/t/...` 404 fallback) and `Dashboard/` (`DashboardController`: login, home, logout; `ClientDashboardController`: `/dashboard/c/{client}` pages, CSV export, domain check, opt-out lift; `OperatorDashboardController`: `/dashboard/operator` pages and actions through the existing audited services). |
 | `src/Tracking/TrackingRecorder.php` | Token eligibility (format, handed to Postfix, job tracking flag, `APP_RETENTION_TRACKING_DAYS`), the bounded recording rule (60 s per message for opens, 10 s per message and link for clicks, 1000 events per type and message, advisory lock), stored-target safety re-check. |
 | `src/Dashboard/` | `ClientReadModel` and `OperatorReadModel` (DBAL; every client query carries the client id; aggregates in PostgreSQL), `KeysetQuery` and `Listing` (keyset pagination, whitelisted sorts, cursor validation), `ClientAccess` (voter check; foreign = 404), `Labels` (terminology), `AuditDetailSanitizer`, `SecurityHeadersSubscriber` (CSP nonce and headers for `/dashboard` only), `DashboardTwigExtension`. |
 | `src/Logging/ContractFormatter.php` | `ts`, `level`, `service`, `msg` plus context. |
 | `tests/Unit/` | D-18 normalisation (including the shared D-32 vectors), request hashing, keyring, configuration rules, log format. |
 | `tests/Contract/` | `/v1` routes equal the OpenAPI operations; OpenAPI enums equal the PHP enums. |
 | `tests/Schema/` | Reference-schema equivalence, migration up/down/up, ORM mapping vs database, vocabulary CHECKs, the grant matrix parsed from `schema.md`, least privilege, critical constraints. |
-| `tests/Integration/` | Authentication, client status (D-31), tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API (`GlobalSuppressionApiTest`) and the Phase 5 operator commands (`Phase5OperatorCommandTest`). Every API response is validated against the OpenAPI contract. Phase 6: `TrackingTest` (opens, clicks, open-redirect attacks, expiry, privacy, logs), `TrackingStatisticsTest` (aggregates against known event sets), `ClientDashboardTest` (pages, filters, keyset pagination, CSV export, actions, terminology, headers, tenant isolation), `OperatorDashboardTest` (operator-only access, client administration, DSN workflow, suppressions, audit), `DashboardLargeDatasetTest` (10,000-address and 10,000-message jobs: query counts, memory, EXPLAIN ANALYZE of every page query; report in `infra/.generated/test-output/`). |
+| `tests/Integration/` | Authentication, client status (D-31), tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API (`GlobalSuppressionApiTest`) and the Phase 5 operator commands (`Phase5OperatorCommandTest`). Every API response is validated against the OpenAPI contract. Phase 6: `TrackingTest` (opens, clicks, open-redirect attacks, expiry, privacy, logs), `TrackingStatisticsTest` (aggregates against known event sets), `ClientDashboardTest` (pages, filters, keyset pagination, CSV export, actions, terminology, headers, tenant isolation), `OperatorDashboardTest` (operator-only access, client administration, DSN workflow, suppressions, audit), `DashboardLargeDatasetTest` (10,000-address and 10,000-message jobs: query counts, memory, EXPLAIN ANALYZE of every page query; report in `infra/.generated/test-output/`). Phase 7: `WebhookWorkerTest` (the worker against a local signature-verifying receiver and the stub resolver: contract, fan-out, retry policy, leases and fencing, SSRF, limits, rotation) and `WebhookDashboardTest` (client management, secret shown once, viewer/foreign denial, operator visibility) `WebProcessIsolationTest` (the web kernel in a subprocess without the worker's database credentials, as in the `symfony-app` container: no 5xx, the worker connection never built) and `WebhookQueryPlanTest` (180,000 deliveries: EXPLAIN ANALYZE of every worker and webhook-page statement, no whole-table scans; report `phase7-webhook-query-plans.txt` in `infra/.generated/test-output/`). |
 | `tests/Phase3/e2e.php` | Phase 3 end-to-end driver (`prepare`, `verify`): creates jobs through `/v1` and checks results, counters, usage and the outbox after the worker run. |
-| `tests/Support/`, `tests/bin/request.php` | Test base classes (`ApiTestCase`, `DashboardTestCase`), direct database connections, catalog comparison, DNS stub, bulk Phase 6 fixtures (`DashboardFixtures`), the test-only SQL recorder (`QueryRecorder`, a DBAL middleware), and the concurrent-request worker. |
+| `tests/Support/`, `tests/bin/request.php`, `tests/bin/web-without-worker-role.php` | Test base classes (`ApiTestCase`, `DashboardTestCase`), direct database connections, catalog comparison, DNS stub, bulk Phase 6 fixtures (`DashboardFixtures`), the test-only SQL recorder (`QueryRecorder`, a DBAL middleware), and the concurrent-request worker. |
 
 ### `scripts/`
 
@@ -400,6 +414,25 @@ sequenceDiagram
     A->>DB: keyset page, client id in every query
     U->>A: POST action + CSRF (operator: /dashboard/operator/...)
     A->>DB: existing audited service (status, suppression lift, DSN match request)
+```
+
+### 3.2.2 Webhook delivery (Phase 7)
+
+```mermaid
+sequenceDiagram
+    participant P as Producer (Go, Python, Symfony)
+    participant DB as PostgreSQL
+    participant W as Webhook worker
+    participant C as Client receiver
+    P->>DB: state change + webhook_events (one transaction)
+    P-->>W: NOTIFY smarthost_webhook_work (API/dashboard tests) or polling
+    W->>DB: fan-out: one webhook_deliveries row per enabled, subscribed endpoint
+    W->>DB: claim due rows (FOR UPDATE SKIP LOCKED, lease, attempt_count + 1)
+    W->>W: SSRF check, resolve and pin the address, sign t.body
+    W->>C: POST WebhookEvent (no transaction open)
+    C-->>W: 2xx / 408 425 429 5xx / other
+    W->>DB: delivered / retry at backoff / failed (only while holding the claim)
+    Note over W,DB: a crashed worker's rows are reclaimed after the lease; the receiver de-duplicates on the event id
 ```
 
 ### 3.3 Validation workflow (Phase 3)

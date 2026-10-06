@@ -248,12 +248,13 @@ final class OperatorDashboardController extends AbstractController
     #[IsGranted('PLATFORM.WEBHOOK.VIEW')]
     public function webhooks(Request $request): Response
     {
-        $filters = ClientDashboardController::filters($request, ['state']);
-        $listing = Listing::fromRequest($request, array_keys(OperatorReadModel::OUTBOX_SORTS), 'created');
+        $filters = ClientDashboardController::filters($request, ['state', 'status', 'event_type', 'client']);
+        $listing = Listing::fromRequest($request, array_keys(OperatorReadModel::OUTBOX_SORTS_DELIVERIES), 'created');
+        $events = Listing::fromRequest(new Request(['cursor' => $request->query->getString('events_cursor')]), array_keys(OperatorReadModel::OUTBOX_SORTS), 'created');
 
         return $this->page('webhooks.html.twig', 'webhooks', [
-            'page' => $this->read->webhookEvents($filters, $listing), 'filters' => $filters, 'listing' => $listing,
-            'summary' => $this->read->webhookSummary()]);
+            'page' => $this->read->webhookDeliveries($filters, $listing), 'events' => $this->read->webhookEvents($filters, $events),
+            'filters' => $filters, 'listing' => $listing, 'summary' => $this->read->webhookSummary()]);
     }
 
     /** @param array<string, mixed> $vars */

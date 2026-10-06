@@ -49,7 +49,7 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.7"
+EXPECTED_SPEC_VERSION = "2.8"
 EXPECTED_SPEC_DATE = "2026-10-06"
 # Decisions that must be incorporated across the revision history (all of D-01..D-38).
 EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
@@ -286,6 +286,28 @@ def check_licence(api: dict) -> None:
           f"openapi: info.license must be name=MIT identifier=MIT to match LICENSE, found {lic}")
 
 
+def check_webhook_test_contract(spec: dict, vocab: dict, api: dict) -> None:
+    """Spec 2.8: POST /webhooks/test names exactly one endpoint; no API manages endpoints or looks up suppressions."""
+    op = api["paths"].get("/webhooks/test", {}).get("post", {})
+    req = api["components"]["schemas"].get("WebhookTestRequest", {})
+    check(op.get("requestBody", {}).get("required") is True, "openapi: POST /webhooks/test must require a request body")
+    check(req.get("required") == ["webhook_endpoint_id"] and set(req.get("properties", {})) == {"webhook_endpoint_id"}
+          and req.get("additionalProperties") is False,
+          "openapi: WebhookTestRequest must be exactly {webhook_endpoint_id} (required) - no client-wide test")
+    check("409" in op.get("responses", {}) and "404" in op.get("responses", {}),
+          "openapi: POST /webhooks/test must document 404 (foreign endpoint) and 409 (disabled endpoint)")
+    check(set(vocab["webhook_subject_type"]["values"]) == {"validation_job", "send_job", "message", "webhook_endpoint"},
+          "vocabulary: webhook_subject_type must not offer a client-wide webhook.test subject")
+    endpoint_paths = [p for p in api["paths"] if "webhook" in p and p != "/webhooks/test"]
+    check(not endpoint_paths, f"openapi: no public webhook-endpoint management API (spec 2.8), found {endpoint_paths}")
+    lookups = [p for p, ops in api["paths"].items() if p.startswith("/global-suppressions") and "get" in ops
+               and any(par.get("in") == "query" for par in ops["get"].get("parameters", []))]
+    check(not lookups, f"openapi: no suppression address-lookup API (spec 2.8), found {lookups}")
+    decisions = json.dumps(spec)
+    check('"no_address_lookup"' in decisions, "spec: the no-suppression-lookup decision (spec 2.8) is not recorded")
+    check("no public /v1 endpoint-management" in decisions, "spec: the no-endpoint-management-API decision (spec 2.8) is not recorded")
+
+
 def check_openapi(spec: dict, vocab: dict, api: dict) -> None:
     schemas = api["components"]["schemas"]
     for name, key in OPENAPI_ENUMS.items():
@@ -488,6 +510,7 @@ def main() -> int:
     check_normalization_vectors(spec)
     check_vocabulary(spec, vocab)
     check_openapi(spec, vocab, api)
+    check_webhook_test_contract(spec, vocab, api)
     check_licence(api)
     check_ddl(spec, vocab, sql, SCHEMA_MD.read_text(encoding="utf-8"))
     check_environment(spec, api, ENV_MD.read_text(encoding="utf-8"), ENV_EXAMPLE.read_text(encoding="utf-8"))

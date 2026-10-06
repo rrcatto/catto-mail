@@ -77,6 +77,9 @@ GRANT SELECT, UPDATE ON webhook_events TO :"webhook";
 GRANT INSERT ON webhook_events TO :"validator", :"delivery";
 GRANT SELECT ON webhook_deliveries TO :"app";
 GRANT SELECT, INSERT, UPDATE ON webhook_deliveries TO :"webhook";
+-- Webhook worker liveness (Phase 7): written by the worker, read by the operator dashboard.
+GRANT SELECT, INSERT, UPDATE ON webhook_worker_heartbeats TO :"webhook";
+GRANT SELECT ON webhook_worker_heartbeats TO :"app";
 GRANT SELECT, INSERT, DELETE ON audit_log TO :"app";
 GRANT INSERT ON audit_log TO :"webhook", :"validator", :"delivery";
 

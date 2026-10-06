@@ -132,7 +132,22 @@ specification 2.7; where they touch architecture, the spec is authoritative.
 
 ## Webhooks
 * Delivered only by the Symfony webhook worker. Delivery is at-least-once, and
-  `Smarthost-Event-Id` is used for de-duplication.
+  `Smarthost-Event-Id` is used for de-duplication. Specification 2.8
+  (`webhooks.delivery_contract`) is the full contract: body, headers, retry policy, destinations
+  and limits.
+* The body is the stored `payload_json` text; `payload_hash` is the SHA-256 of exactly those bytes,
+  and a retry re-sends them unchanged.
+* Retry 408, 425, 429, 5xx and transport errors with capped exponential backoff, ±10% jitter and
+  `Retry-After`. Other 4xx and every 3xx are permanent, and redirects are never followed. Never
+  disable an endpoint automatically.
+* Destinations must be public. Resolve the host, refuse every non-public address and pin the
+  connection to the checked address. Private development hosts are allowed only by name through
+  `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, never in production.
+* A `webhook.test` names exactly one endpoint (`webhook_endpoint_id` is required). Endpoints are
+  managed only in the dashboard or the audited console, never through `/v1`. No API answers
+  whether an address is suppressed.
+* Outcomes are written only while holding the claim: `claimed_by`, the `attempt_count` fencing
+  token and `status = 'pending'`. No database transaction stays open across an HTTP request.
 * `Smarthost-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`. During a rotation overlap a
   second `v1` (signed with the previous secret) is sent. Receivers enforce a 5-minute tolerance.
 * Signing secrets are ≥ 256-bit random, shown once to the client, and stored encrypted with an

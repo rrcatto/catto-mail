@@ -111,10 +111,13 @@ cmd_create() {
   service symfony-app "$(env_file app)" \
     --health-cmd smarthost-fpm-healthcheck --health-interval 15s --health-start-period 10s --health-retries 4 \
     localhost/smarthost-app:dev
-  # The php-fpm base image sets STOPSIGNAL SIGQUIT; the worker handles SIGTERM.
-  service webhook-worker "$(env_file webhook-worker)" --user www-data --stop-signal SIGTERM \
-    --health-cmd "test -s /tmp/smarthost-worker-ok" --health-interval 30s --health-start-period 20s --health-retries 3 \
-    localhost/smarthost-app:dev php /srv/probe/webhook-worker.php
+  # The real Symfony webhook worker (Phase 7). The php-fpm base image sets STOPSIGNAL
+  # SIGQUIT; the worker handles SIGTERM (no new claims; in-flight requests finish
+  # within APP_WEBHOOK_TIMEOUT_SECONDS, well inside the stop timeout). Healthy only
+  # while the worker loop keeps touching its liveness file.
+  service webhook-worker "$(env_file webhook-worker)" --user www-data --stop-signal SIGTERM --stop-timeout 30 \
+    --health-cmd smarthost-webhook-worker-healthcheck --health-interval 30s --health-start-period 20s --health-retries 3 \
+    localhost/smarthost-app:dev php bin/console smarthost:webhook:work
   service nginx "$(env_file proxy)" -e NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
     --secret "smarthost-proxy-tls-cert,type=mount,target=$PROXY_TLS_CERT_FILE" \
     --secret "smarthost-proxy-tls-key,type=mount,target=$PROXY_TLS_KEY_FILE" \

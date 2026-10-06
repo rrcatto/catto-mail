@@ -18,7 +18,8 @@ RUN apt-get update \
 COPY app/docker/zz-smarthost-fpm.conf /usr/local/etc/php-fpm.d/zz-smarthost.conf
 COPY app/docker/php.ini /usr/local/etc/php/conf.d/zz-smarthost.ini
 COPY app/docker/fpm-healthcheck.sh /usr/local/bin/smarthost-fpm-healthcheck
-RUN chmod 0755 /usr/local/bin/smarthost-fpm-healthcheck
+COPY app/docker/webhook-worker-healthcheck.sh /usr/local/bin/smarthost-webhook-worker-healthcheck
+RUN chmod 0755 /usr/local/bin/smarthost-fpm-healthcheck /usr/local/bin/smarthost-webhook-worker-healthcheck
 WORKDIR /srv/app
 
 FROM base AS tools
@@ -49,8 +50,7 @@ FROM base AS runtime
 COPY --from=vendor /srv/app /srv/app
 COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
-# Phase 1 infrastructure probes still used by the verification suite and the
-# webhook-worker placeholder (the worker itself is Phase 7).
+# Phase 1 infrastructure probes still used by the verification suite.
 COPY app/phase1-probe/ /srv/probe/
 RUN rm -rf /srv/app/tests /srv/app/phpunit.dist.xml && chmod -R a+rX /srv/probe \
  && mkdir -p var && chown -R www-data:www-data var

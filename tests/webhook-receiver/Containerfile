@@ -1,0 +1,9 @@
+# Deterministic external-client webhook receiver (test fixture; never a Smarthost
+# service). Stdlib only.
+FROM docker.io/library/python:3.14-slim-trixie
+RUN useradd --uid 10004 --create-home receiver && mkdir -p /data && chown receiver /data
+COPY receiver.py test_receiver.py /opt/receiver/
+WORKDIR /opt/receiver
+USER receiver
+EXPOSE 8080
+ENTRYPOINT ["python", "/opt/receiver/receiver.py"]

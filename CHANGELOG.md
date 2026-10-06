@@ -2,7 +2,74 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.7.
+the *specification* version, which is 2.8.
+
+## [0.1.7] - 2026-10-06
+
+Phase 7, Smarthost side (specification 2.8): the real webhook worker and its delivery contract, a
+single-endpoint `POST /v1/webhooks/test`, and dashboard webhook management. The client workflow is
+proven with a deterministic external test client. Integrating the real first client application,
+in its own repository, is outstanding. Validator version 0.1.7.
+
+### Added
+- **Webhook worker** (`smarthost:webhook:work`, container `smarthost-webhook-worker`). It replaces
+  the Phase 1 placeholder (`app/phase1-probe/webhook-worker.php`, removed).
+  - Fans out the transactional outbox to the client's enabled, subscribed endpoints; one delivery
+    per (event, endpoint).
+  - Signs requests: `Smarthost-Signature: t=..,v1=..` is HMAC-SHA256 over `<t>.<body>`, with a
+    second `v1` during a rotation overlap. Also sends `Smarthost-Event-Id`, `-Event-Type`,
+    `-Delivery-Id`, `-Delivery-Attempt` and `User-Agent: Catto-Mail-Smarthost/0.1.6`.
+  - Claims with `FOR UPDATE SKIP LOCKED` and leases, with the attempt count as the fencing token.
+    Requests are sent concurrently with no transaction open; at-least-once.
+  - Retries: 408/425/429/5xx and transport errors retry with exponential backoff, ±10% jitter and
+    `Retry-After`. Other 4xx and 3xx fail permanently; endpoints are never disabled automatically.
+  - SSRF: non-public destinations are refused (private, loopback, link-local/metadata, CGNAT,
+    multicast, reserved, documentation, ULA, IPv4-embedded). The checked address is pinned and
+    redirects are never followed. `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` is for development fixtures
+    only and is a startup error in production.
+  - Limits: request timeout; at most 64 KiB of the response is read and 1 KiB kept.
+  - Runtime: `LISTEN smarthost_webhook_work` plus polling; SIGTERM stops new claims; a liveness
+    health check; `webhook_worker_heartbeats`. Logs carry `service: webhook-worker`.
+- `POST /v1/webhooks/test` records a `webhook.test` event for exactly one endpoint:
+  `webhook_endpoint_id` is required. It returns 202 with `webhook_event_id` and never calls the
+  endpoint itself. A foreign endpoint answers 404, a disabled one 409 `webhook-endpoint-disabled`,
+  and a missing id fails validation without fanning out.
+- **Client dashboard → Webhooks** (client admins): create, edit and enable/disable endpoints, choose
+  their events, rotate the secret (shown once, `no-store`), send a test event, and browse deliveries
+  with status filters. **Operator → Webhooks**: deliveries (pending/retrying/delivered/failed,
+  client, endpoint and event filters, last response and error), outbox events and worker
+  heartbeats. The overview card shows retrying and failed deliveries and live workers.
+- Migration `Version20261007000100`:
+  - `webhook_deliveries`: `updated_at`, `last_attempt_at`, `last_response_excerpt`, plus claim
+    consistency checks;
+  - a check tying `webhook.test` to the single-endpoint `webhook_endpoint` subject;
+  - the `webhook_worker_heartbeats` table.
+- Migration `Version20261007000200` adds the indexes `webhook_deliveries (webhook_endpoint_id, status,
+  created_at)`, `webhook_deliveries (created_at, id)` and `webhook_events (created_at, id)`. The
+  query-plan review (`WebhookQueryPlanTest`, 180,000 deliveries) showed the webhook dashboard
+  statements taking 190–670 ms on whole-table scans; they now take ≤ 16 ms. The worker statements
+  already used indexes, at ≤ 13 ms. Dashboard delivered and failed counts are now time-bounded:
+  7 days per endpoint and 24 hours in the operator summary.
+- Tests:
+  - `WebhookWorkerTest`: contract body and signature, fan-out rules, permanent and retryable
+    responses, retry then success or exhaustion, crash reclaim and fencing, concurrent fan-out,
+    rotation overlap, SSRF, development allowlist, oversized response, disabled endpoint, message
+    payloads, test events through the API;
+  - `WebhookDashboardTest`, `WebhookQueryPlanTest` and `WebProcessIsolationTest`;
+  - an external receiver fixture (`tests/webhook-receiver/`, with unit tests);
+  - `smarthostctl test phase7-e2e`.
+
+### Changed
+- Specification 2.8 (`webhooks.delivery_contract`); OpenAPI 1.0.0-draft.7.
+- Decisions recorded (specification 2.8):
+  - no public webhook-endpoint management API and no suppression-lookup API;
+  - `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` (empty: no automatic deletion);
+  - production `APP_WEBHOOK_*` values are deferred to Phase 8.
+- The Symfony image adds `symfony/http-client`. The worker uses its own Doctrine connection as
+  `smarthost_webhook`, and signing-secret decryption moved to `App\Webhook\WebhookSecrets`.
+  Doctrine's entity argument resolver is disabled (controllers take ids), so the web process never
+  builds the worker-only entity manager (`WebProcessIsolationTest`).
+- README, CHANGELOG and phase6-e2e wording cleaned up for specification 2.7 (no "form login").
 
 ## [0.1.6] - 2026-10-06
 
@@ -69,7 +136,7 @@ decisions D-36 to D-38).
   opt-outs; this client's suppressed messages with only the broad reason of a global suppression),
   sending domains (DNS check through `SendingDomainService::verify`), usage. A client the user may not
   see is a 404; every query carries the client id.
-- Operator dashboard under `/dashboard/operator` (`ROLE_OPERATOR`): system overview from durable
+- Operator dashboard under `/dashboard/operator` (each page guarded by a permission key since specification 2.7): system overview from durable
   database signals (queues, leases, newest results, Postfix-log ingest cursor, messages per status,
   per-client rates over 7 days, suppressions, unmatched DSNs, webhook outbox), clients (status and
   opt-out capability through the audited services), the unmatched-DSN workflow (match request and

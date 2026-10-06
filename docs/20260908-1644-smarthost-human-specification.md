@@ -1,6 +1,6 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.7. This is a documentation revision, not a software release version.
+**Specification version:** 2.8. This is a documentation revision, not a software release version.
 **Revision date:** 6 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
@@ -1090,7 +1090,8 @@ Rendered content is transient (§8.12). Phase 0 hard-codes no final long-term re
 - tracking tokens and links;
 - unmatched DSNs;
 - audit logs;
-- usage records.
+- usage records;
+- webhook delivery history (`APP_RETENTION_WEBHOOK_DELIVERIES_DAYS`, specification 2.8).
 
 Each period is configurable. The operator's compliance specification will set the production policy. Until then, no automatic deletion takes place.
 
@@ -1123,7 +1124,7 @@ GET  /v1/send-jobs/{id}/messages
 
 GET  /v1/messages/{id}/events
 
-POST /v1/webhooks/test
+POST /v1/webhooks/test                 (one named endpoint: webhook_endpoint_id required)
 
 POST /v1/global-suppressions           (trusted clients only: recipient global opt-out)
 GET  /v1/global-suppressions/{id}
@@ -1160,6 +1161,117 @@ The initial events are:
 - `send.failed`;
 - `message.hard_bounced`;
 - `message.complained`.
+
+### Webhook delivery contract (specification 2.8)
+
+**Body.** Each request is an HTTPS POST of one `WebhookEvent` (`id`, `type`, `created_at`, `data`).
+The `data` depends on the event:
+
+- `validation.*`: the validation job as `GET /v1/validation-jobs/{id}` shows it;
+- `send.*`: the send job;
+- `message.*`: the message, plus the message event that caused the change (the first hard bounce
+  or complaint);
+- `webhook.test`: `{}`.
+
+`data` is the subject's state when the worker fans the event out; clients poll the API for later
+state. No secret, API key, tracking token or VERP token is ever included.
+
+**Headers.**
+
+- `Content-Type: application/json` and `User-Agent: Catto-Mail-Smarthost/<version>`;
+- `Smarthost-Event-Id`, the de-duplication key;
+- `Smarthost-Event-Type`;
+- `Smarthost-Delivery-Id` and `Smarthost-Delivery-Attempt`, for diagnostics only;
+- `Smarthost-Signature: t=<unix seconds>,v1=<hex>`, where `v1` is HMAC-SHA256 over the exact bytes
+  `<t>.<body>` with the endpoint's signing secret. During a rotation overlap a second `v1` signed
+  with the previous secret is added. Receivers compare in constant time, verify before parsing and
+  reject timestamps more than 5 minutes from their clock.
+
+**At-least-once.** Each event produces exactly one *delivery record* per endpoint. The database's
+unique (event, endpoint) index guarantees this even when several workers run. The HTTP request,
+however, can be sent more than once: a request whose result was not recorded (a timeout, or a
+worker that stopped) is sent again. Receivers therefore de-duplicate on `Smarthost-Event-Id`, and
+Smarthost never claims exactly-once delivery.
+
+**Fan-out.** An event goes to the client's endpoints that are enabled and subscribed to its type
+when the worker fans it out, normally within seconds. A `webhook.test` goes only to the one endpoint
+named in the request, if it is still enabled, regardless of subscriptions. There is no client-wide
+test.
+
+**Retries.**
+
+- Any 2xx response delivers the event.
+- 408, 425, 429, 5xx, timeouts, refused or reset connections, TLS errors and temporary DNS failures
+  are retried after min(`APP_WEBHOOK_RETRY_MAX_SECONDS`, `APP_WEBHOOK_RETRY_BASE_SECONDS` ×
+  2^(attempt−1)) ±10 %, or after a `Retry-After` of up to that maximum.
+- Other responses fail the delivery without retry: other 4xx, and 3xx (redirects are never
+  followed).
+- After `APP_WEBHOOK_MAX_ATTEMPTS` attempts the delivery fails.
+- Failed deliveries are kept and shown to the client and the operator. Endpoints are never disabled
+  automatically.
+
+**Destinations (SSRF).** Before every attempt the endpoint's host is resolved, and the request is
+refused if any address is non-public:
+
+- loopback, unspecified and private (RFC 1918) addresses;
+- carrier-grade NAT;
+- link-local addresses, including the cloud metadata address;
+- multicast, reserved and documentation ranges;
+- IPv6 unique-local addresses;
+- IPv4 embedded in IPv6.
+
+The connection is pinned to the checked address, so a DNS answer that changes later cannot
+redirect it. Only https is used in production. In development and test, only the host names listed
+in `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, such as the local receiver fixture, may be private; that
+setting is a startup error in production.
+
+**Limits.**
+
+- The request times out after `APP_WEBHOOK_TIMEOUT_SECONDS`.
+- At most 64 KiB of the response is read, and 1 KiB of it is kept for diagnostics.
+- A batch of requests is sent concurrently, so one slow endpoint does not stall the others.
+
+**The worker.** The worker runs `smarthost:webhook:work` in the `smarthost-webhook-worker`
+container, as its own database role. Each round it:
+
+- fans out pending events;
+- claims due deliveries (`FOR UPDATE SKIP LOCKED`, with a lease). The incremented attempt count is
+  the fencing token;
+- sends them with no database transaction open;
+- records each outcome only if it still holds the lease.
+
+A crashed worker's deliveries are claimed again when the lease expires. `SIGTERM` stops new claims.
+The container's health check requires the worker loop to have run recently, and each worker records
+a heartbeat for the operator dashboard.
+
+**Management.** Client admins manage endpoints in the client dashboard:
+
+- create endpoints and choose their event types;
+- enable, disable and edit them;
+- rotate the signing secret, which is shown once;
+- send a test event.
+
+The audited console commands do the same.
+
+`POST /v1/webhooks/test` requires `webhook_endpoint_id` and records a `webhook.test` for that one
+endpoint. It returns the event id at once (202) and never calls the endpoint itself.
+
+- Another client's endpoint answers 404, exactly as a missing endpoint does.
+- A disabled endpoint answers 409 `webhook-endpoint-disabled`, and nothing is recorded.
+- A request without an endpoint id fails validation (400/422) and is never sent to every endpoint.
+
+**Decisions (specification 2.8).**
+
+- **No endpoint-management API.** The public API has no endpoint-management (CRUD) operations.
+  Endpoints are set up as administration, in the dashboard or the audited console. Runtime
+  integration uses the public API and the received webhooks.
+- **No suppression lookup.** There is no API to ask whether an arbitrary address is suppressed.
+  Smarthost enforces suppressions at send time, and the client learns the outcome from its message
+  state and events.
+- **Retention.** Webhook delivery history follows `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS`. Empty
+  means no automatic deletion until a production retention policy sets a period.
+- **Production values.** Production `APP_WEBHOOK_*` values are chosen in Phase 8. A distinct connect
+  timeout and a response-header size bound are later hardening.
 
 ---
 
@@ -1357,7 +1469,8 @@ Postfix-log ingest cursor, messages per status, bounce/deferral/complaint rates 
 when a worker is down; clients with status changes and the opt-out capability (each through the
 existing audited services); the unmatched-DSN workflow; suppressions with operator provenance,
 operator blocks and lifting with a required note; the audit log with secret-like values redacted
-on display; and the webhook outbox, labelled as outbox state until Phase 7 delivers webhooks. The
+on display; and webhook deliveries (pending, retrying, delivered, failed) with worker heartbeats
+(Phase 7). The
 Postfix queue snapshots are read only by the Go daemon, so the overview shows the messages Smarthost
 considers to be in Postfix rather than the queue depth itself.
 
@@ -1620,19 +1733,26 @@ Exit criteria:
 
 **Purpose:** make the first client application a real external customer of Smarthost.
 
-Implement in the client application:
+Integration expectations of a client application (how it meets them is decided in its own
+repository; Smarthost defines only the public API and webhook contracts):
 
-- API client;
-- API-key configuration;
-- validation submission and result retrieval;
-- rendering of recipient content and batched send-job submission;
-- webhook receiver;
-- campaign/subscriber to Smarthost reference mapping.
+- it calls the public API with its API key, kept as a secret;
+- it submits validation jobs and retrieves the results;
+- it renders recipient content and submits batched send jobs;
+- it receives webhooks, verifies their signatures and de-duplicates them by event id;
+- it maps its own campaigns and subscribers to Smarthost through external references;
+- it reconciles by polling when a webhook is missed.
 
 Exit criteria:
 
 - the full client workflow works without direct database access;
 - either system can be deployed/restarted independently.
+
+**Smarthost side implemented (specification 2.8).** The real Symfony webhook worker (see *Webhook
+delivery contract*), `POST /v1/webhooks/test` and dashboard webhook management. The client-side
+workflow is proven end to end by a deterministic external test client: an API-only driver plus an
+independent webhook receiver, `smarthostctl test phase7-e2e`. Integrating the real first client
+application, in its own repository, is still outstanding.
 
 ---
 
@@ -1738,6 +1858,7 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.8 | 6 October 2026 | Phase 7 Smarthost side: the webhook delivery contract (body, headers, signature input, at-least-once with event-id de-duplication, fan-out timing, `webhook.test` addressing, retry and permanent-failure rules, SSRF destination policy with address pinning and no redirects, response and time limits, no automatic endpoint disabling), the real webhook worker (leases, fencing, heartbeats), dashboard webhook management. `webhook_deliveries` diagnostics; `webhook.test` names exactly one endpoint (`webhook_endpoint_id` required); `webhook_worker_heartbeats` and dashboard indexes; `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` (empty: no automatic deletion). Decisions: no endpoint-management API, no suppression-lookup API, production webhook values in Phase 8. |
 | 2.7 | 6 October 2026 | Passwordless dashboard sign-in by single-use emailed links (through Postfix; Mailpit in development) with roles, permission keys and an editable access-control list; `APP_ADMIN_EMAIL` always receives ADMIN; OPERATOR replaces the operator flag; users, roles and memberships are managed in the browser; passwords removed. New tables `roles`, `role_permissions`, `user_roles`, `auth_login_tokens`. The development public URL is `https://localhost:8443`. |
 | 2.6 | 5 October 2026 | Phase 6 tracking and dashboards: tracking-endpoint eligibility, identical answers for unknown tokens, the bounded recording rule (one recorded open per message per 60 seconds, one recorded click per message and link per 10 seconds, at most 1000 events of a type per message, a per-address limit that only skips the write) and token-free logging; the dashboards' scope, access model, keyset pagination and HTTP security; the `message_events` engagement index and read-only web access to the Postfix-log ingest cursor. No architecture change. |
 | 2.5 | 5 October 2026 | Phase 5 corrections: DSNs and complaints correlate automatically only through Smarthost-issued identifiers; recipient-plus-sender evidence is only an operator candidate (D-36). Trusted clients may create recipient global opt-outs while pending approval or suspended, but lift them only while active or throttled (D-37). Durable opt-out request idempotency independent of the suppression row (D-38). |

@@ -22,7 +22,7 @@ use Symfony\Component\Uid\Uuid;
  * Secrets are "whsec_" + base64url(32 CSPRNG bytes), returned once on creation or
  * rotation, and stored only encrypted (App\Crypto\Keyring, purpose bound to the
  * endpoint id). Rotation keeps the previous secret valid for
- * APP_WEBHOOK_SECRET_OVERLAP_HOURS, during which the worker (Phase 7) sends both
+ * APP_WEBHOOK_SECRET_OVERLAP_HOURS, during which the worker sends both
  * signatures. URLs must be https outside development/test.
  */
 final class WebhookEndpointService
@@ -91,23 +91,10 @@ final class WebhookEndpointService
         $this->change($endpoint, $actor, 'webhook_endpoint.'.$status->value, static fn () => $endpoint->setStatus($status));
     }
 
-    /**
-     * Secrets the worker signs with at $at: the current one, plus the previous one
-     * while its overlap window is open (OpenAPI webhooks: second `v1=` value).
-     *
-     * @return list<string>
-     */
+    /** @return list<string> the secrets the worker signs with at $at (WebhookSecrets) */
     public function activeSecrets(WebhookEndpoint $endpoint, ?\DateTimeImmutable $at = null): array
     {
-        $at ??= Clock::now();
-        $purpose = self::purpose($endpoint->getId());
-        $secrets = [$this->keyring->decrypt($endpoint->getSigningSecretCiphertext(), $endpoint->getSigningSecretKeyId(), $purpose)];
-        if (null !== $endpoint->getPreviousSigningSecretCiphertext() && $endpoint->getPreviousSigningSecretExpiresAt() > $at) {
-            $secrets[] = $this->keyring->decrypt($endpoint->getPreviousSigningSecretCiphertext(),
-                (string) $endpoint->getPreviousSigningSecretKeyId(), $purpose);
-        }
-
-        return $secrets;
+        return (new WebhookSecrets($this->keyring))->active($endpoint, $at);
     }
 
     private static function newSecret(): string
@@ -117,7 +104,7 @@ final class WebhookEndpointService
 
     private static function purpose(Uuid $endpointId): string
     {
-        return 'webhook_signing_secret:'.$endpointId->toRfc4122();
+        return WebhookSecrets::purpose($endpointId);
     }
 
     private function assertUrl(string $url): void

@@ -58,12 +58,14 @@
         <p><a href="{{ path('dashboard_operator_dsns') }}">Review unmatched DSNs</a></p>
     </section>
     <section class="card">
-        <h2>Webhook outbox</h2>
+        <h2>Webhooks</h2>
         <dl>
             <dt>Events awaiting fan-out</dt><dd>{{ o.webhooks.events_awaiting_fanout|number_format }}</dd>
-            {% for k, v in o.webhooks.deliveries %}<dt>Delivery records “{{ k }}”</dt><dd>{{ v|number_format }}</dd>{% endfor %}
+            {% for k in ['pending', 'retrying', 'delivered', 'failed'] %}<dt>Deliveries {{ k }}{% if k in ['delivered', 'failed'] %} (24 h){% endif %}</dt><dd>{{ (o.webhooks.deliveries[k] ?? 0)|number_format }}</dd>{% endfor %}
+            <dt>Workers running</dt><dd>{{ o.webhooks.workers|filter(w => w.alive)|length }}</dd>
         </dl>
-        <p class="muted">Outbox state only. HTTP webhook delivery is not implemented yet (Phase 7), so nothing here means a webhook reached a client.</p>
+        {% if o.webhooks.events_awaiting_fanout > 0 and o.webhooks.workers|filter(w => w.alive)|length == 0 %}<p class="warn" role="status"><strong>Attention:</strong> webhook events are waiting and no webhook worker is running.</p>{% endif %}
+        <p><a href="{{ path('dashboard_operator_webhooks') }}">Deliveries and workers</a></p>
     </section>
     <section class="card">
         <h2>Clients</h2>

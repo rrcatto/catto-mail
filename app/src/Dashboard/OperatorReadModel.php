@@ -36,6 +36,8 @@ final class OperatorReadModel
 
     public const OUTBOX_SORTS = ['created' => ['w.created_at', 'timestamptz']];
 
+    public const OUTBOX_SORTS_DELIVERIES = ['created' => ['d.created_at', 'timestamptz']];
+
     public const USER_SORTS = [
         'created' => ['u.created_at', 'timestamptz'],
         'email' => ['lower(u.email)', 'text'],
@@ -381,13 +383,54 @@ final class OperatorReadModel
             SQL, [$userId]);
     }
 
-    /** @return array{events_awaiting_fanout: int, deliveries: array<string, int>} */
+    /** @return array{events_awaiting_fanout: int, deliveries: array<string, int>, workers: list<array<string, mixed>>} */
     public function webhookSummary(): array
     {
+        // Bounded: every pending delivery (a small set), delivered and failed of the last 24 hours.
+        $deliveries = array_map('intval', $this->connection->fetchAllKeyValue(<<<'SQL'
+            SELECT CASE WHEN attempt_count > 0 THEN 'retrying' ELSE 'pending' END, count(*) FROM webhook_deliveries WHERE status = 'pending' GROUP BY 1
+            UNION ALL
+            SELECT status, count(*) FROM webhook_deliveries WHERE status <> 'pending' AND created_at > now() - interval '24 hours' GROUP BY 1
+            SQL));
+
         return [
             'events_awaiting_fanout' => (int) $this->connection->fetchOne('SELECT count(*) FROM webhook_events WHERE fanned_out_at IS NULL'),
-            'deliveries' => array_map('intval', $this->connection->fetchAllKeyValue('SELECT status, count(*) FROM webhook_deliveries GROUP BY status')),
+            'deliveries' => $deliveries,
+            // Live or recently stopped worker processes (bounded).
+            'workers' => $this->connection->fetchAllAssociative(<<<'SQL'
+                SELECT worker_id, version, started_at, last_seen_at, stopped_at, attempts, delivered, events_fanned_out,
+                       stopped_at IS NULL AND last_seen_at > now() - interval '2 minutes' AS alive
+                  FROM webhook_worker_heartbeats WHERE last_seen_at > now() - interval '1 day' ORDER BY last_seen_at DESC LIMIT 20
+                SQL),
         ];
+    }
+
+    /**
+     * Webhook deliveries across clients.
+     *
+     * @param array{status?: string, event_type?: string, client?: string} $filters
+     *
+     * @return array{rows: list<array<string, mixed>>, next: ?string}
+     */
+    public function webhookDeliveries(array $filters, Listing $listing): array
+    {
+        $where = [];
+        $params = [];
+        ClientReadModel::deliveryStatusFilter($where, $filters['status'] ?? '');
+        if ('' !== ($filters['event_type'] ?? '')) {
+            $where[] = 'd.event_type = ?';
+            $params[] = $filters['event_type'];
+        }
+        if (ClientReadModel::isUuid($filters['client'] ?? '')) {
+            $where[] = 'd.client_id = ?';
+            $params[] = $filters['client'];
+        }
+
+        return $this->keyset->page(<<<'SQL'
+            d.id::text AS id, d.webhook_event_id::text AS event_id, d.event_type, d.status, d.attempt_count, d.next_attempt_at,
+            d.last_attempt_at, d.last_response_status, d.last_error, d.delivered_at, d.created_at, e.url, c.company_name, d.client_id::text AS client_id
+            SQL, 'webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.webhook_endpoint_id JOIN clients c ON c.id = d.client_id',
+            $where, $params, $listing, self::OUTBOX_SORTS_DELIVERIES, 'd.id');
     }
 
     /** @return list<string> distinct audit actions (for the filter) */

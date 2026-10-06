@@ -585,11 +585,15 @@ CREATE TABLE webhook_events (
     subject_type   text        NOT NULL CHECK (subject_type IN ('validation_job', 'send_job', 'message', 'webhook_endpoint')),
     subject_id     uuid        NOT NULL,
     created_at     timestamptz NOT NULL DEFAULT now(),
-    fanned_out_at  timestamptz NULL
+    fanned_out_at  timestamptz NULL,
+    -- webhook.test is always addressed to exactly one endpoint, and only webhook.test has that subject.
+    CONSTRAINT webhook_events_test_subject CHECK (
+        (event_type = 'webhook.test') = (subject_type = 'webhook_endpoint'))
 );
 CREATE INDEX webhook_events_pending_fanout_idx ON webhook_events (created_at) WHERE fanned_out_at IS NULL;
 CREATE UNIQUE INDEX webhook_events_once_uq ON webhook_events (event_type, subject_id)
     WHERE event_type <> 'webhook.test';
+CREATE INDEX webhook_events_created_idx ON webhook_events (created_at, id);  -- operator outbox list (Phase 7)
 
 CREATE TABLE webhook_deliveries (
     id                    uuid        PRIMARY KEY,
@@ -611,11 +615,34 @@ CREATE TABLE webhook_deliveries (
     last_error            text        NULL,
     delivered_at          timestamptz NULL,
     created_at            timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT webhook_deliveries_delivered_has_time CHECK (status <> 'delivered' OR delivered_at IS NOT NULL)
+    -- Phase 7 (specification 2.8)
+    updated_at            timestamptz NOT NULL DEFAULT now(),
+    last_attempt_at       timestamptz NULL,
+    last_response_excerpt text        NULL CHECK (length(last_response_excerpt) <= 1024),  -- bounded diagnostics only
+    CONSTRAINT webhook_deliveries_delivered_has_time CHECK (status <> 'delivered' OR delivered_at IS NOT NULL),
+    -- A claim is a lease; attempt_count (incremented by the claim) fences the attempt's result.
+    CONSTRAINT webhook_deliveries_lease_complete CHECK ((claimed_by IS NULL) = (lease_expires_at IS NULL)),
+    CONSTRAINT webhook_deliveries_final_unclaimed CHECK (status = 'pending' OR claimed_by IS NULL)
 );
 CREATE INDEX webhook_deliveries_due_idx ON webhook_deliveries (status, next_attempt_at) WHERE status = 'pending';
 CREATE INDEX webhook_deliveries_client_created_idx ON webhook_deliveries (client_id, created_at);
 CREATE UNIQUE INDEX webhook_deliveries_event_endpoint_uq ON webhook_deliveries (webhook_event_id, webhook_endpoint_id);
+-- Phase 7 query-plan review: per-endpoint counts; cross-client lists and the bounded summary.
+CREATE INDEX webhook_deliveries_endpoint_status_idx ON webhook_deliveries (webhook_endpoint_id, status, created_at);
+CREATE INDEX webhook_deliveries_created_idx ON webhook_deliveries (created_at, id);
+
+-- One row per webhook-worker process: liveness and counters for the operator dashboard.
+CREATE TABLE webhook_worker_heartbeats (
+    worker_id             text        PRIMARY KEY,
+    version               text        NOT NULL,
+    started_at            timestamptz NOT NULL,
+    last_seen_at          timestamptz NOT NULL,
+    stopped_at            timestamptz NULL,
+    attempts              bigint      NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    delivered             bigint      NOT NULL DEFAULT 0 CHECK (delivered >= 0),
+    events_fanned_out     bigint      NOT NULL DEFAULT 0 CHECK (events_fanned_out >= 0)
+);
+CREATE INDEX webhook_worker_heartbeats_seen_idx ON webhook_worker_heartbeats (last_seen_at);
 
 CREATE TABLE audit_log (
     id           uuid        PRIMARY KEY,

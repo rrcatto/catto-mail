@@ -6,13 +6,14 @@ never host-published). There is no separate PHP HTTP server.
 **Phase 2 (implemented):**
 - the `/v1` API of `docs/api/openapi.v1.yaml`: validation-job creation and reads, the staged send-job
   lifecycle (create → recipient batches → submit), message and event reads, and
-  `POST /v1/webhooks/test` (501 until Phase 7);
+  `POST /v1/webhooks/test` (since Phase 7: records a `webhook.test` event for the one endpoint
+  named by the required `webhook_endpoint_id`);
 - API-key authentication (Bearer, stored only as SHA-256), tenant isolation, idempotency and rate
   limiting; RFC 9457 problem responses;
 - Doctrine entities and the migrations, which are the only authority for schema objects;
 - sending-domain registration and DNS TXT verification, DKIM selector/status records;
 - the dashboard user foundation (users and client memberships);
-- the webhook endpoint/secret model and the transactional outbox (no HTTP delivery yet);
+- the webhook endpoint/secret model and the transactional outbox (HTTP delivery since Phase 7);
 - the audit log and the administrative console commands (`smarthost:*`).
 
 **Phase 3 (implemented):** work-creating operations answer 403 for `pending_approval` and
@@ -50,9 +51,16 @@ ADMIN. Operator pages require permission keys (`App\Access\PermissionCatalog`) g
 *Operator › Users* and *Roles & permissions*. There are no passwords. Migration
 `Version20261006000200`.
 
-**Later phases:** retention commands, and the **webhook worker**, a long-running console process from this image that
-consumes the `webhook_events` outbox and is the only component that sends webhooks. Until Phase 7
-the worker unit runs the placeholder in `phase1-probe/`.
+**Phase 7 (Smarthost side, v0.1.7, specification 2.8):** the **webhook worker**, `bin/console
+smarthost:webhook:work` (container `smarthost-webhook-worker`, same image, database role
+`smarthost_webhook` through its own Doctrine connection). It is the only component that sends
+webhooks: it fans out the `webhook_events` outbox, claims deliveries with leases and fencing,
+signs and sends them concurrently with SSRF protection, and retries or fails them by the
+documented policy (`App\Webhook\WebhookDispatcher`). Client admins manage endpoints under
+*Client › Webhooks*, and operators see deliveries and workers under *Operator › Webhooks*.
+Migration `Version20261007000100`.
+
+**Later phases:** retention commands.
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
 `.env` file). Run console commands in the development pod with

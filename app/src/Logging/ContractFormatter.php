@@ -27,7 +27,8 @@ final class ContractFormatter implements FormatterInterface
         $fields = [
             'ts' => $record->datetime->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z'),
             'level' => strtolower($record->level->getName()),
-            'service' => 'symfony-app',
+            // The webhook worker runs the same image and kernel as the web app.
+            'service' => \in_array('smarthost:webhook:work', $_SERVER['argv'] ?? [], true) ? 'webhook-worker' : 'symfony-app',
             'msg' => $record->message,
             'channel' => $record->channel,
         ] + $this->normalise($record->context) + $this->normalise($record->extra);

@@ -252,12 +252,15 @@ final class ConstraintTest extends TestCase
         self::assertSame('webhook_endpoints_subscribed_event_types_check', $this->violation($endpoint(['subscribed_event_types' => '{"a":1}'])));
         self::assertSame('webhook_endpoints_url_check', $this->violation($endpoint(['url' => 'ftp://x'])));
         $subject = SchemaFixtures::id();
-        $event = fn (string $type) => fn (Connection $c) => $c->insert('webhook_events', ['id' => SchemaFixtures::id(), 'client_id' => $client,
-            'event_type' => $type, 'subject_type' => 'send_job', 'subject_id' => $subject]);
+        $event = fn (string $type, string $subjectType = 'send_job') => fn (Connection $c) => $c->insert('webhook_events', ['id' => SchemaFixtures::id(), 'client_id' => $client,
+            'event_type' => $type, 'subject_type' => $subjectType, 'subject_id' => $subject]);
         self::assertNull($this->violation($event('send.completed')));
         self::assertSame('webhook_events_once_uq', $this->violation($event('send.completed')));
-        self::assertNull($this->violation($event('webhook.test')));
-        self::assertNull($this->violation($event('webhook.test')), 'webhook.test may repeat');
+        self::assertNull($this->violation($event('webhook.test', 'webhook_endpoint')));
+        self::assertNull($this->violation($event('webhook.test', 'webhook_endpoint')), 'webhook.test may repeat');
+        self::assertSame('webhook_events_subject_type_check', $this->violation($event('webhook.test', 'client')), 'no client-wide test subject');
+        self::assertSame('webhook_events_test_subject', $this->violation($event('webhook.test', 'send_job')), 'webhook.test names exactly one endpoint');
+        self::assertSame('webhook_events_test_subject', $this->violation($event('send.completed', 'webhook_endpoint')));
     }
 
     public function testDomainReputationTreatsNullClientAsOneScope(): void

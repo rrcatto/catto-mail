@@ -10,6 +10,7 @@ use App\Domain\DomainRuleViolation;
 use App\Enum\WebhookEndpointStatus;
 use App\Enum\WebhookEventType;
 use App\Enum\WebhookSubjectType;
+use App\Tests\Schema\SchemaFixtures;
 use App\Tests\Support\ApiTestCase;
 use App\Tests\Support\Db;
 use App\Webhook\WebhookEndpointService;
@@ -105,13 +106,14 @@ final class WebhookFoundationTest extends ApiTestCase
         $outbox->record($client->getId(), WebhookEventType::WebhookTest, WebhookSubjectType::WebhookEndpoint, $subject);
         $conn->commit();
         self::assertSame(3, (int) Db::owner()->fetchOne('SELECT count(*) FROM webhook_events WHERE subject_id = ? AND fanned_out_at IS NULL', [$subject->toRfc4122()]));
-        self::assertSame(0, (int) Db::owner()->fetchOne('SELECT count(*) FROM webhook_deliveries WHERE client_id = ?', [$client->getId()->toRfc4122()]), 'no delivery in Phase 2');
+        self::assertSame(0, (int) Db::owner()->fetchOne('SELECT count(*) FROM webhook_deliveries WHERE client_id = ?', [$client->getId()->toRfc4122()]), 'only the webhook worker creates deliveries');
     }
 
-    public function testWebhookTestEndpointIsNotImplementedYet(): void
+    public function testWebhookTestNeedsAKeyAndExactlyOneEndpointId(): void
     {
         [, $key] = $this->newApiClient();
-        $this->assertProblem($this->api('POST', '/v1/webhooks/test', $key), 501, 'not-implemented');
+        $this->assertProblem($this->api('POST', '/v1/webhooks/test', $key, '{}'), 422, 'validation-error');
+        $this->assertProblem($this->api('POST', '/v1/webhooks/test', $key, ['webhook_endpoint_id' => SchemaFixtures::id(), 'all' => true]), 422, 'validation-error');
         $this->assertProblem($this->api('POST', '/v1/webhooks/test', null), 401, 'unauthorized');
     }
 }

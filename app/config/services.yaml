@@ -18,6 +18,15 @@ parameters:
     app.no_admin_email: ''
     app.mail_from: '%env(APP_MAIL_FROM)%'
     app.login_link_ttl_seconds: '%env(int:APP_LOGIN_LINK_TTL_SECONDS)%'
+    # Webhook worker (Phase 7, contract APP_WEBHOOK_*).
+    app.webhook.max_attempts: '%env(int:APP_WEBHOOK_MAX_ATTEMPTS)%'
+    app.webhook.timeout_seconds: '%env(int:APP_WEBHOOK_TIMEOUT_SECONDS)%'
+    app.webhook.lease_seconds: '%env(int:APP_WEBHOOK_LEASE_SECONDS)%'
+    app.webhook.retry_base_seconds: '%env(int:APP_WEBHOOK_RETRY_BASE_SECONDS)%'
+    app.webhook.retry_max_seconds: '%env(int:APP_WEBHOOK_RETRY_MAX_SECONDS)%'
+    app.webhook.poll_interval_seconds: '%env(int:APP_WEBHOOK_POLL_INTERVAL_SECONDS)%'
+    app.webhook.allowed_private_hosts: '%env(default:app.no_private_hosts:APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS)%'
+    app.no_private_hosts: ''
     # Empty means no expiry (contract APP_RETENTION_TRACKING_DAYS).
     app.tracking.retention_days: '%env(default:app.no_retention:APP_RETENTION_TRACKING_DAYS)%'
     app.no_retention: ''
@@ -62,17 +71,21 @@ services:
 
     # Real DNS in every environment except tests (tests replace it with a stub).
     App\Domain\Dns\TxtResolver: '@App\Domain\Dns\SystemTxtResolver'
+    App\Webhook\HostResolver: '@App\Webhook\SystemHostResolver'
 
 when@test:
     services:
         App\Domain\Dns\TxtResolver:
             class: App\Tests\Support\StubTxtResolver
             public: true
+        App\Webhook\HostResolver:
+            class: App\Tests\Support\StubHostResolver
+            public: true
         # The outbox has no Phase 2 producer yet (validation/sending events come from
         # Python and Go); keep it reachable for its tests.
         App\Webhook\WebhookOutbox:
             autowire: true
             public: true
-        # Records the SQL of the application connection (query counts and plans in tests).
+        # Records the SQL of the application and webhook-worker connections (query counts and plans in tests).
         App\Tests\Support\QueryRecorder:
-            tags: [{ name: doctrine.middleware, connection: default }]
+            tags: [{ name: doctrine.middleware, connection: default }, { name: doctrine.middleware, connection: webhook }]

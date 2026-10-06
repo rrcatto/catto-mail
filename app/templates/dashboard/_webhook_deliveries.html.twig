@@ -1,0 +1,19 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% if rows is empty %}<p class="empty">No deliveries match.</p>{% else %}
+<div class="scroll">
+<table class="dense">
+    <thead><tr><th scope="col">Created</th>{% if show_client %}<th scope="col">Client</th>{% endif %}<th scope="col">Event</th><th scope="col">Endpoint</th><th scope="col">State</th><th scope="col" class="num">Attempts</th><th scope="col">Last response</th><th scope="col">Next attempt</th><th scope="col">Delivered</th></tr></thead>
+    <tbody>{% for d in rows %}
+        {% set state = d.status == 'pending' and d.attempt_count > 0 ? 'retrying' : d.status %}
+        <tr><td>{{ d.created_at|ts }}</td>{% if show_client %}<td>{{ d.company_name }}</td>{% endif %}
+            <td><code>{{ d.event_type }}</code><br><small><code>{{ d.event_id }}</code></small></td>
+            <td class="url">{{ d.url }}</td>
+            <td>{{ ui.status(state == 'delivered' ? 'completed' : (state == 'failed' ? 'failed' : 'deferred'), 'none') }} {{ state|capitalize }}</td>
+            <td class="num">{{ d.attempt_count }}</td>
+            <td>{{ d.last_response_status ?? '—' }}{% if d.last_error %}<br><small>{{ d.last_error }}</small>{% endif %}</td>
+            <td>{{ d.next_attempt_at|ts }}</td>
+            <td>{{ d.delivered_at|ts }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+</div>
+{% endif %}

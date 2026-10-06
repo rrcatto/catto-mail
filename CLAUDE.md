@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.7) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.8) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -40,7 +40,13 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
   in `smarthostctl test phase2`; `test phase6-e2e` runs through nginx against the running pod.
 - **Passwordless sign-in, roles and ACL** (spec 2.7): complete (v0.1.6; `app/src/Access/`,
   `app/src/Security/LoginLink*`, Operator › Users and Roles & permissions).
-- Do not start Phase 7 or later work unless the user explicitly asks for it.
+- **Phase 7** (first client API integration, spec 2.8): Smarthost side complete (v0.1.7). The
+  webhook worker is `smarthost:webhook:work` (`app/src/Webhook/`, `WebhookWorkCommand`), with client
+  and operator webhook dashboard pages. `infra/bin/smarthostctl test phase7-e2e` proves the client
+  workflow through the API and signed webhooks only, with the external receiver fixture in
+  `tests/webhook-receiver/`. Integrating the real first client application (its own repository) is
+  outstanding.
+- Do not start Phase 8 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -92,6 +98,20 @@ This is a public repository. Documentation, comments, examples, tests, configura
   `docs/contracts/environment.md`. Regenerate the template with
   `python3 infra/lib/smarthost_render.py env-example`, then run
   `python3 scripts/check-contracts.py`.
+- **Webhook delivery (spec 2.8).**
+  - Only `smarthost:webhook:work` (`WebhookDispatcher`) sends HTTP webhooks. It uses the `webhook`
+    Doctrine connection and entity manager (role `smarthost_webhook`).
+  - Never use these from web code: the `symfony-app` container has no `APP_WEBHOOK_DB_*`
+    credentials (`WebProcessIsolationTest`).
+  - Destinations must pass `WebhookTargetGuard` and are pinned through the HTTP client's `resolve`
+    option. Redirects are never followed. `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` is for development
+    fixtures only.
+  - Delivery is at-least-once; never claim exactly-once.
+  - Fixed decisions (spec 2.8):
+    - `POST /v1/webhooks/test` names exactly one endpoint (`webhook_endpoint_id` required).
+    - There is no `/v1` webhook-endpoint CRUD and no suppression-lookup API.
+    - `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` empty means no automatic deletion.
+    - Production `APP_WEBHOOK_*` values belong to Phase 8.
 - **Suppressions (D-30).** Automatic suppressions and recipient global opt-outs are global
   (`client_id` NULL); the opt-out reporter is `source_client_id`. Only Go creates `hard_bounce`,
   `complaint` and `repeated_soft_bounce`, through the one policy in `delivery/internal/store/policy.go`;

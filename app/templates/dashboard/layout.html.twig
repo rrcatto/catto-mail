@@ -35,6 +35,7 @@
             <li><a href="{{ path('dashboard_client_suppressions', {clientId: cid}) }}"{% if section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>
             <li><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}"{% if section == 'domains' %} aria-current="page"{% endif %}>Sending domains</a></li>
             <li><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}"{% if section == 'usage' %} aria-current="page"{% endif %}>Usage</a></li>
+            <li><a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}"{% if section == 'webhooks' and client is defined %} aria-current="page"{% endif %}>Webhooks</a></li>
         </ul>
     {% endif %}
     {% if app.user.platformUser %}
@@ -47,7 +48,7 @@
             {% if is_granted('PLATFORM.DSN.VIEW') %}<li><a href="{{ path('dashboard_operator_dsns') }}"{% if section == 'dsns' %} aria-current="page"{% endif %}>Unmatched DSNs</a></li>{% endif %}
             {% if is_granted('PLATFORM.SUPPRESSION.VIEW') %}<li><a href="{{ path('dashboard_operator_suppressions') }}"{% if client is not defined and section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>{% endif %}
             {% if is_granted('PLATFORM.AUDIT.VIEW') %}<li><a href="{{ path('dashboard_operator_audit') }}"{% if section == 'audit' %} aria-current="page"{% endif %}>Audit log</a></li>{% endif %}
-            {% if is_granted('PLATFORM.WEBHOOK.VIEW') %}<li><a href="{{ path('dashboard_operator_webhooks') }}"{% if section == 'webhooks' %} aria-current="page"{% endif %}>Webhook outbox</a></li>{% endif %}
+            {% if is_granted('PLATFORM.WEBHOOK.VIEW') %}<li><a href="{{ path('dashboard_operator_webhooks') }}"{% if section == 'webhooks' and client is not defined %} aria-current="page"{% endif %}>Webhooks</a></li>{% endif %}
         </ul>
     {% endif %}
 </nav>

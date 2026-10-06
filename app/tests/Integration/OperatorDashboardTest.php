@@ -80,7 +80,7 @@ final class OperatorDashboardTest extends DashboardTestCase
         }
         // Operators may open any client's dashboard.
         self::assertSame(200, $this->page('/dashboard/c/'.$client->getId()->toRfc4122()."/send-jobs/{$set['job']}")->getStatusCode());
-        self::assertStringContainsString('Outbox state only', self::text($this->page('/dashboard/operator/webhooks')));
+        self::assertStringContainsString('Delivery is at-least-once', self::text($this->page('/dashboard/operator/webhooks')));
     }
 
     public function testClientAdministrationReusesAuditedServices(): void

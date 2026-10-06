@@ -2,10 +2,10 @@
 
 **Status:** Phases 1–6 complete (Phase 5: inbound DSN, complaint and global suppression
 processing, D-30, v0.1.5; Phase 6: tracking and dashboards with passwordless sign-in, roles and
-ACL, v0.1.6). `smarthostctl verify`
+ACL, v0.1.6; Phase 7 Smarthost side: the webhook worker, specification 2.8, v0.1.7). `smarthostctl verify`
 passes all 176 checks (§6; `--clean` additionally starts from destroyed volumes), and
 `smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e`,
-`test phase5-e2e` and `test phase6-e2e` the end-to-end runs (§7).
+`test phase5-e2e`, `test phase6-e2e` and `test phase7-e2e` the end-to-end runs (§7).
 
 ## 1. Requirements
 
@@ -113,6 +113,7 @@ flowchart TD
 | `smarthostctl test phase4-e2e [A B C D E]` | Phase 4 end to end against the **running** pod's Postfix, OpenDKIM and Mailpit (§7). It stops and restarts Smarthost containers only (OpenDKIM, Mailpit, delivery). |
 | `smarthostctl test phase5-e2e [A B C D E F G]` | Phase 5 end to end against the **running** pod: DSNs and ARF reports through Postfix port 25 and the real DSN spool (§7). It creates a second test client and stops/starts only the delivery container. |
 | `smarthostctl test phase6-e2e` | Phase 6 end to end against the **running** pod through nginx: tracking from a delivered message, open-redirect attempts, the dashboards as two client users and an operator, token-free logs (§7). It creates test clients and users and stops nothing. |
+| `smarthostctl test phase7-e2e` | Phase 7 end to end against the **running** pod: an external client using only the API and the signed webhooks verified by a local receiver container (`smarthost-test-webhook-receiver`, alias `webhook-receiver`, removed afterwards). It creates a test client, SIGKILLs and restarts the webhook-worker container once, and stops nothing else (§7). |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
 | `smarthostctl migrate` | Runs the `db-migrate` and `db-grants` tasks in the running pod (after `recreate` with a rebuilt app image that brings new migrations, `start` also runs them). |
 
@@ -140,7 +141,7 @@ containers in `infra/podman/smarthost-pod.sh.in`.
 | db-migrate (task, not a member) | smarthost-app | — | www-data; database role `smarthost_owner` | exit status |
 | db-grants (task, not a member) | postgres:16.15-trixie | — | admin connection | exit status |
 | symfony-app | smarthost-app | `symfony-app` | FPM master root, workers www-data; database role `smarthost_app` | FastCGI `/fpm-ping` |
-| webhook-worker | smarthost-app | — | www-data | heartbeat file |
+| webhook-worker | smarthost-app (`smarthost:webhook:work`) | — | www-data; database role `smarthost_webhook` | liveness file newer than 120 s |
 | nginx | smarthost-nginx | — | image default | loopback `/nginx-health` |
 | validator | smarthost-validator | — | uid 10001 | database probe |
 | delivery | smarthost-delivery | — | `SMARTHOST_DELIVERY_UID`:`SMARTHOST_SPOOL_GID` (5001:5000) | heartbeat (database reachable) |
@@ -208,7 +209,7 @@ Three independent layers keep development mail off the Internet:
 | PostgreSQL roles | `smarthost_owner` can create tables. `smarthost_app`, `smarthost_webhook`, `smarthost_validator` and `smarthost_delivery` cannot (`permission denied for schema public`). None is superuser, createdb or createrole, and a wrong password is refused. |
 | nginx → PHP-FPM | `/healthz` is served with `sapi=fpm-fcgi`. After a PHP-FPM restart, nginx reaches it again without being restarted, because it resolves the upstream at request time. |
 | Quadlet lifecycle (before D-35) | Quadlet's generated units run containers with `--rm` and remove the pod in `ExecStopPost`, so every stop (including a machine shutdown) deleted the pod and its containers. The persistent pod replaced them. |
-| Stop signals | The php-fpm base image sets `STOPSIGNAL SIGQUIT`, which the PHP webhook worker running as PID 1 ignores; its container uses `--stop-signal SIGTERM`. The fake SMTP server (Python, PID 1, no SIGTERM handler) runs with `--init`. Without these, every pod stop waited 30 s for SIGKILL. |
+| Stop signals | The php-fpm base image sets `STOPSIGNAL SIGQUIT`, which the PHP webhook worker running as PID 1 ignores; its container uses `--stop-signal SIGTERM`, on which `smarthost:webhook:work` stops claiming, finishes or abandons its in-flight requests (their lease expires) and exits within `--stop-timeout 30`. The fake SMTP server (Python, PID 1, no SIGTERM handler) runs with `--init`. Without these, every pod stop waited 30 s for SIGKILL. |
 | Containers started by the boot service | A unit that runs the local `podman` CLI leaves each container's `conmon` in the unit's cgroup (its journal fills with container output, and a failed unit would kill them). `smarthost.service` therefore uses the user's Podman API socket (`CONTAINER_HOST`), like Podman Desktop, plus `KillMode=process`. |
 | Postfix V-1…V-7 | See `docs/architecture/postfix-integration.md` §8. |
 
@@ -277,9 +278,12 @@ curl -sk https://127.0.0.1:8443/v1/send-jobs -H "Authorization: Bearer $K" \
   -d '{"external_reference":"demo","message_class":"transactional","sender_identity":{"email":"dev@smarthost-dev.test"}}'
 ```
 
-Other administration (clients, keys, users, memberships, sending domains, webhook endpoints) is
-done with the `smarthost:*` console commands (`console list smarthost`), never through undocumented
-API endpoints.
+Other administration (clients, keys, users, memberships, sending domains) is done with the
+`smarthost:*` console commands (`console list smarthost`), never through undocumented API endpoints.
+Webhook endpoints can also be managed by client admins in the dashboard (*Webhooks*). In
+development only the receiver fixture host `webhook-receiver` may be a private destination
+(`APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`); every other endpoint must resolve to a public address, and
+the worker refuses everything else.
 
 ### Dashboard sign-in (passwordless)
 
@@ -329,9 +333,9 @@ application role; DNS is stubbed and nothing reaches the Internet.
 | unit | D-18 normalisation (including IDNA), canonical request hashing, the keyring, fail-closed configuration, log format |
 | contract | `/v1` routes are exactly the OpenAPI operations; OpenAPI enums equal the PHP enums |
 | schema | The migrated catalog equals `reference-schema.sql` (tables, columns, defaults, constraints, indexes); migrations up/down/up and per-migration rollback; ORM mapping equals the database; CHECKs equal the vocabulary; grants equal `schema.md` §6; least-privilege behaviour; critical CHECK/UNIQUE/FK behaviour |
-| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API and the Phase 5 operator commands; every API response is validated against the OpenAPI contract. Phase 6: tracking endpoints (opens, clicks, open-redirect attacks, expiry, privacy, logs), tracking statistics, client and operator dashboards (pages, filters, keyset pagination, CSV export, CSRF, terminology, headers), two-client isolation, operator-only access, and the 10,000-row load test (query counts, memory, EXPLAIN ANALYZE of every page query, written to `infra/.generated/test-output/phase6-dashboard-observations.txt`) |
+| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API and the Phase 5 operator commands; every API response is validated against the OpenAPI contract. Phase 6: tracking endpoints (opens, clicks, open-redirect attacks, expiry, privacy, logs), tracking statistics, client and operator dashboards (pages, filters, keyset pagination, CSV export, CSRF, terminology, headers), two-client isolation, operator-only access, and the 10,000-row load test (query counts, memory, EXPLAIN ANALYZE of every page query, written to `infra/.generated/test-output/phase6-dashboard-observations.txt`). Phase 7: the webhook worker (contract body and signature, fan-out, retry policy, leases and fencing, DNS rebinding and SSRF, limits, rotation), dashboard webhook management, the web process without the worker's credentials, and the webhook query plans at 180,000 deliveries (`phase7-webhook-query-plans.txt`) |
 
-Latest run (v0.1.6): 225 tests and 3,306 assertions, all passing (v0.1.5: 177). Unit includes the shared D-32
+Latest run (v0.1.7): 244 tests and 3,774 assertions, all passing (v0.1.6: 225; v0.1.5: 177). Unit includes the shared D-32
 vectors; integration includes the D-31 client-status rules, the D-30 global opt-out API
 (`GlobalSuppressionApiTest`, including multi-process concurrency) and the Phase 5 operator commands
 (`Phase5OperatorCommandTest`); schema includes the D-30 constraints and the six-migration rollback.
@@ -408,3 +412,27 @@ everything through nginx → PHP-FPM, as a mail client or browser would:
 | L | Neither the nginx access log (tracking URLs shown as `/t/o/[token].gif`, `/t/c/[token]/1`) nor the application log contains the token |
 
 Latest run (v0.1.6): 75/75 checks pass.
+
+**Phase 7 end to end** (`infra/tests/phase7-e2e.sh`, `smarthostctl test phase7-e2e`) plays the
+first client application. Its driver (`phase7_e2e.py`) holds only an API key and reads only the
+API and the webhooks its receiver accepted. The receiver (`tests/webhook-receiver/`) verifies
+signatures independently and de-duplicates by event id.
+
+| Part | Proves |
+|---|---|
+| V | Validation job through the API → `validation.completed` webhook → results paged and mapped back by `external_address_reference` |
+| S | A 501-recipient rendered subscription send in two batches (one replayed with the same Idempotency-Key) → Go → Postfix → OpenDKIM → Mailpit → `send.completed` webhook; messages mapped by `external_recipient_reference` |
+| T | Pixel and click from the delivered mail are visible as recorded events through the API; the unsubscribe link is not tracked; no tracking webhook |
+| B/C | A hard-bounce DSN and an ARF complaint through Postfix port 25 → `message.hard_bounced` / `message.complained` webhooks and API events |
+| O | A recipient global opt-out (D-30) produces no webhook |
+| W | `POST /v1/webhooks/test` without `webhook_endpoint_id` is 422 and nothing is delivered (a test always names one endpoint) |
+| F | Receiver offline → retry → delivered; worker SIGKILLed while the receiver is processing → re-sent after the lease, one client-side effect; HTTP 400 → failed without retry, client reconciles by polling |
+| X | Endpoints at 127.0.0.1 and 169.254.169.254 are refused before any request |
+
+It also checks that every request was validly signed, the User-Agent, the worker command and its
+heartbeat.
+
+Each run registers its endpoint at its own receiver path (`/hooks/client-<timestamp>`), waits until
+no earlier send work is queued or processing, and disables its endpoints on exit.
+
+Latest run (v0.1.7): 38/38 checks pass.

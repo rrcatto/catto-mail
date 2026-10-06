@@ -163,7 +163,7 @@ final class TenantIsolationTest extends ApiTestCase
             ->findOneBy(['keyHash' => \App\Security\ApiKeyManager::hash($aKey)]));
         $container->get('security.token_storage')->setToken(new UsernamePasswordToken($user, 'api', $user->getRoles()));
         self::assertNull($container->get(TenantScope::class)->webhookEndpoint($bEndpoint->getId()->toRfc4122()));
-        // The (Phase 7) test endpoint is still a 501 for every client.
-        $this->assertProblem($this->api('POST', '/v1/webhooks/test', $aKey, ['webhook_endpoint_id' => $bEndpoint->getId()->toRfc4122()]), 501, 'not-implemented');
+        // Another client's webhook endpoint is "not found" for the test endpoint.
+        $this->assertProblem($this->api('POST', '/v1/webhooks/test', $aKey, ['webhook_endpoint_id' => $bEndpoint->getId()->toRfc4122()]), 404, 'not-found');
     }
 }
