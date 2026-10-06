@@ -1,0 +1,91 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}System overview{% endblock %}
+{% block body %}
+<h1>System overview</h1>
+<p class="muted">Figures come from the database as of this page load (no live probes): work queues, worker leases and the newest results the workers wrote. A worker that is down shows up as stalled work rather than as an error here.</p>
+<div class="cards">
+    <section class="card">
+        <h2>Validation (Python worker)</h2>
+        {% set v = o.validation %}
+        <dl>
+            <dt>Jobs queued or processing</dt><dd>{{ v.active_jobs|number_format }}{% if v.oldest_active_job %} (oldest submitted {{ v.oldest_active_job|ts }}){% endif %}</dd>
+            <dt>Addresses waiting</dt><dd>{{ v.pending|number_format }}</dd>
+            <dt>Waiting to retry</dt><dd>{{ v.retry_scheduled|number_format }}</dd>
+            <dt>Being checked now</dt><dd>{{ v.claimed|number_format }} by {{ v.active_workers }} worker{{ v.active_workers == 1 ? '' : 's' }}</dd>
+            <dt>Expired leases (awaiting reclaim)</dt><dd>{{ v.expired_leases|number_format }}</dd>
+            <dt>Newest result of a job in progress</dt><dd>{{ o.validation_last_result|ts }}</dd>
+            <dt>Last job completed</dt><dd>{{ o.validation_last_completed|ts }}</dd>
+        </dl>
+        {% if v.pending > 0 and v.active_workers == 0 %}<p class="warn" role="status"><strong>Attention:</strong> addresses are waiting and no validation worker holds a lease.</p>{% endif %}
+    </section>
+    <section class="card">
+        <h2>Delivery (Go daemon)</h2>
+        {% set s = o.sending %}
+        <dl>
+            <dt>Send jobs queued</dt><dd>{{ s.queued_jobs|number_format }}{% if s.oldest_queued %} (oldest {{ s.oldest_queued|ts }}){% endif %}</dd>
+            <dt>Send jobs processing</dt><dd>{{ s.processing_jobs|number_format }} ({{ s.leased_jobs }} leased by {{ s.active_workers }} worker{{ s.active_workers == 1 ? '' : 's' }})</dd>
+            <dt>Dispatched, awaiting outcomes</dt><dd>{{ s.dispatched_jobs|number_format }}</dd>
+            {% for c in o.ingest %}<dt>Ingest cursor “{{ c.source }}” last advanced</dt><dd>{{ c.updated_at|ts }}</dd>{% else %}<dt>Postfix-log ingest</dt><dd>No cursor recorded yet</dd>{% endfor %}
+        </dl>
+        {% if (s.queued_jobs + s.processing_jobs) > 0 and s.active_workers == 0 %}<p class="warn" role="status"><strong>Attention:</strong> send work is waiting and no delivery worker holds a lease.</p>{% endif %}
+    </section>
+    <section class="card">
+        <h2>Messages in flight</h2>
+        <table class="kv"><tbody>
+            {% for key in ['created', 'queued', 'submitted', 'deferred', 'outcome_unknown'] %}
+                <tr><th scope="row">{{ key|label('message_status') }}</th><td class="num">{{ (o.statuses[key] ?? 0)|number_format }}</td></tr>
+            {% endfor %}
+        </tbody></table>
+        <p class="muted">“Submitted” and “Deferred” are the messages Smarthost believes are in the Postfix queue. The Postfix queue snapshots themselves are read only by the delivery daemon, so the actual queue depth and snapshot age are not shown here.</p>
+    </section>
+    <section class="card">
+        <h2>All messages by status</h2>
+        {{ ui.counts(o.statuses, 'message_status') }}
+    </section>
+    <section class="card">
+        <h2>Suppressions (active)</h2>
+        <p>{{ o.global_suppressions|number_format }} global.</p>
+        {% if o.suppressions is empty %}<p>None.</p>{% else %}<ul class="counts">{% for k, v in o.suppressions %}<li>{{ k|label('suppression_reason') }}: {{ v|number_format }}</li>{% endfor %}</ul>{% endif %}
+        <p><a href="{{ path('dashboard_operator_suppressions') }}">Suppression administration</a></p>
+    </section>
+    <section class="card">
+        <h2>Unmatched DSNs</h2>
+        <dl>
+            <dt>Open</dt><dd>{{ (o.unmatched_dsns.open ?? 0)|number_format }}</dd>
+            <dt>Match requested (awaiting the daemon)</dt><dd>{{ (o.unmatched_dsns.match_requested ?? 0)|number_format }}</dd>
+        </dl>
+        <p><a href="{{ path('dashboard_operator_dsns') }}">Review unmatched DSNs</a></p>
+    </section>
+    <section class="card">
+        <h2>Webhook outbox</h2>
+        <dl>
+            <dt>Events awaiting fan-out</dt><dd>{{ o.webhooks.events_awaiting_fanout|number_format }}</dd>
+            {% for k, v in o.webhooks.deliveries %}<dt>Delivery records “{{ k }}”</dt><dd>{{ v|number_format }}</dd>{% endfor %}
+        </dl>
+        <p class="muted">Outbox state only. HTTP webhook delivery is not implemented yet (Phase 7), so nothing here means a webhook reached a client.</p>
+    </section>
+    <section class="card">
+        <h2>Clients</h2>
+        {{ ui.counts(o.clients, 'client_status') }}
+        <p><a href="{{ path('dashboard_operator_clients', {status: 'pending_approval'}) }}">Approval queue</a></p>
+    </section>
+</div>
+
+<h2>Bounce and complaint rates by client (jobs of the last {{ o.rate_window_days }} days)</h2>
+<p class="muted">Rates are per message that reached Postfix, by current status: a deferred message may still be accepted or bounce.</p>
+{% if o.rates is empty %}<p class="empty">No send jobs in the window.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col" class="num">Reached Postfix</th><th scope="col" class="num">Remote accepted</th><th scope="col" class="num">Hard bounce</th><th scope="col" class="num">Soft bounce</th><th scope="col" class="num">Deferred</th><th scope="col" class="num">Complaint</th><th scope="col" class="num">Outcome unknown</th><th scope="col" class="num">Suppressed</th></tr></thead>
+    <tbody>{% for r in o.rates %}
+        <tr><td><a href="{{ path('dashboard_operator_client', {id: r.client_id}) }}">{{ r.company_name }}</a></td><td>{{ r.client_status|label('client_status') }}</td>
+            <td class="num">{{ r.reached_postfix|number_format }}</td><td class="num">{{ r.remote_accepted|number_format }}</td>
+            <td class="num">{{ r.hard_bounced|number_format }} <small>({{ r.hard_bounce_rate ?? '—' }} %)</small></td>
+            <td class="num">{{ r.soft_bounced|number_format }} <small>({{ r.soft_bounce_rate ?? '—' }} %)</small></td>
+            <td class="num">{{ r.deferred|number_format }} <small>({{ r.deferral_rate ?? '—' }} %)</small></td>
+            <td class="num">{{ r.complained|number_format }} <small>({{ r.complaint_rate ?? '—' }} %)</small></td>
+            <td class="num">{{ r.outcome_unknown|number_format }}</td><td class="num">{{ r.suppressed|number_format }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{% endblock %}

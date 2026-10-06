@@ -1,0 +1,13 @@
+# Dashboard assets (Twig + Symfony UX/Stimulus, no build step). nginx hands every
+# request to PHP-FPM and serves no files itself, so AssetMapper serves the mapped
+# assets through the front controller in every environment (digest-versioned
+# URLs, long-lived caching). Nothing is loaded from a CDN: the vendored modules
+# live in assets/vendor/ and the es-module-shims polyfill (fetched from a CDN by
+# default) is disabled - current browsers support import maps natively.
+framework:
+    asset_mapper:
+        paths:
+            - assets/
+        missing_import_mode: strict
+        server: true
+        importmap_polyfill: false

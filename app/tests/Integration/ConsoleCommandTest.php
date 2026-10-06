@@ -85,11 +85,13 @@ final class ConsoleCommandTest extends ApiTestCase
         self::assertSame(1, $this->console('smarthost:domain:dkim', ['client-id' => $client, 'domain' => 'console.example', 'dkim-status' => 'bogus'])->getStatusCode());
 
         $email = 'console.'.bin2hex(random_bytes(4)).'@example.test';
-        self::assertSame(0, $this->console('smarthost:user:create', ['email' => $email, '--password-stdin' => true], 'console password 123')->getStatusCode());
-        self::assertNotNull(Db::owner()->fetchOne('SELECT password_hash FROM users WHERE lower(email) = lower(?)', [$email]));
+        self::assertSame(0, $this->console('smarthost:user:create', ['email' => $email])->getStatusCode());
+        self::assertNotNull(Db::owner()->fetchOne('SELECT id FROM users WHERE lower(email) = lower(?)', [$email]));
         self::assertSame(1, $this->console('smarthost:user:create', ['email' => strtoupper($email)])->getStatusCode(), 'duplicate login email');
         self::assertSame(0, $this->console('smarthost:membership:set', ['email' => $email, 'client-id' => $client, 'role' => 'admin'])->getStatusCode());
-        self::assertSame(0, $this->console('smarthost:user:set-operator', ['email' => $email, 'operator' => 'yes'])->getStatusCode());
+        self::assertSame(0, $this->console('smarthost:user:role', ['email' => $email, 'role' => 'operator', 'action' => 'grant'])->getStatusCode());
+        self::assertSame(['OPERATOR'], Db::owner()->fetchFirstColumn('SELECT r.role_key FROM user_roles ur JOIN roles r ON r.id = ur.role_id JOIN users u ON u.id = ur.user_id WHERE lower(u.email) = lower(?)', [$email]));
+        self::assertSame(1, $this->console('smarthost:user:role', ['email' => $email, 'role' => 'NOPE', 'action' => 'grant'])->getStatusCode());
         self::assertSame(0, $this->console('smarthost:user:set-status', ['email' => $email, 'status' => 'disabled'])->getStatusCode());
 
         $hook = self::fields($this->console('smarthost:webhook:add', ['client-id' => $client, 'url' => 'https://hooks.example/c', '--event' => ['send.completed']]));
@@ -101,7 +103,7 @@ final class ConsoleCommandTest extends ApiTestCase
 
         $actions = Db::owner()->fetchFirstColumn("SELECT DISTINCT action FROM audit_log WHERE actor_type = 'system' AND actor_id LIKE 'console:%'");
         foreach (['client.created', 'api_key.created', 'api_key.revoked', 'sending_domain.created', 'sending_domain.verified', 'sending_domain.dkim_changed',
-            'user.created', 'client_membership.created', 'user.global_role_changed', 'user.disabled', 'webhook_endpoint.created',
+            'user.created', 'client_membership.created', 'user.role_granted', 'user.disabled', 'webhook_endpoint.created',
             'webhook_endpoint.secret_rotated', 'webhook_endpoint.disabled', 'client.status_changed'] as $action) {
             self::assertContains($action, $actions);
         }

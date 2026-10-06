@@ -48,7 +48,7 @@ final class SuppressionCreateCommand extends AdminCommand
         $days = $input->getOption('expires-in-days');
         $s = $this->suppressions->create($client, (string) ($address ?? $domain),
             null !== $address ? SuppressionScopeType::Address : SuppressionScopeType::Domain, $reason,
-            null === $days ? null : (int) $days, $this->operator($input->getOption('operator')), (string) $input->getOption('note'));
+            null === $days ? null : (int) $days, $this->operator($input->getOption('operator'), 'PLATFORM.SUPPRESSION.MANAGE'), (string) $input->getOption('note'));
         $io->writeln('suppression_id: '.$s->getId()->toRfc4122());
         $io->writeln('value: '.$s->getAddressOrDomain());
 

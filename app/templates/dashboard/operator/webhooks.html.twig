@@ -1,0 +1,24 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Webhook outbox{% endblock %}
+{% block body %}
+<h1>Webhook outbox</h1>
+<p class="warn" role="note"><strong>Outbox state only.</strong> Events are recorded transactionally for later HTTP delivery by the Symfony webhook worker, which arrives in Phase 7. Nothing on this page means that a webhook reached a client.</p>
+<dl class="inline-dl">
+    <dt>Events awaiting fan-out</dt><dd>{{ summary.events_awaiting_fanout|number_format }}</dd>
+    {% for k, v in summary.deliveries %}<dt>Delivery records “{{ k }}”</dt><dd>{{ v|number_format }}</dd>{% else %}<dt>Delivery records</dt><dd>None</dd>{% endfor %}
+</dl>
+<form method="get" class="filters" role="search" aria-label="Filter outbox events">
+    {{ ui.select('state', 'State', {awaiting_fanout: 'Awaiting fan-out', fanned_out: 'Fanned out'}, filters.state, 'All') }}
+    <button type="submit">Apply</button>
+</form>
+{% if page.rows is empty %}<p class="empty">No outbox events match.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th><th scope="col">Client</th><th scope="col">Event</th><th scope="col">Subject</th><th scope="col">Fanned out</th><th scope="col" class="num">Delivery records</th></tr></thead>
+    <tbody>{% for w in page.rows %}
+        <tr><td>{{ w.created_at|ts }}</td><td>{{ w.company_name }}</td><td><code>{{ w.event_type }}</code></td><td>{{ w.subject_type }} <code>{{ w.subject_id }}</code></td><td>{{ w.fanned_out_at ? w.fanned_out_at|ts : 'Pending' }}</td><td class="num">{{ w.deliveries }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(page, 'events') }}
+{% endblock %}

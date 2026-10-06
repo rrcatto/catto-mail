@@ -1,0 +1,76 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}User {{ u.email }}{% endblock %}
+{% block body %}
+{% set manage = is_granted('PLATFORM.USER.MANAGE') %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_users') }}">Users</a> › {{ u.email }}</p>
+<h1>{{ u.displayName ?? u.email }}</h1>
+{% if is_configured_admin %}<p class="caveat">This is the configured administrator address (<code>APP_ADMIN_EMAIL</code>): it receives the ADMIN role every time it signs in.</p>{% endif %}
+<div class="cards">
+    <section class="card">
+        <h2>Account</h2>
+        <dl>
+            <dt>Email</dt><dd>{{ u.email }}</dd>
+            <dt>Status</dt><dd>{{ ui.status(u.status.value, 'none') }}</dd>
+            <dt>Created</dt><dd>{{ u.createdAt|ts }}</dd>
+            <dt>Last sign-in</dt><dd>{{ u.lastLoginAt|ts }}</dd>
+        </dl>
+        {% if manage %}
+        <form method="post" action="{{ path('dashboard_operator_user_profile', {id: u.id.toRfc4122}) }}" class="stack">
+            {{ ui.csrf() }}
+            <label>Name <input type="text" name="display_name" value="{{ u.displayName }}" maxlength="200"></label>
+            <label>Status
+                <select name="status"{% if is_self %} disabled{% endif %}>
+                    <option value="active"{% if u.status.value == 'active' %} selected{% endif %}>Active</option>
+                    <option value="disabled"{% if u.status.value == 'disabled' %} selected{% endif %}>Disabled (cannot sign in; signed out at once)</option>
+                </select>
+            </label>
+            <button type="submit">Save</button>
+        </form>
+        <form method="post" action="{{ path('dashboard_operator_user_login_link', {id: u.id.toRfc4122}) }}">
+            {{ ui.csrf() }}<button type="submit"{% if u.disabled %} disabled{% endif %}>Email a sign-in link</button>
+        </form>
+        {% endif %}
+    </section>
+    <section class="card">
+        <h2>Roles</h2>
+        <table class="kv"><tbody>
+        {% for r in roles %}
+            {% set has = r.roleKey in held %}
+            <tr>
+                <th scope="row">{{ r.roleKey }}<br><small>{{ r.name }}</small></th>
+                <td>{{ has ? 'Held' : '—' }}</td>
+                <td>{% if manage and (r.roleKey != 'ADMIN' or is_granted('SYSTEM.ROLE.MANAGE')) %}
+                    <form method="post" action="{{ path('dashboard_operator_user_role', {id: u.id.toRfc4122}) }}">
+                        {{ ui.csrf() }}<input type="hidden" name="role_id" value="{{ r.id.toRfc4122 }}"><input type="hidden" name="action" value="{{ has ? 'revoke' : 'grant' }}">
+                        <button type="submit">{{ has ? 'Revoke' : 'Grant' }}</button>
+                    </form>
+                {% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody></table>
+        <p class="muted">ADMIN holds every permission. Only an administrator can grant or revoke ADMIN.</p>
+    </section>
+</div>
+
+<h2>Client memberships</h2>
+{% if memberships is empty %}<p class="empty">No client memberships.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">Client</th><th scope="col">Client status</th><th scope="col">Role</th><th scope="col">Since</th>{% if manage %}<th scope="col">Remove</th>{% endif %}</tr></thead>
+    <tbody>{% for m in memberships %}
+        <tr><td><a href="{{ path('dashboard_client_overview', {clientId: m.client_id}) }}">{{ m.company_name }}</a></td><td>{{ m.client_status|label('client_status') }}</td><td>{{ m.role|capitalize }}</td><td>{{ m.created_at|ts }}</td>
+        {% if manage %}<td><form method="post" action="{{ path('dashboard_operator_user_membership', {id: u.id.toRfc4122}) }}" data-controller="confirm" data-confirm-message-value="Remove {{ u.email }} from {{ m.company_name }}?">
+            {{ ui.csrf() }}<input type="hidden" name="client_id" value="{{ m.client_id }}"><input type="hidden" name="action" value="remove"><button type="submit">Remove</button></form></td>{% endif %}</tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{% if manage %}
+<form method="post" action="{{ path('dashboard_operator_user_membership', {id: u.id.toRfc4122}) }}" class="filters">
+    {{ ui.csrf() }}
+    <label>Client <select name="client_id" required><option value="">Choose…</option>{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }}</option>{% endfor %}</select></label>
+    <label>Role <select name="membership_role">{% for m in membership_roles %}<option value="{{ m.value }}">{{ m.value|capitalize }}</option>{% endfor %}</select></label>
+    <button type="submit">Add or change membership</button>
+</form>
+<p class="muted">Viewer: read the client's pages. Member: also run sending-domain checks. Admin: also lift the client's own global opt-outs.</p>
+{% endif %}
+{% endblock %}

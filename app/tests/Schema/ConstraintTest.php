@@ -60,9 +60,8 @@ final class ConstraintTest extends TestCase
         self::assertNull($this->violation(fn (Connection $c) => $c->insert('users', ['id' => SchemaFixtures::id(), 'email' => 'other@example.test'])));
     }
 
-    public function testGlobalRoleAndStatusAreRestricted(): void
+    public function testStatusIsRestricted(): void
     {
-        self::assertSame('users_global_role_check', $this->violation(fn (Connection $c) => $c->insert('users', ['id' => SchemaFixtures::id(), 'email' => 'a@x.test', 'global_role' => 'admin'])));
         self::assertSame('users_status_check', $this->violation(fn (Connection $c) => $c->insert('users', ['id' => SchemaFixtures::id(), 'email' => 'b@x.test', 'status' => 'locked'])));
     }
 

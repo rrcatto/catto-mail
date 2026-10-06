@@ -1,6 +1,6 @@
 # Postfix Integration Contract
 
-**Status:** normative contract for specification 2.5 (spec `go_delivery.initial_integration_strategy`,
+**Status:** normative contract for specification 2.7 (spec `go_delivery.initial_integration_strategy`,
 `service_topology.opendkim`, `transport_reconciliation`). This document describes the
 mechanics. It does not change the architecture.
 

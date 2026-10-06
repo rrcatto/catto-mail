@@ -1,0 +1,90 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Validation job{% endblock %}
+{% block body %}
+{% set cid = client.id.toRfc4122 %}
+<p class="crumbs"><a href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}">Validation jobs</a> › Job</p>
+<h1>Validation job {{ job.external_reference ? '“' ~ job.external_reference ~ '”' : '' }}</h1>
+<div class="cards">
+    <section class="card">
+        <h2>Job</h2>
+        <dl>
+            <dt>Job id</dt><dd><code>{{ job.id }}</code></dd>
+            <dt>Status</dt><dd>{{ ui.status(job.status, 'validation_job_status') }}</dd>
+            <dt>Submitted</dt><dd>{{ job.submitted_at|ts }}</dd>
+            <dt>Started</dt><dd>{{ job.started_at|ts }}</dd>
+            <dt>Completed</dt><dd>{{ job.completed_at|ts }}</dd>
+            <dt>Addresses</dt><dd>{{ job.total_addresses|number_format }} ({{ job.processed_count|number_format }} checked)</dd>
+        </dl>
+    </section>
+    <section class="card">
+        <h2>Classification summary</h2>
+        {{ ui.counts(job.classification_counts_json, 'classification') }}
+        {% if job.processing.pending is defined or job.processing.claimed is defined or job.processing.retry_scheduled is defined %}
+            <p>Still being checked: {{ ((job.processing.pending ?? 0) + (job.processing.claimed ?? 0) + (job.processing.retry_scheduled ?? 0))|number_format }}
+            {% if job.processing.retry_scheduled ?? 0 %}({{ job.processing.retry_scheduled|number_format }} waiting to retry after a temporary failure){% endif %}</p>
+        {% endif %}
+        <p class="muted">Validation results estimate deliverability; delivery certainty comes only from sending.</p>
+    </section>
+</div>
+
+<h2>Address results</h2>
+<form method="get" class="filters" role="search" aria-label="Filter address results">
+    {{ ui.select('classification', 'Classification', label_options('classification'), filters.classification) }}
+    {{ ui.select('syntax', 'Syntax', {valid: 'Valid', invalid: 'Invalid'}, filters.syntax) }}
+    {{ ui.select('domain', 'Domain', {mx: 'MX', null_mx: 'Null MX', address_fallback: 'Address fallback', no_mail_host: 'No mail host', nxdomain: 'NXDOMAIN', temporary_failure: 'Temporary failure', invalid_response: 'Invalid response', skipped: 'Skipped'}, filters.domain) }}
+    {{ ui.select('smtp', 'SMTP', {accepted: 'Accepted', rejected: 'Rejected', temporary_failure: 'Temporary failure', blocked: 'Blocked', timeout: 'Timeout', connection_failed: 'Connection failed', inconclusive: 'Inconclusive', skipped: 'Skipped'}, filters.smtp) }}
+    {{ ui.select('confidence', 'Confidence', {low: 'Low', medium: 'Medium', high: 'High'}, filters.confidence) }}
+    {{ ui.yesno('role', 'Role', filters.role) }}
+    {{ ui.yesno('disposable', 'Disposable', filters.disposable) }}
+    {{ ui.yesno('catch_all', 'Catch-all', filters.catch_all) }}
+    {{ ui.yesno('typo', 'Typo suspected', filters.typo) }}
+    <label>Order
+        <select name="sort">
+            {% for value, text in {input: 'Input order', address: 'Original address', classification: 'Classification'} %}<option value="{{ value }}"{% if listing.sort == value %} selected{% endif %}>{{ text }}</option>{% endfor %}
+        </select>
+    </label>
+    <input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_client_validation_job', {clientId: cid, jobId: job.id}) }}">Reset</a>
+</form>
+<p><a href="{{ path('dashboard_client_validation_export', {clientId: cid, jobId: job.id}|merge(filters|filter(v => v != ''))) }}" download>Download these results as CSV</a> <span class="muted">(all rows matching the filters; same fields as the API)</span></p>
+{% if page.rows is empty %}<p class="empty">No addresses match.</p>{% else %}
+<div class="scroll">
+<table class="dense">
+    <thead><tr>
+        <th scope="col">{{ ui.sort(listing, 'address', 'Original address') }}</th>
+        <th scope="col">Normalised</th>
+        <th scope="col">{{ ui.sort(listing, 'classification', 'Classification') }}</th>
+        <th scope="col">Confidence</th>
+        <th scope="col">Syntax</th><th scope="col">Domain</th><th scope="col">SMTP</th>
+        <th scope="col">Role</th><th scope="col">Disposable</th><th scope="col">Catch-all</th><th scope="col">Typo?</th>
+        <th scope="col">Suggestion</th>
+        <th scope="col">Diagnostic</th>
+        <th scope="col">Checked</th>
+    </tr></thead>
+    <tbody>
+    {% for a in page.rows %}
+        <tr>
+            <td>{{ a.original_address }}{% if a.external_address_reference %}<br><small>ref {{ a.external_address_reference }}</small>{% endif %}</td>
+            <td>{{ a.normalized_address ?? '—' }}</td>
+            <td>{% if a.overall_classification %}{{ ui.status(a.overall_classification, 'classification') }}{% else %}<span class="st">Not checked yet</span>{% endif %}</td>
+            <td>{{ a.confidence|default('—')|capitalize }}</td>
+            <td>{{ a.syntax_status ?? '—' }}</td>
+            <td>{{ a.domain_status ?? '—' }}</td>
+            <td>{{ a.smtp_status ?? '—' }}</td>
+            <td>{{ ui.flag(a.is_role) }}</td>
+            <td>{{ ui.flag(a.is_disposable) }}</td>
+            <td>{{ ui.flag(a.is_catch_all_or_accept_all) }}</td>
+            <td>{{ ui.flag(a.is_domain_typo_suspected) }}</td>
+            <td>{% if a.suggested_address %}{{ a.suggested_address }}<br><small>{{ a.suggestion_confidence }} confidence</small>{% else %}—{% endif %}</td>
+            <td>{% if a.diagnostic_code %}<code>{{ a.diagnostic_code }}</code>{% endif %} {{ a.diagnostic_text }}</td>
+            <td>{{ a.checked_at|ts }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+{{ ui.pager(page, 'addresses') }}
+{% endblock %}

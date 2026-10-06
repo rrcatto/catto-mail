@@ -17,7 +17,7 @@ final class VocabularyConstraintTest extends TestCase
 {
     /** vocabulary key => list of table.column whose CHECK must list exactly its values */
     private const COLUMNS = [
-        'client_status' => ['clients.status'], 'user_status' => ['users.status'], 'global_role' => ['users.global_role'],
+        'client_status' => ['clients.status'], 'user_status' => ['users.status'],
         'client_membership_role' => ['client_memberships.role'], 'sending_domain_status' => ['sending_domains.status'],
         'dkim_status' => ['sending_domains.dkim_status'], 'validation_job_status' => ['validation_jobs.status'],
         'syntax_status' => ['validation_addresses.syntax_status'], 'domain_status' => ['validation_addresses.domain_status'],

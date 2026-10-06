@@ -1,0 +1,45 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Users{% endblock %}
+{% block body %}
+<h1>Users</h1>
+<p>Everyone signs in with an emailed single-use link; there are no passwords. Installation-wide access comes from roles (<a href="{{ is_granted('SYSTEM.ROLE.VIEW') ? path('dashboard_operator_roles') : '#' }}">roles &amp; permissions</a>); access to a client's own pages comes from a client membership.</p>
+<form method="get" class="filters" role="search" aria-label="Filter users">
+    <label>Email or name contains <input type="text" name="q" value="{{ filters.q }}"></label>
+    {{ ui.select('status', 'Status', {active: 'Active', disabled: 'Disabled'}, filters.status) }}
+    <label>Role <select name="role"><option value="">Any</option>{% for r in roles %}<option value="{{ r.roleKey }}"{% if filters.role == r.roleKey %} selected{% endif %}>{{ r.roleKey }}</option>{% endfor %}</select></label>
+    <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_operator_users') }}">Reset</a>
+</form>
+{% if page.rows is empty %}<p class="empty">No users match.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'email', 'Email') }}</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Roles</th><th scope="col" class="num">Client memberships</th><th scope="col">Last sign-in</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
+    <tbody>{% for u in page.rows %}
+        <tr><td><a href="{{ path('dashboard_operator_user', {id: u.id}) }}">{{ u.email }}</a></td><td>{{ u.display_name ?? '—' }}</td>
+            <td>{{ ui.status(u.status, 'none') }}</td><td>{{ u.roles ?? '—' }}</td><td class="num">{{ u.memberships }}</td><td>{{ u.last_login_at|ts }}</td><td>{{ u.created_at|ts }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(page, 'users') }}
+
+{% if is_granted('PLATFORM.USER.MANAGE') %}
+<h2>Add a user</h2>
+<form method="post" action="{{ path('dashboard_operator_user_create') }}" class="filters">
+    {{ ui.csrf() }}
+    <label>Email <input type="email" name="email" required maxlength="320"></label>
+    <label>Name (optional) <input type="text" name="display_name" maxlength="200"></label>
+    <label>Role (optional)
+        <select name="role_id"><option value="">None</option>{% for r in roles %}{% if r.roleKey != 'ADMIN' or is_granted('SYSTEM.ROLE.MANAGE') %}<option value="{{ r.id.toRfc4122 }}">{{ r.roleKey }} – {{ r.name }}</option>{% endif %}{% endfor %}</select>
+    </label>
+    <label>Client (optional)
+        <select name="client_id"><option value="">None</option>{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }}</option>{% endfor %}</select>
+    </label>
+    <label>Client role
+        <select name="membership_role">{% for m in membership_roles %}<option value="{{ m.value }}">{{ m.value|capitalize }}</option>{% endfor %}</select>
+    </label>
+    <label class="check"><input type="checkbox" name="send_link" value="1" checked> Email them a sign-in link now</label>
+    <button type="submit">Add user</button>
+</form>
+{% endif %}
+{% endblock %}

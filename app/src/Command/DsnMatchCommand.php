@@ -38,7 +38,7 @@ final class DsnMatchCommand extends AdminCommand
     {
         $id = (string) $input->getArgument('id');
         $d = $this->dsns->find($id) ?? throw new DomainRuleViolation("No unmatched DSN $id.");
-        $this->dsns->requestMatch($d, (string) $input->getArgument('message-id'), $this->operator($input->getOption('operator')), $input->getOption('note'));
+        $this->dsns->requestMatch($d, (string) $input->getArgument('message-id'), $this->operator($input->getOption('operator'), 'PLATFORM.DSN.MANAGE'), $input->getOption('note'));
         $io->writeln('status: '.$d->getStatus()->value);
         $io->note('The delivery daemon applies the resolution; check with smarthost:dsn:show.');
 

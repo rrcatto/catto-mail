@@ -1,0 +1,54 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Suppressions{% endblock %}
+{% block body %}
+<h1>Suppressions</h1>
+<form method="get" class="filters" role="search" aria-label="Filter suppressions">
+    <label>Address or domain (exact, normalised) <input type="text" name="address" value="{{ filters.address }}" autocomplete="off"></label>
+    {{ ui.select('reason', 'Reason', label_options('suppression_reason'), filters.reason) }}
+    {{ ui.select('state', 'State', {active: 'Active', lifted: 'Lifted', expired: 'Expired'}, filters.state, 'All') }}
+    {{ ui.select('scope', 'Scope', {global: 'Global', client: 'Client-scoped'}, filters.scope, 'All') }}
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_operator_suppressions') }}">Reset</a>
+</form>
+{% if page.rows is empty %}<p class="empty">No suppressions match.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">Address or domain</th><th scope="col">Scope</th><th scope="col">Reason</th><th scope="col">State</th><th scope="col">Provenance</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th><th scope="col">Expires / lifted</th><th scope="col">Lift</th></tr></thead>
+    <tbody>{% for s in page.rows %}
+        <tr>
+            <td>{{ s.address_or_domain }}</td>
+            <td>{{ s.client_id ? 'Client: ' ~ s.scope_client : 'Global' }} ({{ s.scope_type }})</td>
+            <td>{{ s.reason|label('suppression_reason') }}</td>
+            <td>{{ ui.status(s.state, 'none') }}</td>
+            <td>{% if s.source_client %}Reported by {{ s.source_client }}{% if s.external_reference %} (ref {{ s.external_reference }}){% endif %}{% elseif s.source_message_id %}Message <code>{{ s.source_message_id }}</code>{% elseif s.reason in ['operator_block', 'client_abuse_block'] %}Operator{% else %}—{% endif %}</td>
+            <td>{{ s.created_at|ts }}</td>
+            <td>{% if s.lifted_at %}Lifted {{ s.lifted_at|ts }}{% elseif s.expires_at %}Expires {{ s.expires_at|ts }}{% else %}Never expires{% endif %}</td>
+            <td>{% if s.state == 'active' and is_granted('PLATFORM.SUPPRESSION.MANAGE') %}
+                <form method="post" action="{{ path('dashboard_operator_suppression_lift', {id: s.id}) }}" class="row" data-controller="confirm" data-confirm-message-value="Lift this suppression of {{ s.address_or_domain }}? The row is kept as history.">
+                    {{ ui.csrf() }}<input type="hidden" name="return_address" value="{{ filters.address }}">
+                    <label class="sr" for="note-{{ s.id }}">Reason for lifting</label>
+                    <input id="note-{{ s.id }}" type="text" name="note" required minlength="3" placeholder="Reason (required)">
+                    <button type="submit">Lift</button>
+                </form>
+            {% else %}—{% endif %}</td>
+        </tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(page, 'suppressions') }}
+
+{% if is_granted('PLATFORM.SUPPRESSION.MANAGE') %}
+<h2>Create an operator block</h2>
+<form method="post" action="{{ path('dashboard_operator_suppression_create') }}" class="filters">
+    {{ ui.csrf() }}
+    <label>Address or domain <input type="text" name="value" required></label>
+    <label>Type <select name="scope_type"><option value="address">Address</option><option value="domain">Domain</option></select></label>
+    <label>Reason <select name="reason">{% for r in operator_reasons %}<option value="{{ r.value }}">{{ r.value|label('suppression_reason') }}</option>{% endfor %}</select></label>
+    <label>Client id (empty = global) <input type="text" name="client_id" pattern="[0-9a-fA-F-]{36}"></label>
+    <label>Expires in days (empty = never) <input type="number" name="expires_in_days" min="1"></label>
+    <label>Reason note (required) <input type="text" name="note" required minlength="3"></label>
+    <button type="submit">Create block</button>
+</form>
+{% endif %}
+<p class="muted">Hard-bounce, complaint and repeated-soft-bounce suppressions are created by the delivery daemon, and recipient global opt-outs by trusted clients. Suppressions are lifted, never deleted.</p>
+{% endblock %}

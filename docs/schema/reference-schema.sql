@@ -1,5 +1,5 @@
 -- =============================================================================
--- Smarthost reference schema — specification 2.5 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5)
+-- Smarthost reference schema — specification 2.7 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5, engagement index in 2.6, access control in 2.7)
 -- =============================================================================
 --
 -- THIS IS NOT A MIGRATION. Symfony/Doctrine migrations (Phase 2) are the sole
@@ -39,13 +39,13 @@ CREATE TABLE clients (
     can_submit_global_suppressions  boolean  NOT NULL DEFAULT false
 );
 
--- Dashboard login accounts (D-12). API keys are never browser credentials.
+-- Dashboard accounts (D-12). Passwordless: sign-in is by single-use emailed link
+-- (auth_login_tokens). API keys are never browser credentials. Installation-wide
+-- roles are in user_roles; client access is in client_memberships.
 CREATE TABLE users (
     id             uuid        PRIMARY KEY,
     email          text        NOT NULL,                             -- login identifier
-    password_hash  text        NULL,                                 -- Symfony PasswordHasher output; NULL = invited, cannot log in yet
     display_name   text        NULL,
-    global_role    text        NULL CHECK (global_role IN ('operator')),   -- NULL = no global role
     status         text        NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     created_at     timestamptz NOT NULL DEFAULT now(),
     last_login_at  timestamptz NULL,
@@ -64,6 +64,59 @@ CREATE TABLE client_memberships (
 );
 CREATE UNIQUE INDEX client_memberships_user_client_uq ON client_memberships (user_id, client_id);
 CREATE INDEX client_memberships_client_idx ON client_memberships (client_id);
+
+-- Installation-wide roles and the permission keys they grant (App\Access\PermissionCatalog;
+-- keys are code, not rows). Built-in: ADMIN (every permission by definition, no rows) and
+-- OPERATOR (seeded with every PLATFORM.* permission, editable). Specification 2.7.
+CREATE TABLE roles (
+    id           uuid        PRIMARY KEY,
+    role_key     text        NOT NULL CHECK (role_key ~ '^[A-Z][A-Z0-9_]{1,63}$'),
+    name         text        NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    description  text        NOT NULL DEFAULT '',
+    is_builtin   boolean     NOT NULL DEFAULT false,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX roles_key_uq ON roles (role_key);
+
+CREATE TABLE role_permissions (
+    id              uuid        PRIMARY KEY,
+    role_id         uuid        NOT NULL REFERENCES roles (id),
+    permission_key  text        NOT NULL CHECK (permission_key ~ '^[A-Z][A-Z_]*(\.[A-Z][A-Z_]*)+$'),
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX role_permissions_role_permission_uq ON role_permissions (role_id, permission_key);
+
+CREATE TABLE user_roles (
+    id           uuid        PRIMARY KEY,
+    user_id      uuid        NOT NULL REFERENCES users (id),
+    role_id      uuid        NOT NULL REFERENCES roles (id),
+    assigned_by  uuid        NULL REFERENCES users (id),
+    assigned_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX user_roles_user_role_uq ON user_roles (user_id, role_id);
+CREATE INDEX user_roles_role_idx ON user_roles (role_id);
+
+-- Single-use emailed sign-in links. Only the SHA-256 of the token is stored; the
+-- rows double as the request history for the per-address and per-IP rate limits
+-- (the IP is stored only as a keyed hash). user_id is NULL when the link was
+-- issued to APP_ADMIN_EMAIL before that account existed.
+CREATE TABLE auth_login_tokens (
+    id                 uuid        PRIMARY KEY,
+    email              text        NOT NULL,
+    user_id            uuid        NULL REFERENCES users (id),
+    token_hash         text        NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    return_path        text        NULL CHECK (return_path IS NULL OR return_path ~ '^/dashboard(/[^/]|$)'),
+    requested_ip_hash  text        NOT NULL CHECK (requested_ip_hash ~ '^[0-9a-f]{64}$'),
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    expires_at         timestamptz NOT NULL,
+    used_at            timestamptz NULL,
+    CONSTRAINT auth_login_tokens_expiry_after_creation CHECK (expires_at > created_at)
+);
+CREATE UNIQUE INDEX auth_login_tokens_hash_uq ON auth_login_tokens (token_hash);
+CREATE INDEX auth_login_tokens_email_created_idx ON auth_login_tokens (lower(email), created_at);
+CREATE INDEX auth_login_tokens_ip_created_idx ON auth_login_tokens (requested_ip_hash, created_at);
+CREATE INDEX auth_login_tokens_user_idx ON auth_login_tokens (user_id) WHERE user_id IS NOT NULL;
 
 -- Sending domains with DNS TXT verification and DKIM status (D-13, D-26).
 -- TXT record: _smarthost-verification.<domain>  "smarthost-verification=<token>".
@@ -352,6 +405,9 @@ CREATE UNIQUE INDEX message_events_source_key_uq ON message_events (event_source
     WHERE source_event_key IS NOT NULL;
 CREATE INDEX message_events_soft_bounce_idx ON message_events (message_id, occurred_at)   -- D-18 rule evaluation
     WHERE event_type IN ('soft_bounce', 'remote_accepted');
+-- Phase 6: recorded-open/click aggregates and the tracking endpoint's per-message check.
+CREATE INDEX message_events_engagement_idx ON message_events (message_id, occurred_at)
+    WHERE event_type IN ('open_recorded', 'click_recorded');
 
 -- DSNs that resolve to no message (D-05). Operator-scoped; retained after resolution.
 CREATE TABLE unmatched_dsns (

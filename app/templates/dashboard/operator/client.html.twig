@@ -1,0 +1,68 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Client {{ c.company_name }}{% endblock %}
+{% block body %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_clients') }}">Clients</a> › {{ c.company_name }}</p>
+<h1>{{ c.company_name }}</h1>
+<p><a href="{{ path('dashboard_client_overview', {clientId: c.id}) }}">Open this client's dashboard</a></p>
+<div class="cards">
+    <section class="card">
+        <h2>Account</h2>
+        <dl>
+            <dt>Client id</dt><dd><code>{{ c.id }}</code></dd>
+            <dt>Contact</dt><dd>{{ c.contact_email }}</dd>
+            <dt>Plan</dt><dd>{{ c.plan }}</dd>
+            <dt>Created</dt><dd>{{ c.created_at|ts }}</dd>
+            <dt>Status</dt><dd>{{ ui.status(c.status, 'client_status') }}</dd>
+        </dl>
+        {% if is_granted('PLATFORM.CLIENT.MANAGE') %}
+        <form method="post" action="{{ path('dashboard_operator_client_status', {id: c.id}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Change the status of {{ c.company_name }}?">
+            {{ ui.csrf() }}
+            <label>New status
+                <select name="status">{% for s in statuses %}<option value="{{ s.value }}"{% if s.value == c.status %} selected{% endif %}>{{ s.value|label('client_status') }}</option>{% endfor %}</select>
+            </label>
+            <button type="submit">Change status</button>
+        </form>
+        {% endif %}
+        <p class="muted">Approve (active), throttle, suspend or close. Every change is audited.</p>
+    </section>
+    <section class="card">
+        <h2>Recipient global opt-outs</h2>
+        <p>Capability: <strong>{{ c.can_submit_global_suppressions ? 'Permitted' : 'Not permitted' }}</strong></p>
+        {% if is_granted('PLATFORM.CLIENT.MANAGE') %}
+        <form method="post" action="{{ path('dashboard_operator_client_capability', {id: c.id}) }}" class="stack">
+            {{ ui.csrf() }}
+            <input type="hidden" name="setting" value="{{ c.can_submit_global_suppressions ? 'disable' : 'enable' }}">
+            <label>Reason (required, recorded in the audit log) <input type="text" name="note" required minlength="3"></label>
+            <button type="submit">{{ c.can_submit_global_suppressions ? 'Withdraw capability' : 'Grant capability' }}</button>
+        </form>
+        {% endif %}
+    </section>
+</div>
+
+<h2>Sending domains</h2>
+{% if c.domains is empty %}<p class="empty">None.</p>{% else %}
+<table><thead><tr><th scope="col">Domain</th><th scope="col">Status</th><th scope="col">Verified</th><th scope="col">Last check</th><th scope="col">DKIM</th></tr></thead>
+<tbody>{% for d in c.domains %}<tr><td>{{ d.domain }}</td><td>{{ ui.status(d.status, 'domain_status') }}</td><td>{{ d.verified_at|ts }}</td><td>{{ d.last_checked_at|ts }}{% if d.last_check_error %}<br><small>{{ d.last_check_error }}</small>{% endif %}</td><td>{{ d.dkim_status|label('dkim_status') }}{% if d.dkim_selector %} ({{ d.dkim_selector }}){% endif %}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+
+<h2>API keys</h2>
+<p class="muted">Metadata only. Keys are stored as hashes and can never be shown again.</p>
+{% if c.api_keys is empty %}<p class="empty">None.</p>{% else %}
+<table><thead><tr><th scope="col">Prefix</th><th scope="col">Name</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Revoked</th></tr></thead>
+<tbody>{% for k in c.api_keys %}<tr><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.name ?? '—' }}</td><td>{{ k.created_at|ts }}</td><td>{{ k.last_used_at|ts }}</td><td>{{ k.revoked_at ? k.revoked_at|ts : 'Active' }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+
+<h2>Members</h2>
+{% if c.members is empty %}<p class="empty">None.</p>{% else %}
+<table><thead><tr><th scope="col">User</th><th scope="col">Role</th><th scope="col">Account</th><th scope="col">Last sign-in</th></tr></thead>
+<tbody>{% for m in c.members %}<tr><td>{{ m.display_name ? m.display_name ~ ' – ' : '' }}{{ m.email }}</td><td>{{ m.role|capitalize }}</td><td>{{ m.status|capitalize }}</td><td>{{ m.last_login_at|ts }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+
+<h2>Webhook endpoints</h2>
+{% if c.webhook_endpoints is empty %}<p class="empty">None.</p>{% else %}
+<table><thead><tr><th scope="col">URL</th><th scope="col">Status</th><th scope="col">Events</th><th scope="col">Secret rotation overlap</th><th scope="col">Updated</th></tr></thead>
+<tbody>{% for w in c.webhook_endpoints %}<tr><td class="url">{{ w.url }}</td><td>{{ w.status|capitalize }}</td><td>{{ w.subscribed_event_types|json_counts|join(', ') }}</td><td>{{ w.rotation_overlap ? 'Previous secret still valid' : 'No' }}</td><td>{{ w.updated_at|ts }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+<p class="muted">Members are managed on the <a href="{{ path('dashboard_operator_users') }}">Users</a> page. API keys, sending domains and webhook endpoints are managed with the audited <code>smarthost:*</code> console commands.</p>
+{% endblock %}

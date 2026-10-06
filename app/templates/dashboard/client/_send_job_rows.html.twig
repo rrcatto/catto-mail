@@ -1,0 +1,29 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% if rows is empty %}<p class="empty">No send jobs match.</p>{% else %}
+<table>
+    <thead><tr>
+        <th scope="col">{% if listing %}{{ ui.sort(listing, 'created', 'Created') }}{% else %}Created{% endif %}</th>
+        <th scope="col">Status</th>
+        <th scope="col">External reference</th>
+        <th scope="col">Class</th>
+        <th scope="col" class="num">{% if listing %}{{ ui.sort(listing, 'recipients', 'Recipients') }}{% else %}Recipients{% endif %}</th>
+        <th scope="col">Queued</th>
+        <th scope="col">Dispatched / completed</th>
+        <th scope="col">Messages by status</th>
+    </tr></thead>
+    <tbody>
+    {% for j in rows %}
+        <tr>
+            <td><a href="{{ path('dashboard_client_send_job', {clientId: client.id.toRfc4122, jobId: j.id}) }}">{{ j.created_at|ts }}</a></td>
+            <td>{{ ui.status(j.status, 'send_job_status') }}</td>
+            <td>{{ j.external_reference }}</td>
+            <td>{{ j.message_class|capitalize }}</td>
+            <td class="num">{{ j.total_recipients|number_format }}</td>
+            <td>{{ j.queued_at|ts }}</td>
+            <td>{{ j.dispatch_completed_at|ts }}<br>{{ j.completed_at|ts }}</td>
+            <td>{{ ui.counts(j.summary_counts_json, 'message_status') }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}

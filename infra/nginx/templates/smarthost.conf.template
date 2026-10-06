@@ -4,10 +4,23 @@
 # NGINX_LOCAL_RESOLVERS (set by the image when NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1).
 server_tokens off;
 
+# Tracking URLs (/t/o/<token>.gif, /t/c/<token>/<n>) carry opaque per-message
+# tokens. The access log records them redacted, query string dropped (Phase 6:
+# tracking tokens are not logged).
+map $request_uri $smarthost_log_uri {
+    ~^/t/o/                                       "/t/o/[token].gif";
+    ~^/t/c/[^/?]*/(?<smarthost_link_index>[0-9]+)  "/t/c/[token]/$smarthost_link_index";
+    ~^/t/                                         "/t/[redacted]";
+    default                                       $request_uri;
+}
+log_format smarthost '$remote_addr - $remote_user [$time_local] "$request_method $smarthost_log_uri $server_protocol" '
+                     '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+
 server {
     listen 443 ssl;
     http2 on;
     server_name ${PROXY_SERVER_NAME};
+    access_log /var/log/nginx/access.log smarthost;
 
     ssl_certificate     ${PROXY_TLS_CERT_FILE};
     ssl_certificate_key ${PROXY_TLS_KEY_FILE};
@@ -28,8 +41,8 @@ server {
         return 413 '{"type":"about:blank","title":"Payload too large","status":413}';
     }
 
-    # Every request goes to the Symfony front controller (API, health, dashboard
-    # and, later, tracking endpoints). There is no separate PHP HTTP server.
+    # Every request goes to the Symfony front controller (API, health, dashboard,
+    # dashboard assets and tracking endpoints). There is no separate PHP HTTP server.
     location / {
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME /srv/app/public/index.php;

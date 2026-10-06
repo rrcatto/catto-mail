@@ -1,0 +1,17 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Send jobs{% endblock %}
+{% block body %}
+<h1>Send jobs</h1>
+<form method="get" class="filters" role="search" aria-label="Filter send jobs">
+    {{ ui.select('status', 'Status', label_options('send_job_status'), filters.status) }}
+    <label>External reference <input type="text" name="external_reference" value="{{ filters.external_reference }}"></label>
+    <label>Created from <input type="date" name="from" value="{{ filters.from }}"></label>
+    <label>to <input type="date" name="to" value="{{ filters.to }}"></label>
+    <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_client_send_jobs', {clientId: client.id.toRfc4122}) }}">Reset</a>
+</form>
+{% include 'dashboard/client/_send_job_rows.html.twig' with {rows: page.rows} %}
+{{ ui.pager(page, 'jobs') }}
+{% endblock %}

@@ -1,7 +1,7 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.5. This is a documentation revision, not a software release version.
-**Revision date:** 5 October 2026 (original: 8 September 2026)
+**Specification version:** 2.7. This is a documentation revision, not a software release version.
+**Revision date:** 6 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
 The canonical, machine-readable specification is `docs/20260908-1644-smarthost-llm-spec.yaml`.
@@ -675,9 +675,11 @@ A DSN that cannot be associated with any message cannot be a normal message even
 
 Irrelevant DSNs, such as backscatter, can be dismissed with a written reason. If Go cannot interpret
 the DSN for the requested message (it reports no failure for it), the record returns to open with
-the reason, and no event is created. Until the Phase 6 operator dashboard exists, operators use
-audited console commands (`smarthost:dsn:list`, `smarthost:dsn:show`, `smarthost:dsn:match`,
-`smarthost:dsn:dismiss`); each records the operator's identity.
+the reason, and no event is created. Operators work through the operator dashboard (Unmatched
+DSNs: list, detail with the parsed evidence and candidate messages, match request, dismissal with a
+written reason) or the audited console commands (`smarthost:dsn:list`, `smarthost:dsn:show`,
+`smarthost:dsn:match`, `smarthost:dsn:dismiss`). Both use the same application service, record the
+operator's identity and only record the request; Go applies a match.
 
 ## 9.4.1 Inbound DSN and complaint processing
 
@@ -846,6 +848,29 @@ The tracking endpoints:
 - map the token to the stored message or link;
 - never expose raw recipient email addresses.
 
+A token is accepted only if it is well formed, names a message that was handed to Postfix and whose
+send job enables that kind of tracking, and, when `APP_RETENTION_TRACKING_DAYS` is set, the message
+is not older than that. Anything else is answered exactly as an unknown token would be. The
+responses never contain recipient, client or message data, are never cacheable (`no-store`), set no
+cookies and need no JavaScript. `HEAD` requests are answered but never recorded. Tracking tokens are
+not logged: nginx writes tracking URLs to its access log with the token redacted, and the
+application does not log route parameters.
+
+### Recording rule
+
+Events are append-only. Each recorded open or click is a separate `open_recorded` or
+`click_recorded` event from the `tracking_endpoint` source; nothing about the requester (IP address,
+user agent) is stored. Automated repetition (prefetchers, link scanners, reloads) must not grow the
+table without bound, so a request is still answered but **not recorded** when:
+
+- the same message had an open recorded in the last 60 seconds (opens);
+- the same message and link had a click recorded in the last 10 seconds (clicks);
+- the message already has 1000 events of that type;
+- the requesting address exceeded 1200 tracking requests per minute.
+
+This is a bound on storage, not a claim about how many people engaged. Recording never changes a
+message's transport status.
+
 ## 12.2 Recorded opens
 
 HTML mail may contain a small tracking image:
@@ -854,7 +879,8 @@ HTML mail may contain a small tracking image:
 /t/o/{token}.gif
 ```
 
-Loading the image creates an `open_recorded` event.
+Loading the image creates an `open_recorded` event (subject to the recording rule). The response is
+always the same transparent 1×1 GIF, whether or not the token is known.
 
 The UI must describe this accurately as a **recorded open**, not proof that a human definitely read the email.
 
@@ -874,7 +900,14 @@ Eligible HTML links are rewritten to:
 /t/c/{token}/{link_index}
 ```
 
-The server records a `click_recorded` event, then redirects to the destination stored in the server-side link map. The redirect target never comes from the URL, which prevents open-redirect abuse.
+The server records a `click_recorded` event (with the link index), then redirects to exactly the
+destination stored in the server-side link map for that message and index. The redirect target never
+comes from the URL, a query string, the `Host` or the `Referer`, which prevents **open redirect**
+abuse. An unknown token, an index that the message does not have, or any other URL under `/t/`
+gets the same plain 404. Unsubscribe links are never rewritten, so they are never click-tracked.
+
+Dashboards report messages with at least one recorded open or click, the total recorded events,
+the first and last recorded times and clicks per stored link. A click is never counted as an open.
 
 No raw recipient email address is embedded in any public tracking URL.
 
@@ -1143,7 +1176,7 @@ Required controls include:
 - authenticated SMTP submission;
 - API key hashing;
 - per-client scoping;
-- human dashboard users with client memberships and a global operator role, never API keys as browser credentials;
+- human dashboard users who sign in without passwords, by single-use emailed links, with client memberships and installation-wide roles and permissions; never API keys as browser credentials;
 - API and volume rate limits;
 - manual account approval before substantial production volume;
 - account suspension;
@@ -1259,7 +1292,7 @@ Include DKIM signing, the milter-failure tempfail-and-retry case, and reconcilia
 
 ## Client dashboard
 
-The client-facing Symfony UI should eventually provide:
+The client-facing Symfony UI should eventually provide (Phase 6 status below):
 
 - validation uploads;
 - validation job history;
@@ -1279,6 +1312,28 @@ Large tables require server-side pagination, sorting and filtering.
 
 Symfony UX, LiveComponent, Twig and Stimulus should be used to avoid repeating hand-written AJAX/table plumbing.
 
+**Implemented in Phase 6.** Sign-in is passwordless (specification 2.7; see *Dashboard sign-in and
+access control* below). Client pages live under `/dashboard/c/{client id}`. A client that the
+user may not see is answered exactly like one that does not exist, and every query carries the
+client's id. Viewers can read, members can also run a sending-domain DNS check, and admins can also
+lift the client's own recipient global opt-outs (D-37 still applies). The pages are:
+
+- overview: validation and sending counters, recorded engagement of the last 30 days, sending
+  domains and usage this month;
+- validation jobs with filters, job detail with paginated, filterable and sortable address results,
+  and a CSV export of the (filtered) results, streamed in batches, with exactly the API's
+  `ValidationAddress` fields;
+- send jobs with filters, job detail with transport outcomes, recorded engagement, clicks per link
+  and the paginated message list, and the per-message event timeline;
+- suppressions: those of this client and the opt-outs it reported, plus this client's messages that a
+  suppression stopped, with only the broad reason of a global suppression (never who reported it);
+- sending domains with the verification record, status, DKIM status and a DNS check;
+- usage per month and the individual usage records.
+
+Lists use **keyset** (cursor) pagination with whitelisted sort and filter names. Browser upload of
+validation lists and browser management of API keys and webhook endpoints are not part of Phase 6
+(the API and the audited console commands remain); LiveComponent was not needed.
+
 ## Operator dashboard
 
 The operator requires a separate view containing:
@@ -1289,11 +1344,59 @@ The operator requires a separate view containing:
 - Postfix queue depth and queue-snapshot freshness;
 - Python validation backlog;
 - Go and webhook-worker health;
-- unmatched DSNs and their resolution (console commands until this dashboard exists);
+- unmatched DSNs and their resolution;
 - global suppressions and their provenance, with audited lifting;
 - `outcome_unknown` messages and log gaps;
 - failed webhooks;
 - audit history.
+
+**Implemented in Phase 6** (each page requires a permission key; see below): a system overview built from durable
+database signals (validation and send work queues, worker leases, the newest results, the
+Postfix-log ingest cursor, messages per status, bounce/deferral/complaint rates per client over
+7 days, active suppressions, unmatched DSNs and the webhook outbox), so the page stays fast and usable
+when a worker is down; clients with status changes and the opt-out capability (each through the
+existing audited services); the unmatched-DSN workflow; suppressions with operator provenance,
+operator blocks and lifting with a required note; the audit log with secret-like values redacted
+on display; and the webhook outbox, labelled as outbox state until Phase 7 delivers webhooks. The
+Postfix queue snapshots are read only by the Go daemon, so the overview shows the messages Smarthost
+considers to be in Postfix rather than the queue depth itself.
+
+Every dashboard change is a POST with a CSRF token. Dashboard responses carry a Content Security
+Policy (same-origin scripts and styles only, with a per-request nonce for the import map; no CDN),
+refuse framing and are never cached; error pages are generic.
+
+## Dashboard sign-in and access control (specification 2.7)
+
+There are no passwords. At `/dashboard/login` a user enters an email address; if that address
+belongs to an enabled user, Smarthost emails a **single-use sign-in link**. The answer is the same
+whether or not an account exists. The link:
+
+- carries a 256-bit random token, of which only the SHA-256 is stored;
+- expires after `APP_LOGIN_LINK_TTL_SECONDS` (15 minutes by default) and works once;
+- is built from `SMARTHOST_PUBLIC_BASE_URL`, never from the request's `Host` header;
+- is not consumed by a `HEAD` request (mail-security scanners).
+
+Requests are limited to 5 per address and 20 per client address per 15 minutes. The email is the
+only mail the Symfony application sends: it goes through authenticated Postfix submission (its own
+SASL account) and OpenDKIM, so in development it lands in Mailpit like everything else.
+
+The address in `APP_ADMIN_EMAIL` can always request a link. Its account is created on first sign-in
+and it receives the **ADMIN** role at every sign-in, so the configured administrator can always get
+back in.
+
+**Roles and permissions.** Operator pages each require a permission key, such as
+`PLATFORM.CLIENT.MANAGE` or `PLATFORM.AUDIT.VIEW`. Roles grant sets of keys and a user holds the
+keys of all their roles:
+
+- **ADMIN** holds every permission, cannot be reduced, and is the only role with the `SYSTEM.*`
+  keys: managing roles and granting ADMIN;
+- **OPERATOR** starts with every `PLATFORM.*` key and can be edited;
+- custom roles are created and edited on the Roles page.
+
+Changes apply at each holder's next request. Users, their roles and their client memberships are
+managed on the Users page, and every change is audited. Access to a client's own pages still comes
+from the client membership (viewer, member, admin); `PLATFORM.CLIENT.VIEW` and
+`PLATFORM.CLIENT.MANAGE` give access to every client.
 
 ---
 
@@ -1506,7 +1609,10 @@ Exit criteria:
 - large tables use server-side pagination;
 - tracking URLs contain no raw email address;
 - redirect endpoint cannot be abused as a generic open redirect;
-- UI distinguishes SMTP acceptance from proven reading, and never shows `outcome_unknown` as delivered.
+- UI distinguishes SMTP acceptance from proven reading, and never shows `outcome_unknown` as delivered;
+- tenant isolation and operator-only areas are proven with two clients;
+- a 10,000-address validation job and a 10,000-message send job render page by page with bounded
+  memory and query counts.
 
 ---
 
@@ -1632,6 +1738,8 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.7 | 6 October 2026 | Passwordless dashboard sign-in by single-use emailed links (through Postfix; Mailpit in development) with roles, permission keys and an editable access-control list; `APP_ADMIN_EMAIL` always receives ADMIN; OPERATOR replaces the operator flag; users, roles and memberships are managed in the browser; passwords removed. New tables `roles`, `role_permissions`, `user_roles`, `auth_login_tokens`. The development public URL is `https://localhost:8443`. |
+| 2.6 | 5 October 2026 | Phase 6 tracking and dashboards: tracking-endpoint eligibility, identical answers for unknown tokens, the bounded recording rule (one recorded open per message per 60 seconds, one recorded click per message and link per 10 seconds, at most 1000 events of a type per message, a per-address limit that only skips the write) and token-free logging; the dashboards' scope, access model, keyset pagination and HTTP security; the `message_events` engagement index and read-only web access to the Postfix-log ingest cursor. No architecture change. |
 | 2.5 | 5 October 2026 | Phase 5 corrections: DSNs and complaints correlate automatically only through Smarthost-issued identifiers; recipient-plus-sender evidence is only an operator candidate (D-36). Trusted clients may create recipient global opt-outs while pending approval or suspended, but lift them only while active or throttled (D-37). Durable opt-out request idempotency independent of the suppression row (D-38). |
 | 2.4 | 4 October 2026 | Incorporates D-30: automatic transport suppressions (recipient-specific hard bounces, verified complaints, repeated recipient soft bounces) are global across the installation and apply to every client; non-recipient, temporary and ambiguous outcomes never create one; the repeated-soft-bounce suppression is temporary. Adds the `recipient_global_opt_out` reason, reported only by clients an operator authorised (`can_submit_global_suppressions`) through `/v1/global-suppressions`, with explicit provenance and audited lifting that never deletes history or overrides independent suppressions. Ordinary unsubscribes remain client state. Details inbound DSN/ARF parsing, correlation, classification, the unmatched-DSN workflow and spool retention. |
 | 2.3 | 4 October 2026 | Incorporates D-35: a persistent pod lifecycle replaces the Quadlet pod/container units. The pod and containers are created once and then started and stopped as the same objects (also from Podman Desktop); a systemd user service starts the existing pod at boot; only an explicit recreate replaces them, and volume destruction stays separate. |

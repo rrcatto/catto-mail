@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="same-origin">
+    <title>{% block title %}Dashboard{% endblock %} · Catto Mail Smarthost</title>
+    <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
+    {{ importmap('app', {nonce: csp_nonce()}) }}
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+    <div class="brand"><a href="{{ path('dashboard_home') }}">Catto Mail Smarthost</a></div>
+    {% if app.user %}
+        <div class="who">
+            Signed in as <strong>{{ app.user.displayName ?? app.user.email }}</strong>
+            {% for r in app.user.roleKeys %}<span class="tag">{{ r|lower }}</span>{% endfor %}
+            <form method="post" action="{{ path('dashboard_logout') }}" class="inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+                <button type="submit" class="link">Sign out</button>
+            </form>
+        </div>
+    {% endif %}
+</header>
+{% if app.user %}
+<nav class="nav" aria-label="Main">
+    {% if client is defined %}
+        {% set cid = client.id.toRfc4122 %}
+        <span class="nav-title">{{ client.companyName }}</span>
+        <ul>
+            <li><a href="{{ path('dashboard_client_overview', {clientId: cid}) }}"{% if section == 'overview' %} aria-current="page"{% endif %}>Overview</a></li>
+            <li><a href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}"{% if section == 'validation' %} aria-current="page"{% endif %}>Validation</a></li>
+            <li><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}"{% if section == 'sending' %} aria-current="page"{% endif %}>Sending</a></li>
+            <li><a href="{{ path('dashboard_client_suppressions', {clientId: cid}) }}"{% if section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>
+            <li><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}"{% if section == 'domains' %} aria-current="page"{% endif %}>Sending domains</a></li>
+            <li><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}"{% if section == 'usage' %} aria-current="page"{% endif %}>Usage</a></li>
+        </ul>
+    {% endif %}
+    {% if app.user.platformUser %}
+        <span class="nav-title">Operator</span>
+        <ul>
+            {% if is_granted('PLATFORM.OVERVIEW.VIEW') %}<li><a href="{{ path('dashboard_operator_overview') }}"{% if client is not defined and section == 'overview' %} aria-current="page"{% endif %}>System overview</a></li>{% endif %}
+            {% if is_granted('PLATFORM.CLIENT.VIEW') %}<li><a href="{{ path('dashboard_operator_clients') }}"{% if section == 'clients' %} aria-current="page"{% endif %}>Clients</a></li>{% endif %}
+            {% if is_granted('PLATFORM.USER.VIEW') %}<li><a href="{{ path('dashboard_operator_users') }}"{% if section == 'users' %} aria-current="page"{% endif %}>Users</a></li>{% endif %}
+            {% if is_granted('SYSTEM.ROLE.VIEW') %}<li><a href="{{ path('dashboard_operator_roles') }}"{% if section == 'roles' %} aria-current="page"{% endif %}>Roles &amp; permissions</a></li>{% endif %}
+            {% if is_granted('PLATFORM.DSN.VIEW') %}<li><a href="{{ path('dashboard_operator_dsns') }}"{% if section == 'dsns' %} aria-current="page"{% endif %}>Unmatched DSNs</a></li>{% endif %}
+            {% if is_granted('PLATFORM.SUPPRESSION.VIEW') %}<li><a href="{{ path('dashboard_operator_suppressions') }}"{% if client is not defined and section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>{% endif %}
+            {% if is_granted('PLATFORM.AUDIT.VIEW') %}<li><a href="{{ path('dashboard_operator_audit') }}"{% if section == 'audit' %} aria-current="page"{% endif %}>Audit log</a></li>{% endif %}
+            {% if is_granted('PLATFORM.WEBHOOK.VIEW') %}<li><a href="{{ path('dashboard_operator_webhooks') }}"{% if section == 'webhooks' %} aria-current="page"{% endif %}>Webhook outbox</a></li>{% endif %}
+        </ul>
+    {% endif %}
+</nav>
+{% endif %}
+<main id="main">
+    {% for type, messages in app.flashes %}
+        {% for message in messages %}
+            <p class="flash flash-{{ type }}" role="{{ type == 'error' ? 'alert' : 'status' }}"><strong>{{ type == 'error' ? 'Error' : (type == 'success' ? 'Done' : 'Note') }}:</strong> {{ message }}</p>
+        {% endfor %}
+    {% endfor %}
+    {% block body %}{% endblock %}
+</main>
+<footer class="foot">Times are shown in UTC.</footer>
+</body>
+</html>

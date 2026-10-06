@@ -2,13 +2,124 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.5.
+the *specification* version, which is 2.7.
 
-## [Unreleased]
+## [0.1.6] - 2026-10-06
 
-Phase 5 corrections (specification 2.5, decisions D-36 to D-38). No version change.
+Phase 6 complete: tracking and dashboards (specification 2.6), with passwordless dashboard sign-in,
+roles, permissions and an ACL (specification 2.7), and the Phase 5 corrections (specification 2.5,
+decisions D-36 to D-38).
 
-### Changed
+### Changed (specification 2.7, by owner instruction)
+- Dashboard sign-in is passwordless: `/dashboard/login` asks for an email address and emails a
+  single-use link (256-bit token, only its SHA-256 stored, `APP_LOGIN_LINK_TTL_SECONDS` lifetime,
+  atomic redeem, HEAD never redeems; 5 requests per address and 20 per client address per 15
+  minutes; the same answer whether or not a link was sent; the link is built from
+  `SMARTHOST_PUBLIC_BASE_URL`). Form login, password hashing, `smarthost:user:set-password` and
+  `--password-stdin` are gone; `users.password_hash` is dropped.
+- The web application sends the sign-in email itself through authenticated Postfix submission with
+  its own SASL account (Symfony Mailer); Postfix creates both SASL accounts; OpenDKIM signs; Mailpit
+  captures it in development.
+- `APP_ADMIN_EMAIL` can always request a link; the account is created on first sign-in and receives
+  ADMIN (every permission) at every sign-in.
+- Roles, permissions and ACL: permission keys (`App\Access\PermissionCatalog`), tables `roles`,
+  `role_permissions`, `user_roles`, `auth_login_tokens` (migration `Version20261006000200`); built-in
+  ADMIN (fixed, every key, SYSTEM.* only for it) and OPERATOR (every PLATFORM.* key, editable);
+  custom roles. `users.global_role` and the `global_role` vocabulary are replaced by OPERATOR
+  (vocabulary 2.4.0); operator pages require permission keys; `ClientVoter` grants every client to
+  `PLATFORM.CLIENT.VIEW`/`MANAGE`. `smarthost:user:set-operator` is replaced by
+  `smarthost:user:role <email> <ROLE> grant|revoke`; `smarthost:user:create --role`.
+- New operator pages: Users (create, enable/disable, email a sign-in link, roles, add/change/remove
+  client memberships; `smarthost_app` may now delete memberships) and Roles & permissions (ADMIN).
+- New settings `APP_ADMIN_EMAIL`, `APP_MAIL_FROM`, `APP_LOGIN_LINK_TTL_SECONDS`,
+  `APP_MAIL_SUBMISSION_HOST`/`PORT`/`USERNAME`/`PASSWORD`; the development `SMARTHOST_PUBLIC_BASE_URL`
+  is `https://localhost:8443` and `PROXY_SERVER_NAME` `localhost`, so emailed links open in a browser.
+- Tests: `DashboardUserTest` (rewritten for links), `AccessControlTest`; the dashboard test helpers
+  sign in through the real emailed link; `phase6-e2e` takes the link from Mailpit (DKIM-signed,
+  single use, admin bootstrap, ACL). The schema catalog comparison uses visible column order.
+
+### Verified (v0.1.6, final)
+- `smarthostctl test phase2`: 225 tests, 3,306 assertions; `test phase3`: Ruff and mypy clean,
+  295 pytest tests, end to end PASS; `test phase4` (Go 4/5 suite): gofmt and go vet clean, 14 unit
+  packages, 29 integration tests.
+- `test phase6-e2e` 75/75 (sign-in links from Mailpit), `test phase4-e2e` 21/21 (incl. 10,000
+  recipients), `test phase5-e2e` 50/50 against the rebuilt, recreated pod; `smarthostctl verify`
+  176/176 (persistent lifecycle T19–T23, neighbours untouched); dashboard and Mailpit reachable from
+  the Windows host.
+- Contract checks 1966/1966; OpenAPI 3.1 valid; yamllint clean; shellcheck clean at warning;
+  `composer validate --strict`; privacy and secrets scans clean.
+
+### Added (Phase 6)
+- Public tracking endpoints `GET /t/o/{token}.gif` and `GET /t/c/{token}/{link_index}` on the
+  opaque Go tokens (`App\Tracking\TrackingRecorder`, `App\Controller\TrackingController`). A token
+  must be well formed, name a message handed to Postfix whose job enables that tracking kind and be
+  within `APP_RETENTION_TRACKING_DAYS` (now consumed; empty = no expiry). Opens always get the same
+  43-byte GIF; clicks get a 302 to exactly the stored `message_links` target (re-checked as an
+  absolute http/https URL without control characters) or the same plain 404; a `/t/...` fallback
+  route answers every other tracking URL with that 404 instead of a logged routing error.
+  `no-store`, `no-referrer`, no cookies, HEAD never recorded, nothing about the requester stored.
+- Bounded recording rule: a request is answered but not recorded within 60 s of the message's last
+  recorded open (opens) or 10 s of the message and link's last recorded click (clicks), beyond 1000
+  events of a type per message, or above 1200 tracking requests per minute from one address
+  (`tracking` rate limiter); a per-message advisory lock makes it atomic.
+- Client dashboard under `/dashboard/c/{client}`: overview, validation jobs and job results
+  (filters, keyset pagination, sorting, CSV export with exactly the API's `ValidationAddress`
+  fields, streamed in batches), send jobs and job detail (transport outcomes, recorded engagement,
+  clicks per link, messages), message event timeline, suppressions (own rows and reported
+  opt-outs; this client's suppressed messages with only the broad reason of a global suppression),
+  sending domains (DNS check through `SendingDomainService::verify`), usage. A client the user may not
+  see is a 404; every query carries the client id.
+- Operator dashboard under `/dashboard/operator` (`ROLE_OPERATOR`): system overview from durable
+  database signals (queues, leases, newest results, Postfix-log ingest cursor, messages per status,
+  per-client rates over 7 days, suppressions, unmatched DSNs, webhook outbox), clients (status and
+  opt-out capability through the audited services), the unmatched-DSN workflow (match request and
+  dismissal through `UnmatchedDsnAdministration`; Go applies matches), suppressions (operator
+  provenance, operator blocks, lifting with a required note), audit log (filters; secret-like keys
+  redacted on display), webhook outbox (labelled as outbox state until Phase 7).
+- Twig templates, AssetMapper (served through PHP-FPM; Stimulus vendored, no CDN, es-module-shims
+  polyfill disabled), Symfony UX StimulusBundle with one `confirm` controller; `symfony/twig-bundle`,
+  `symfony/asset`, `symfony/asset-mapper`, `symfony/stimulus-bundle`. Generic production error page.
+- Dashboard HTTP security: CSP with a per-request nonce for the import map, `frame-ancestors 'none'`,
+  `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: same-origin`, `no-store`; every change a POST
+  with a CSRF token; sign-out is a POST with a CSRF token (GET no longer signs out).
+- Migration `Version20261006000100`: partial `message_events_engagement_idx` (opens/clicks), added
+  because the load test showed the engagement aggregates scanning all of `message_events`.
+- Grant: `smarthost_app` may read (not write) `delivery_ingest_cursors` (schema.md §6 footnote 4).
+- Tests: `TrackingTest`, `TrackingStatisticsTest`, `ClientDashboardTest`, `OperatorDashboardTest`,
+  `DashboardLargeDatasetTest` (10,000-address and 10,000-message jobs with 45,000 events plus other
+  tenants' data; query counts, memory and EXPLAIN ANALYZE of every page query, reported in
+  `infra/.generated/test-output/`), the test-only `QueryRecorder` DBAL middleware; Go
+  `TestTextOnlyMessageOfTrackedJobIsNotInstrumented`; `infra/tests/phase6-e2e.sh` and
+  `smarthostctl test phase6-e2e`.
+
+### Changed (Phase 6)
+- Specification 2.6 (YAML and human specification): tracking endpoint eligibility, responses,
+  recording rule, aggregates and privacy; the Phase 6 dashboards' scope, access model, pagination
+  and HTTP security; what is not in Phase 6 (browser upload, API-key/webhook management, Postfix
+  queue depth in the web UI, LiveComponent). Contract documents re-labelled 2.6; OpenAPI routes
+  unchanged.
+- The `request` log channel records only warnings (it logged route parameters, i.e. tracking
+  tokens, at info), in tests too; nginx writes tracking URLs to its access log with the token
+  redacted.
+- The minimal inline-HTML login page is replaced by the Twig dashboard; the dashboard home sends
+  operators to the operator overview and single-client users to their client.
+- `infra/tests/testpod.sh` accepts extra application-container arguments; `phase2-test.sh` mounts
+  `infra/.generated/test-output/`.
+
+### Verified (Phase 6, before specification 2.7)
+- `smarthostctl test phase2`: 216 tests, 2,796 assertions; `test phase3`: Ruff and mypy clean,
+  295 pytest tests, end to end PASS; `test phase4` (Go 4/5 suite): gofmt and go vet clean, 14 unit
+  packages, 29 integration tests.
+- `test phase6-e2e` 68/68, `test phase4-e2e` 21/21, `test phase5-e2e` 50/50 against the rebuilt,
+  recreated pod; `smarthostctl verify` 176/176 (persistent lifecycle T19–T23, neighbours untouched).
+- Load test (measured client 10,000 addresses / 10,000 messages / 45,000 events, plus 30,000
+  addresses, 30,000 messages and 120,000 events of another client, 20,000 suppressions, 20,000 audit
+  rows): at most 13 queries and 1.2 MiB of PHP memory per page, slowest statement 33 ms; the
+  10,000-row CSV export in 24 bounded queries.
+- Contract checks 1915/1915; OpenAPI 3.1 valid; yamllint clean; shellcheck clean at warning;
+  `composer validate --strict`; privacy and secrets scans clean.
+
+### Changed (Phase 5 corrections, specification 2.5)
 - D-36: inbound DSNs and complaints are correlated automatically only through Smarthost-issued
   identifiers (VERP token, envelope id, Smarthost Message-ID, Postfix queue id). Recipient address
   plus a matching returned sender no longer correlates (with global suppressions it is forgeable);

@@ -69,6 +69,6 @@ final class OrmMappingTest extends KernelTestCase
         }
         self::assertSame([], array_keys(array_diff_key($db, $mapped)), 'Tables without an entity');
         self::assertSame([], $problems);
-        self::assertCount(25, $mapped);
+        self::assertCount(29, $mapped);
     }
 }

@@ -33,7 +33,7 @@ final class DsnDismissCommand extends AdminCommand
     {
         $id = (string) $input->getArgument('id');
         $d = $this->dsns->find($id) ?? throw new DomainRuleViolation("No unmatched DSN $id.");
-        $operator = $this->operator($input->getOption('operator'));
+        $operator = $this->operator($input->getOption('operator'), 'PLATFORM.DSN.MANAGE');
         $this->dsns->dismiss($d, (string) $input->getOption('reason'), $operator);
         $io->writeln('status: '.$d->getStatus()->value);
 

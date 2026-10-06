@@ -1,0 +1,23 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Unmatched DSNs{% endblock %}
+{% block body %}
+<h1>Unmatched DSNs</h1>
+<p>Delivery status notifications that could not be tied to a message by a Smarthost-issued identifier. They never change a message or create a suppression until an operator requests a match and the delivery daemon applies it.</p>
+<form method="get" class="filters" role="search" aria-label="Filter unmatched DSNs">
+    {{ ui.select('status', 'Status', label_options('dsn_status'), filters.status, 'All') }}
+    {{ ui.select('classification', 'Classification', {hard_bounce: 'Hard bounce', soft_bounce: 'Soft bounce', deferred: 'Deferred', connection_failure: 'Connection failure', complaint: 'Complaint', malformed_or_unmatched_dsn: 'Malformed or unmatched'}, filters.classification) }}
+    <input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+</form>
+{% if page.rows is empty %}<p class="empty">No DSNs match.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'received', 'Received') }}</th><th scope="col">Status</th><th scope="col">Classification</th><th scope="col">Recipient</th><th scope="col">Status code</th><th scope="col">Reporting MTA</th><th scope="col" class="num">Candidates</th></tr></thead>
+    <tbody>{% for d in page.rows %}
+        <tr><td><a href="{{ path('dashboard_operator_dsn', {id: d.id}) }}">{{ d.received_at|ts }}</a></td><td>{{ ui.status(d.status, 'dsn_status') }}</td><td>{{ d.classification|replace({'_': ' '})|capitalize }}</td>
+            <td>{{ d.final_recipient ?? d.original_recipient ?? '—' }}</td><td>{{ d.enhanced_status_code ?? '—' }}</td><td>{{ d.reporting_mta ?? '—' }}</td><td class="num">{{ d.candidates }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(page, 'DSNs') }}
+{% endblock %}

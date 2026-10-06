@@ -1,0 +1,24 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Roles &amp; permissions{% endblock %}
+{% block body %}
+<h1>Roles &amp; permissions</h1>
+<p>Each role grants a set of permissions; a user's permissions are those of all their roles. ADMIN always holds every permission. Changes apply at each holder's next request.</p>
+<table>
+    <thead><tr><th scope="col">Role</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Permissions</th><th scope="col" class="num">Users</th></tr></thead>
+    <tbody>{% for r in roles %}
+        <tr><td><a href="{{ path('dashboard_operator_role', {id: r.id.toRfc4122}) }}"><code>{{ r.roleKey }}</code></a></td><td>{{ r.name }}{% if r.description %}<br><small>{{ r.description }}</small>{% endif %}</td>
+            <td>{{ r.builtin ? 'Built-in' : 'Custom' }}</td><td class="num">{{ permission_counts[r.id.toRfc4122] }} / {{ permission_total }}</td><td class="num">{{ user_counts[r.id.toRfc4122] ?? 0 }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% if is_granted('SYSTEM.ROLE.MANAGE') %}
+<h2>Create a role</h2>
+<form method="post" action="{{ path('dashboard_operator_role_create') }}" class="filters">
+    {{ ui.csrf() }}
+    <label>Key (e.g. SUPPORT) <input type="text" name="role_key" required pattern="[A-Za-z][A-Za-z0-9_]{1,63}" maxlength="64"></label>
+    <label>Name <input type="text" name="name" required maxlength="100"></label>
+    <label>Description <input type="text" name="description" maxlength="300"></label>
+    <button type="submit">Create role</button>
+</form>
+{% endif %}
+{% endblock %}

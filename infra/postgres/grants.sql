@@ -14,7 +14,13 @@ REVOKE ALL ON ALL TABLES IN SCHEMA public FROM :"app", :"webhook", :"validator",
 -- Tenancy, people, domains and authentication
 GRANT SELECT, INSERT, UPDATE ON clients TO :"app";
 GRANT SELECT ON clients TO :"webhook", :"validator", :"delivery";
-GRANT SELECT, INSERT, UPDATE ON users, client_memberships TO :"app";
+GRANT SELECT, INSERT, UPDATE ON users TO :"app";
+-- Memberships can be removed from the dashboard (specification 2.7).
+GRANT SELECT, INSERT, UPDATE, DELETE ON client_memberships TO :"app";
+-- Roles, permissions and passwordless sign-in links (specification 2.7).
+GRANT SELECT, INSERT, UPDATE, DELETE ON roles TO :"app";
+GRANT SELECT, INSERT, DELETE ON role_permissions, user_roles TO :"app";
+GRANT SELECT, INSERT, UPDATE, DELETE ON auth_login_tokens TO :"app";
 GRANT SELECT, INSERT, UPDATE ON sending_domains TO :"app";
 GRANT SELECT ON sending_domains TO :"delivery";
 GRANT SELECT, INSERT, UPDATE ON api_keys TO :"app";
@@ -50,6 +56,8 @@ GRANT SELECT, INSERT ON message_events TO :"delivery";
 GRANT SELECT, UPDATE, DELETE ON unmatched_dsns TO :"app";
 GRANT SELECT, INSERT, UPDATE ON unmatched_dsns TO :"delivery";
 GRANT SELECT, INSERT, UPDATE ON delivery_ingest_cursors TO :"delivery";
+-- Read-only, for the operator dashboard's Postfix-log ingest freshness (Phase 6).
+GRANT SELECT ON delivery_ingest_cursors TO :"app";
 
 -- Suppression and reputation
 GRANT SELECT, INSERT, UPDATE, DELETE ON suppressions TO :"app";

@@ -67,12 +67,17 @@ final class LeastPrivilegeTest extends TestCase
         self::assertFalse($this->denied('UPDATE send_job_recipients SET subject = subject WHERE false'), 'content purge columns stay updatable');
         self::assertTrue($this->denied('DELETE FROM send_jobs'));
         self::assertTrue($this->denied('DELETE FROM clients'));
-        self::assertTrue($this->denied('DELETE FROM client_memberships'));
+        self::assertFalse($this->denied('DELETE FROM client_memberships WHERE false'), 'memberships can be removed (specification 2.7)');
+        self::assertTrue($this->denied('UPDATE user_roles SET assigned_at = assigned_at'), 'role grants are inserted and deleted, never rewritten');
         self::assertTrue($this->denied('UPDATE messages SET current_status = current_status'));
         self::assertTrue($this->denied('UPDATE message_events SET diagnostic = diagnostic'));
         self::assertTrue($this->denied('UPDATE validation_addresses SET overall_classification = overall_classification'));
         self::assertTrue($this->denied('INSERT INTO messages (id) VALUES (gen_random_uuid())'));
-        self::assertTrue($this->denied('SELECT * FROM delivery_ingest_cursors'));
+        // Phase 6: readable for the operator dashboard's ingest freshness, never writable.
+        self::assertFalse($this->denied('SELECT source, updated_at FROM delivery_ingest_cursors'));
+        self::assertTrue($this->denied("UPDATE delivery_ingest_cursors SET position = position"));
+        self::assertTrue($this->denied("INSERT INTO delivery_ingest_cursors (source, generation_id, position) VALUES ('x', 'y', 0)"));
+        self::assertTrue($this->denied('DELETE FROM delivery_ingest_cursors'));
         self::assertTrue($this->denied('UPDATE webhook_deliveries SET status = status'));
         self::assertTrue($this->denied('UPDATE audit_log SET action = action'));
     }

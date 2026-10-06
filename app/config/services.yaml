@@ -13,6 +13,14 @@ parameters:
     app.log_format: '%env(default:app.default_log_format:SMARTHOST_LOG_FORMAT)%'
     app.default_log_format: 'json'
     app.openapi_contract: '%kernel.project_dir%/config/contracts/openapi.v1.yaml'
+    # Passwordless dashboard sign-in (specification 2.7).
+    app.admin_email: '%env(default:app.no_admin_email:APP_ADMIN_EMAIL)%'
+    app.no_admin_email: ''
+    app.mail_from: '%env(APP_MAIL_FROM)%'
+    app.login_link_ttl_seconds: '%env(int:APP_LOGIN_LINK_TTL_SECONDS)%'
+    # Empty means no expiry (contract APP_RETENTION_TRACKING_DAYS).
+    app.tracking.retention_days: '%env(default:app.no_retention:APP_RETENTION_TRACKING_DAYS)%'
+    app.no_retention: ''
 
 services:
     _defaults:
@@ -28,6 +36,7 @@ services:
             int $recheckHours: '%app.domain_verification.recheck_hours%'
             int $secretOverlapHours: '%app.webhook.secret_overlap_hours%'
             string $openApiContractPath: '%app.openapi_contract%'
+            string $trackingRetentionDays: '%app.tracking.retention_days%'
 
     App\:
         resource: '../src/'
@@ -64,3 +73,6 @@ when@test:
         App\Webhook\WebhookOutbox:
             autowire: true
             public: true
+        # Records the SQL of the application connection (query counts and plans in tests).
+        App\Tests\Support\QueryRecorder:
+            tags: [{ name: doctrine.middleware, connection: default }]

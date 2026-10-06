@@ -1,0 +1,24 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Clients{% endblock %}
+{% block body %}
+<h1>Clients</h1>
+<form method="get" class="filters" role="search" aria-label="Filter clients">
+    {{ ui.select('status', 'Status', label_options('client_status'), filters.status) }}
+    <label>Name or contact contains <input type="text" name="q" value="{{ filters.q }}"></label>
+    <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_operator_clients') }}">Reset</a>
+</form>
+{% if page.rows is empty %}<p class="empty">No clients match.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Company') }}</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">Plan</th><th scope="col">Global opt-outs</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
+    <tbody>{% for c in page.rows %}
+        <tr><td><a href="{{ path('dashboard_operator_client', {id: c.id}) }}">{{ c.company_name }}</a></td><td>{{ c.contact_email }}</td>
+            <td>{{ ui.status(c.status, 'client_status') }}</td><td>{{ c.plan }}</td><td>{{ c.can_submit_global_suppressions ? 'Permitted' : 'No' }}</td>
+            <td class="num">{{ c.verified_domains }}</td><td>{{ c.created_at|ts }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(page, 'clients') }}
+{% endblock %}

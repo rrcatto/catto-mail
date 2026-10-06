@@ -20,7 +20,7 @@ ever differ, the specification wins.
 | D-09 | Delivery-time tracking instrumentation, only when enabled. Open pixel in HTML only. Click rewriting of eligible HTML HTTP(S) links only. | `sending.tracking_instrumentation` |
 | D-10 | `webhook_endpoints` with encrypted signing secrets and rotation; deliveries reference the endpoint. | `api.webhooks`, `schema.tables` |
 | D-11 | 10,000 recipients per job, configuration-driven; rejected cleanly above the limit. | `sending.ingestion.max_recipients_per_job` |
-| D-12 | `users` and `client_memberships`; global operator role; API keys never used for browser login. | `security.dashboard_authentication`, `schema.tables` |
+| D-12 | `users` and `client_memberships`; global operator role (since specification 2.7: roles and permission keys, passwordless sign-in); API keys never used for browser login. | `security.dashboard_authentication`, `schema.tables` |
 | D-13 | `sending_domains` (several per client), random DNS TXT verification token, `verified_at`, DKIM selector/status. Unverified domains are rejected for live sending. | `sending.sending_domains` |
 | D-14 | Rendered content is transient: purged on Postfix acceptance, otherwise cleaned up after 7 days by default. Other retention periods are configurable and not hard-coded. | `sending.rendered_content_retention`, `compliance.retention` |
 | D-15 | Roles are created by infrastructure bootstrap under `infra/`. Doctrine owns schema objects. Separate identities for owner, app, webhook worker, validator and delivery. | `postgres.roles_and_privileges` |
@@ -189,6 +189,43 @@ are in `docs/architecture/postfix-integration.md` §5 and §10 and `delivery/REA
 | A match request Go cannot apply returns the row to `open` with `detail_json.resolution_failures`. | `delivery/internal/store/dsn.go` |
 | Phase 1 verification T16 stops the delivery daemon while it observes raw Maildir delivery (the daemon now consumes the spool), runs the claim probe in a throwaway container, and then proves the running daemon ingests a new DSN. | `infra/tests/phase1-verify.sh` |
 
+### Phase 6 implementation choices
+
+Made while implementing Phase 6; recorded in specification 2.6
+(`message_tracking.engagement_tracking.endpoints`, `user_interfaces.phase_6_implementation`).
+None changes the architecture.
+
+| Choice | Where |
+|---|---|
+| Tracking recording rule: a request is always answered, but not recorded when the message had an open in the last 60 s (opens), the message and link had a click in the last 10 s (clicks), the message has 1000 events of that type, or the requesting address exceeded 1200 tracking requests per minute (Symfony rate limiter `tracking`). A per-message transaction-scoped advisory lock makes the check-and-insert atomic. Nothing about the requester is stored. | `app/src/Tracking/TrackingRecorder.php`, `config/packages/framework.yaml` |
+| Eligibility: well-formed token (base64url, 32–64 characters), message handed to Postfix (`postfix_queue_id` set), job tracking flag for that kind, not older than `APP_RETENTION_TRACKING_DAYS` when set. A text-only message of a tracked job has a token that never appears in any mail (Go instruments only HTML). | `TrackingRecorder` |
+| Responses: one 43-byte GIF for every open request; 302 to exactly the stored target (re-checked: absolute http/https, no whitespace/control characters) or the same plain 404; a low-priority `/t/{rest}` fallback answers every other tracking URL with that 404 instead of a router exception, so malformed URLs (with tokens) are never logged as errors. `no-store`, `no-referrer`, no cookies; HEAD not recorded. | `app/src/Controller/TrackingController.php` |
+| Token-free logs: the `request` log channel only records warnings (it logs route parameters at info); nginx logs tracking URLs with the token redacted (`map $request_uri`). | `config/packages/monolog.yaml`, `infra/nginx/templates/smarthost.conf.template` |
+| Dashboard read models use DBAL with an explicit client condition in every query (the ORM tenant filter only covers API requests); a client the user may not see is a 404 like a missing one. Changes reuse the existing audited services. | `app/src/Dashboard/` |
+| Keyset pagination over (whitelisted sort expression, id); a cursor whose values do not fit the sort type restarts at page 1 (a tampered cursor once produced a cast error, found by the tests). | `app/src/Dashboard/KeysetQuery.php` |
+| Overview counters come from `send_jobs.summary_counts_json` / `validation_jobs.classification_counts_json` (one row per job); engagement figures are limited to jobs of the last 30 days (client) and rates to jobs of the last 7 days (operator). | `ClientReadModel`, `OperatorReadModel` |
+| `message_events_engagement_idx` (partial, opens/clicks): the load test showed the engagement aggregates scanning all of `message_events`; with the index they read only the job's tracking rows (31–59 ms → 10–12 ms at 165,000 events). No other Phase 6 query needed an index; the deferred reconciliation-candidates index stays deferred (no Phase 6 query uses it). | migration `Version20261006000100` |
+| The web role may read `delivery_ingest_cursors` (operator overview: Postfix-log ingest freshness); it still cannot write it. | `infra/postgres/grants.sql`, schema.md §6 |
+| AssetMapper serves the dashboard assets through PHP-FPM (nginx serves no files); Stimulus is vendored in `app/assets/vendor/`; the es-module-shims CDN polyfill is disabled. CSP with a per-request nonce for the import map. LiveComponent was not needed. | `config/packages/asset_mapper.yaml`, `app/src/Dashboard/SecurityHeadersSubscriber.php` |
+| Validation-result export: CSV with exactly the OpenAPI `ValidationAddress` fields, streamed in keyset batches of 500, formula-like cells prefixed with an apostrophe. | `ClientDashboardController::exportValidationResults` |
+
+### Owner instruction: passwordless sign-in, roles and ACL (specification 2.7, 2026-10-06)
+
+The owner instructed that the dashboard use passwordless sign-in (an emailed link, captured by
+Mailpit in development) with an `APP_ADMIN_EMAIL` administrator and roles, permissions and an ACL,
+adapted from the owner's other Symfony applications. Owner instructions take precedence over earlier
+specification rules; the specification was updated to match.
+
+| Choice | Where |
+|---|---|
+| Single-use links: 256-bit token, SHA-256 stored, 15-minute default lifetime, atomic `UPDATE ... RETURNING` redeem, HEAD never redeems; 5 requests per address and 20 per client address (keyed hash) per 15 minutes; identical answer whether or not a link was sent. | `app/src/Security/LoginLinkService.php`, `LoginLinkAuthenticator.php` |
+| The web application sends this one kind of mail itself, through authenticated Postfix submission with its own SASL account (`APP_MAIL_SUBMISSION_*`), so it is DKIM-signed and captured by Mailpit in development. Bulk/campaign mail still never goes through Symfony. | `config/packages/mailer.yaml`, `postfix/entrypoint.sh` |
+| `APP_ADMIN_EMAIL` may always request a link; the account is created on first sign-in and ADMIN is (re)granted at every sign-in, recreating the ADMIN row if it was lost. | `app/src/Access/AccessControl.php` |
+| Permission keys in code (`PermissionCatalog`), roles in the database (`roles`, `role_permissions`, `user_roles`); ADMIN holds every key without rows; SYSTEM.* only for ADMIN; OPERATOR seeded with every PLATFORM.* key; permissions re-resolved on every request. | `app/src/Access/` |
+| `users.password_hash` and `users.global_role` are dropped; existing operators became OPERATOR holders in the migration. | migration `Version20261006000200` |
+| Client memberships can be removed (DELETE grant) so the Users page can manage them. | `infra/postgres/grants.sql` |
+| The development `SMARTHOST_PUBLIC_BASE_URL` is `https://localhost:8443` (the published nginx port) so emailed links open in a browser; nginx `server_name` follows. | environment contract |
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are
@@ -211,8 +248,14 @@ None of them required an architectural change.
 None. D-31 to D-34 were resolved on 2026-10-03, D-35 and D-30 on 2026-10-04, D-36 to D-38 on
 2026-10-05 (see §1).
 
-Points to confirm before production (not blocking Phase 6): a CA file variable so Go can verify
+Points to confirm before production (not blocking Phase 7): a CA file variable so Go can verify
 Postfix's submission certificate; an index for reconciliation candidates at production volume
-(Phase 5 query-plan review found no Phase 5 query that needs it); retention commands for the
-configured `APP_RETENTION_SUPPRESSIONS_DAYS` / `APP_RETENTION_UNMATCHED_DSN_DAYS` periods (empty,
-so no deletion, until the compliance policy sets them).
+(neither the Phase 5 nor the Phase 6 query-plan review found a query that needs it); retention
+commands for the configured `APP_RETENTION_SUPPRESSIONS_DAYS` / `APP_RETENTION_UNMATCHED_DSN_DAYS` /
+`APP_RETENTION_TRACKING_DAYS` periods (empty, so no deletion, until the compliance policy sets them;
+tracking expiry is already enforced by the endpoints); whether Go should publish the Postfix queue
+depth and snapshot age to the database so the operator overview can show them; an index on
+`suppressions (created_at, id)` if the unfiltered operator suppression list grows large (a sorted
+scan, 33 ms at 20,000 rows in the Phase 6 load test); and whether
+browser-based validation upload, API-key and webhook-endpoint management are wanted (console
+commands and the API cover them today).

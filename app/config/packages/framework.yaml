@@ -26,6 +26,13 @@ framework:
             policy: sliding_window
             limit: 30
             interval: '1 minute'
+        # Per client IP for the public tracking endpoints (Phase 6). Generous, because
+        # mailbox providers fetch images through a few proxy addresses: above it the
+        # pixel and redirects are still served, only the database write is skipped.
+        tracking:
+            policy: sliding_window
+            limit: 1200
+            interval: '1 minute'
 
 when@test:
     framework:

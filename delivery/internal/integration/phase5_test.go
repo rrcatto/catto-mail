@@ -724,7 +724,7 @@ func TestConcurrentWorkersClaimEachFileOnce(t *testing.T) {
 // operatorUser creates an operator (as Symfony would) for match requests.
 func (e *env) operatorUser() string {
 	id := ids.UUIDv7()
-	e.exec(`INSERT INTO users (id, email, global_role) VALUES ($1, $2, 'operator')`, id, "op-"+tag()+"@smarthost.test")
+	e.exec(`INSERT INTO users (id, email) VALUES ($1, $2)`, id, "op-"+tag()+"@smarthost.test")
 	return id
 }
 

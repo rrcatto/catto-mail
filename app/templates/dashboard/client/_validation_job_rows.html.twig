@@ -1,0 +1,25 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% if rows is empty %}<p class="empty">No validation jobs match.</p>{% else %}
+<table>
+    <thead><tr>
+        <th scope="col">{% if listing %}{{ ui.sort(listing, 'submitted', 'Submitted') }}{% else %}Submitted{% endif %}</th>
+        <th scope="col">Status</th>
+        <th scope="col">External reference</th>
+        <th scope="col" class="num">{% if listing %}{{ ui.sort(listing, 'total', 'Addresses') }}{% else %}Addresses{% endif %}</th>
+        <th scope="col" class="num">Checked</th>
+        <th scope="col">Classification summary</th>
+    </tr></thead>
+    <tbody>
+    {% for j in rows %}
+        <tr>
+            <td><a href="{{ path('dashboard_client_validation_job', {clientId: client.id.toRfc4122, jobId: j.id}) }}">{{ j.submitted_at|ts }}</a></td>
+            <td>{{ ui.status(j.status, 'validation_job_status') }}</td>
+            <td>{{ j.external_reference ?? '—' }}</td>
+            <td class="num">{{ j.total_addresses|number_format }}</td>
+            <td class="num">{{ j.processed_count|number_format }}</td>
+            <td>{{ ui.counts(j.classification_counts_json, 'classification') }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}

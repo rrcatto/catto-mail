@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.5 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.7 · **Template:** [`infra/.env.example`](../../infra/.env.example)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -56,7 +56,7 @@ secret has a value in the template, and that safety switches default to safe val
 | Variable | Consumers | Secret | Phase | Example | Meaning |
 |---|---|---|---|---|---|
 | `SMARTHOST_ENV` | app, webhook-worker, validator, delivery, postfix, opendkim | no | 1 | `development` | One of `development`, `test` or `production`. Postfix uses it in the live-mode guard, and OpenDKIM uses it to refuse generating disposable development keys outside `development`/`test`. |
-| `SMARTHOST_PUBLIC_BASE_URL` | app, delivery | no | 2 | `https://smarthost.localhost` | Public HTTPS origin for the API and tracking URLs. No trailing slash. |
+| `SMARTHOST_PUBLIC_BASE_URL` | app, delivery | no | 2 | `https://localhost:8443` | Public HTTPS origin for the API, tracking URLs and emailed dashboard sign-in links (which are built from it, never from a request's Host header). No trailing slash. In development it is the published nginx port, so links in Mailpit open in the browser. |
 | `SMARTHOST_LOG_LEVEL` | app, webhook-worker, validator, delivery | no | 1 | `info` | `debug`, `info`, `warning` or `error`. |
 | `SMARTHOST_LOG_FORMAT` | app, webhook-worker, validator, delivery | no | 1 | `json` | `json` (default), or `text` for local debugging only. |
 | `SMARTHOST_LIVE_DELIVERY_ENABLED` | postfix, delivery | no | 1 | `false` | Capture/live switch. When it is `false` (capture mode), Postfix relays every outbound message to `POSTFIX_RELAYHOST` (Mailpit) and refuses to start without one. `true` (live mode) is accepted **only** with `SMARTHOST_ENV=production` and an empty `POSTFIX_RELAYHOST`; any other combination is a startup error. In development, the internal Podman network additionally has no Internet route. |
@@ -123,6 +123,13 @@ secret has a value in the template, and that safety switches default to safe val
 | `APP_RETENTION_UNMATCHED_DSN_DAYS` | app | no | 5 | | Resolved or dismissed unmatched DSNs. Empty means no automatic deletion. |
 | `APP_RETENTION_AUDIT_LOG_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
 | `APP_RETENTION_USAGE_RECORDS_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
+| `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. Empty disables this. |
+| `APP_MAIL_FROM` | app | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail Smarthost"). Its domain should be DKIM-signed by OpenDKIM. |
+| `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |
+| `APP_MAIL_SUBMISSION_HOST` | app | no | 6 | `postfix` | Postfix submission host for the web application's own mail (sign-in links). |
+| `APP_MAIL_SUBMISSION_PORT` | app | no | 6 | `587` | Authenticated submission port (STARTTLS, OpenDKIM milter). |
+| `APP_MAIL_SUBMISSION_USERNAME` | app, postfix | no | 6 | `smarthost-app` | SASL account of the web application on Postfix submission (separate from the delivery daemon's). |
+| `APP_MAIL_SUBMISSION_PASSWORD` | app, postfix | **yes** | 6 | | SASL password for that account. |
 
 ## Python validator (`validator`)
 
@@ -203,7 +210,7 @@ secret has a value in the template, and that safety switches default to safe val
 | Variable | Consumers | Secret | Phase | Example | Meaning |
 |---|---|---|---|---|---|
 | `PROXY_HTTPS_BIND` | proxy | no | 1 | `127.0.0.1:8443` | Published HTTPS listener. In production it is `0.0.0.0:443`. |
-| `PROXY_SERVER_NAME` | proxy | no | 1 | `smarthost.localhost` | nginx `server_name`. Must match the host in `SMARTHOST_PUBLIC_BASE_URL`. |
+| `PROXY_SERVER_NAME` | proxy | no | 1 | `localhost` | nginx `server_name`. Must match the host in `SMARTHOST_PUBLIC_BASE_URL`. |
 | `PROXY_FASTCGI_ADDRESS` | proxy | no | 1 | `symfony-app:9000` | PHP-FPM FastCGI address on the internal network. There is no separate PHP HTTP application server. |
 | `PROXY_TLS_CERT_FILE` | proxy | no | 1 | `/run/secrets/proxy_tls_cert` | Path to the mounted certificate. |
 | `PROXY_TLS_KEY_FILE` | proxy | no | 1 | `/run/secrets/proxy_tls_key` | Path to the mounted private key. |

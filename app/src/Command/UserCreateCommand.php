@@ -12,7 +12,11 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand('smarthost:user:create', 'Create a dashboard user (password from STDIN with --password-stdin)')]
+/**
+ * Creates a dashboard user (passwordless: they sign in with an emailed link).
+ * Usually done in the dashboard (Operator › Users); this is the scripted path.
+ */
+#[AsCommand('smarthost:user:create', 'Create a dashboard user (signs in with an emailed link)')]
 final class UserCreateCommand extends AdminCommand
 {
     public function __construct(private readonly AccountAdministration $accounts)
@@ -24,15 +28,15 @@ final class UserCreateCommand extends AdminCommand
     {
         $this->addArgument('email', InputArgument::REQUIRED, 'Login email (unique, case-insensitive)')
             ->addOption('display-name', null, InputOption::VALUE_REQUIRED)
-            ->addOption('operator', null, InputOption::VALUE_NONE, 'Grant the global operator role')
-            ->addOption('password-stdin', null, InputOption::VALUE_NONE, 'Read the password from the first line of STDIN');
+            ->addOption('role', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Grant this role (e.g. OPERATOR); repeatable');
     }
 
     protected function handle(InputInterface $input, SymfonyStyle $io): int
     {
-        $password = $input->getOption('password-stdin') ? $this->secretFromStdin($input) : null;
-        $user = $this->accounts->createUser((string) $input->getArgument('email'), $input->getOption('display-name'), $password,
-            (bool) $input->getOption('operator'), $this->actor());
+        $user = $this->accounts->createUser((string) $input->getArgument('email'), $input->getOption('display-name'), $this->actor());
+        foreach ((array) $input->getOption('role') as $key) {
+            $this->accessControl->grantRoleAsSystem($user, (string) $key, $this->actor());
+        }
         $io->writeln('user_id: '.$user->getId()->toRfc4122());
 
         return Command::SUCCESS;

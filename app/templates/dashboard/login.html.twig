@@ -1,0 +1,17 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<section class="narrow">
+    <h1>Sign in</h1>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <p>Enter your email address and we will email you a sign-in link. There is no password.</p>
+    <form method="post" action="{{ path('dashboard_login_request') }}" class="stack">
+        <label>Email address
+            <input type="email" name="email" autocomplete="username" required autofocus maxlength="320">
+        </label>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('login-link') }}">
+        <button type="submit">Email me a sign-in link</button>
+    </form>
+    <p class="muted">Accounts are created by an operator. API keys cannot be used to sign in here.</p>
+</section>
+{% endblock %}

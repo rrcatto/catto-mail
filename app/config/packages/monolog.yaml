@@ -8,7 +8,15 @@ monolog:
             path: 'php://stderr'
             level: '%env(SMARTHOST_LOG_LEVEL)%'
             formatter: App\Logging\ContractFormatter
-            channels: ['!event', '!deprecation', '!doctrine']
+            channels: ['!event', '!deprecation', '!doctrine', '!request']
+        # The request channel logs matched routes with their parameters at info, which
+        # would put tracking tokens in the logs; keep only its problems.
+        request:
+            type: stream
+            path: 'php://stderr'
+            level: warning
+            formatter: App\Logging\ContractFormatter
+            channels: ['request']
         # Doctrine logs connection details and every query at info/debug; keep only problems.
         doctrine:
             type: stream
@@ -25,4 +33,11 @@ when@test:
                 path: '%kernel.logs_dir%/%kernel.environment%.log'
                 level: debug
                 formatter: App\Logging\ContractFormatter
-                channels: ['!event']
+                channels: ['!event', '!request']
+            # As in production: the request channel only from warning (no route parameters).
+            request:
+                type: stream
+                path: '%kernel.logs_dir%/%kernel.environment%.log'
+                level: warning
+                formatter: App\Logging\ContractFormatter
+                channels: ['request']

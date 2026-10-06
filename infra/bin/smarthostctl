@@ -146,6 +146,9 @@ usage: smarthostctl <command>
   test phase5-e2e [A B C D E F G]  Phase 5 end to end against the RUNNING pod: DSNs and ARF
                     complaints through Postfix :25 and the spool, global suppression across
                     clients, opt-out API, correlation, operator workflow, crash, retention
+  test phase6-e2e   Phase 6 end to end against the RUNNING pod through nginx: tracking pixel and
+                    click redirect from a delivered message, open-redirect attempts, dashboards
+                    (login, tenant isolation, operator area, DSN/suppression actions), token-free logs
   console <args>    run a Symfony console command in the running app container (as www-data),
                     e.g. console smarthost:dev:bootstrap
   migrate           re-run Doctrine migrations and then the infrastructure grants
@@ -188,8 +191,9 @@ case "${1:-}" in
       phase4|phase5) shift; exec "$REPO/infra/tests/phase4-test.sh" "$@" ;;
       phase4-e2e) shift; exec "$REPO/infra/tests/phase4-e2e.sh" "$@" ;;
       phase5-e2e) shift; exec "$REPO/infra/tests/phase5-e2e.sh" "$@" ;;
+      phase6-e2e) shift; exec "$REPO/infra/tests/phase6-e2e.sh" "$@" ;;
       all) "$REPO/infra/tests/phase2-test.sh" && "$REPO/infra/tests/phase3-test.sh" && exec "$REPO/infra/tests/phase4-test.sh" ;;
-      *) die "test: expected phase2, phase3, phase4, phase5, phase4-e2e, phase5-e2e or nothing" ;;
+      *) die "test: expected phase2, phase3, phase4, phase5, phase4-e2e, phase5-e2e, phase6-e2e or nothing" ;;
     esac ;;
   console) shift; exec podman exec -i -u www-data smarthost-symfony-app php bin/console "$@" ;;
   migrate) pod tasks db-migrate db-grants ;;

@@ -1,0 +1,78 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}{{ client.companyName }} – Overview{% endblock %}
+{% block body %}
+{% set cid = client.id.toRfc4122 %}
+<h1>{{ client.companyName }}</h1>
+<p>Client status: {{ ui.status(client.status.value, 'client_status') }}</p>
+
+<div class="cards">
+    <section class="card">
+        <h2>Validation</h2>
+        <dl>
+            <dt>Jobs</dt><dd>{{ o.validation.jobs|number_format }} ({{ o.validation.active_jobs|number_format }} in progress)</dd>
+            <dt>Addresses submitted</dt><dd>{{ o.validation.addresses|number_format }}</dd>
+            <dt>Addresses checked</dt><dd>{{ o.validation.processed|number_format }}</dd>
+        </dl>
+        {% if o.classifications is not empty %}
+            <h3>Results by classification</h3>
+            <ul class="counts">{% for k, v in o.classifications %}<li>{{ k|label('classification') }}: {{ v|number_format }}</li>{% endfor %}</ul>
+        {% endif %}
+        <p class="muted">Validation estimates deliverability; it does not prove that a mailbox will accept a message.</p>
+    </section>
+
+    <section class="card">
+        <h2>Sending (all jobs)</h2>
+        {% set s = o.statuses %}
+        <dl>
+            <dt>Send jobs</dt><dd>{{ o.sending.jobs|number_format }} ({{ o.sending.active_jobs|number_format }} in progress)</dd>
+            <dt>Recipients</dt><dd>{{ o.sending.recipients|number_format }}</dd>
+            <dt>Remote accepted</dt><dd>{{ (s.remote_accepted ?? 0)|number_format }}</dd>
+            <dt>Deferred (still retrying)</dt><dd>{{ (s.deferred ?? 0)|number_format }}</dd>
+            <dt>Soft bounced</dt><dd>{{ (s.soft_bounced ?? 0)|number_format }}</dd>
+            <dt>Hard bounced</dt><dd>{{ (s.hard_bounced ?? 0)|number_format }}</dd>
+            <dt>Complaints</dt><dd>{{ (s.complained ?? 0)|number_format }}</dd>
+            <dt>Suppressed (not sent)</dt><dd>{{ (s.suppressed ?? 0)|number_format }}</dd>
+            <dt>Outcome unknown</dt><dd>{{ (s.outcome_unknown ?? 0)|number_format }}</dd>
+            <dt>Failed</dt><dd>{{ (s.failed ?? 0)|number_format }}</dd>
+        </dl>
+        <p class="muted">“Remote accepted” means the receiving mail server accepted responsibility for the message. It does not prove inbox placement or that anyone received it.</p>
+    </section>
+
+    <section class="card">
+        <h2>Engagement (jobs of the last {{ o.engagement_window_days }} days)</h2>
+        <dl>
+            <dt>Messages with a recorded open</dt><dd>{{ o.engagement.opened_messages|number_format }}</dd>
+            <dt>Recorded open events</dt><dd>{{ o.engagement.open_events|number_format }}</dd>
+            <dt>Messages with a recorded click</dt><dd>{{ o.engagement.clicked_messages|number_format }}</dd>
+            <dt>Recorded click events</dt><dd>{{ o.engagement.click_events|number_format }}</dd>
+        </dl>
+        {% include 'dashboard/_engagement_caveat.html.twig' %}
+    </section>
+
+    <section class="card">
+        <h2>Sending domains</h2>
+        {% if o.domains is empty %}<p>No sending domains yet.</p>{% else %}
+        <ul class="plain">{% for d in o.domains %}<li>{{ d.domain }} – {{ ui.status(d.status, 'domain_status') }}, DKIM {{ d.dkim_status|label('dkim_status') }}</li>{% endfor %}</ul>
+        {% endif %}
+        <p><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Sending domain details</a></p>
+    </section>
+
+    <section class="card">
+        <h2>Usage this month</h2>
+        <dl>
+            <dt>Validation addresses</dt><dd>{{ (o.usage_this_month.validation_address ?? 0)|number_format }}</dd>
+            <dt>Messages submitted</dt><dd>{{ (o.usage_this_month.message_submitted ?? 0)|number_format }}</dd>
+        </dl>
+        <p><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}">Usage history</a></p>
+    </section>
+</div>
+
+<h2>Recent validation jobs</h2>
+{% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: o.recent_validation_jobs, listing: null} %}
+<p><a href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}">All validation jobs</a></p>
+
+<h2>Recent send jobs</h2>
+{% include 'dashboard/client/_send_job_rows.html.twig' with {rows: o.recent_send_jobs, listing: null} %}
+<p><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">All send jobs</a></p>
+{% endblock %}

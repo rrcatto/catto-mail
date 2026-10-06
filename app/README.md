@@ -11,7 +11,7 @@ never host-published). There is no separate PHP HTTP server.
   limiting; RFC 9457 problem responses;
 - Doctrine entities and the migrations, which are the only authority for schema objects;
 - sending-domain registration and DNS TXT verification, DKIM selector/status records;
-- the dashboard user foundation (users, client memberships, operator role, form login);
+- the dashboard user foundation (users and client memberships);
 - the webhook endpoint/secret model and the transactional outbox (no HTTP delivery yet);
 - the audit log and the administrative console commands (`smarthost:*`).
 
@@ -29,8 +29,28 @@ operator-granted `can_submit_global_suppressions`), operator suppression adminis
 audited `smarthost:client:global-suppressions`, `smarthost:suppression:*` and `smarthost:dsn:*`
 console commands that require `--operator=<login email>`. Migration `Version20261004000100`.
 
-**Later phases:** client and operator dashboards (replacing the Phase 5 operator console commands), tracking endpoints, retention
-commands, and the **webhook worker**, a long-running console process from this image that
+**Phase 6 (implemented, v0.1.6, spec 2.6):**
+- public tracking endpoints `GET /t/o/{token}.gif` and `GET /t/c/{token}/{n}` (`App\Tracking\TrackingRecorder`,
+  `App\Controller\TrackingController`): eligibility checks, the same pixel or 404 for unknown tokens,
+  the bounded recording rule, redirects only to the stored `message_links` target, no cookies, no
+  token in any log;
+- the client dashboard under `/dashboard/c/{client}` and the operator dashboard under
+  `/dashboard/operator` (Twig, AssetMapper, Symfony UX StimulusBundle; no SPA, no CDN): read models
+  in `App\Dashboard\` with keyset pagination and an explicit client condition in every query;
+  changes are POST + CSRF through the existing audited services (`AccountAdministration`,
+  `SuppressionAdministration`, `UnmatchedDsnAdministration`, `GlobalSuppressionService`,
+  `SendingDomainService`); CSP with a per-request nonce;
+- migration `Version20261006000100` (`message_events_engagement_idx`).
+
+**Passwordless sign-in, roles and ACL (specification 2.7):** `/dashboard/login` emails a single-use
+link (`App\Security\LoginLinkService`, Symfony Mailer through Postfix submission, Mailpit in
+development; `App\Security\LoginLinkAuthenticator` redeems it). `APP_ADMIN_EMAIL` always receives
+ADMIN. Operator pages require permission keys (`App\Access\PermissionCatalog`) granted by roles
+(`App\Access\AccessControl`, `PermissionVoter`); users, roles and memberships are managed under
+*Operator › Users* and *Roles & permissions*. There are no passwords. Migration
+`Version20261006000200`.
+
+**Later phases:** retention commands, and the **webhook worker**, a long-running console process from this image that
 consumes the `webhook_events` outbox and is the only component that sends webhooks. Until Phase 7
 the worker unit runs the placeholder in `phase1-probe/`.
 
@@ -41,7 +61,7 @@ See `docs/PROJECT.md` for every file.
 
 Must not:
 - probe mailboxes;
-- send tracked mail or talk to Postfix;
+- send tracked or bulk mail (its only mail is the dashboard sign-in link, submitted to Postfix);
 - render templates or merge data;
 - hold or generate DKIM keys;
 - call Python or Go over RPC.

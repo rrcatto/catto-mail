@@ -30,7 +30,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *  - the D-30 global-opt-out capability for this disposable development client
  *    only (never for any other client);
  *  - a new API key, printed once;
- *  - optionally (--operator-email) a dashboard operator with a random password,
+ *  - optionally (--operator-email) a dashboard user with the OPERATOR role (signs in
+ *    with an emailed link; no password),
  *    printed once, and an admin membership of the client.
  *
  * Nothing is hard-coded or committed: every credential is generated now.
@@ -87,13 +88,13 @@ final class DevBootstrapCommand extends AdminCommand
         $io->writeln('api_key: '.$raw);
 
         if (null !== $email = $input->getOption('operator-email')) {
-            $password = rtrim(strtr(base64_encode(random_bytes(18)), '+/', '-_'), '=');
-            $user = $this->accounts->createUser((string) $email, 'Development operator', $password, true, $actor);
+            $user = $this->accounts->createUser((string) $email, 'Development operator', $actor);
+            $this->accessControl->grantRoleAsSystem($user, 'OPERATOR', $actor);
             $this->accounts->setMembership($user, $client, ClientMembershipRole::Admin, $actor);
             $io->writeln('operator_email: '.$user->getEmail());
-            $io->writeln('operator_password: '.$password);
+            $io->writeln('operator_sign_in: request a link at /dashboard/login (it arrives in Mailpit)');
         }
-        $io->note('Credentials are shown once and cannot be recovered.');
+        $io->note('The API key is shown once and cannot be recovered.');
 
         return Command::SUCCESS;
     }

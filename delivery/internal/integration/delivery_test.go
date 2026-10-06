@@ -314,6 +314,31 @@ func TestHeadersTrackingAndVERP(t *testing.T) {
 	}
 }
 
+// Phase 6: a text-only message of a tracked job carries no pixel and no rewritten
+// link, so its tracking token never appears in any mail and no link is mapped.
+func TestTextOnlyMessageOfTrackedJobIsNotInstrumented(t *testing.T) {
+	e := newEnv(t)
+	job := e.newJob(jobOpts{opens: true, clicks: true}, []rcpt{{addr: "plain@text.test", text: "Visit https://shop.test/plain today"}})
+	w := e.worker("txt")
+	w.ProcessJob(e.ctx, e.claim(w))
+	msgs := e.smtp.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("%d messages", len(msgs))
+	}
+	mid := e.str(`SELECT id::text FROM messages WHERE send_job_id = $1`, job)
+	token := e.str(`SELECT COALESCE(tracking_token, '') FROM messages WHERE id = $1`, mid)
+	body := string(msgs[0].Data)
+	if strings.Contains(body, "/t/o/") || strings.Contains(body, "/t/c/") || (token != "" && strings.Contains(body, token)) {
+		t.Fatalf("text-only message was instrumented: %s", body)
+	}
+	if !strings.Contains(body, "https://shop.test/plain") {
+		t.Fatalf("text part changed: %s", body)
+	}
+	if e.count(`SELECT count(*) FROM message_links WHERE message_id = $1`, mid) != 0 {
+		t.Fatal("a text-only message has no link mapping")
+	}
+}
+
 func TestAmbiguousSubmissionResolvedFromLogWithoutResubmission(t *testing.T) {
 	e := newEnv(t)
 	job := e.newJob(jobOpts{}, []rcpt{{addr: testsmtp.DropAfterData + "1@x.test"}})

@@ -1,0 +1,31 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Audit log{% endblock %}
+{% block body %}
+<h1>Audit log</h1>
+<form method="get" class="filters" role="search" aria-label="Filter the audit log">
+    <label>Action <select name="action"><option value="">Any</option>{% for a in actions %}<option value="{{ a }}"{% if filters.action == a %} selected{% endif %}>{{ a }}</option>{% endfor %}</select></label>
+    {{ ui.select('actor_type', 'Actor type', {user: 'User', api_key: 'API key', system: 'System'}, filters.actor_type) }}
+    <label>Actor id <input type="text" name="actor" value="{{ filters.actor }}"></label>
+    <label>Target type <input type="text" name="target_type" value="{{ filters.target_type }}"></label>
+    <label>Target id <input type="text" name="target_id" value="{{ filters.target_id }}"></label>
+    <label>From <input type="date" name="from" value="{{ filters.from }}"></label>
+    <label>to <input type="date" name="to" value="{{ filters.to }}"></label>
+    <input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_operator_audit') }}">Reset</a>
+</form>
+{% if page.rows is empty %}<p class="empty">No audit entries match.</p>{% else %}
+<table class="dense">
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Details</th></tr></thead>
+    <tbody>{% for a in page.rows %}
+        <tr><td>{{ a.occurred_at|ts }}</td>
+            <td>{{ a.actor_type }}{% if a.actor_email %}: {{ a.actor_email }}{% elseif a.actor_id %}: <code>{{ a.actor_id }}</code>{% endif %}</td>
+            <td><code>{{ a.action }}</code></td>
+            <td>{{ a.target_type }}{% if a.target_id %} <code>{{ a.target_id }}</code>{% endif %}</td>
+            <td>{% if a.detail is empty %}—{% else %}<dl class="inline-dl">{% for k, v in a.detail %}<dt>{{ k }}</dt><dd>{{ v is iterable ? v|json_encode : (v is same as(true) ? 'true' : (v is same as(false) ? 'false' : (v ?? 'null'))) }}</dd>{% endfor %}</dl>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(page, 'entries') }}
+{% endblock %}

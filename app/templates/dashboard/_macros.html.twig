@@ -1,0 +1,58 @@
+{# Shared table helpers. Every value is escaped by Twig's autoescaping. #}
+
+{# Next/first page links of a keyset page; keeps filters, sort and limit. #}
+{% macro pager(page, label = 'rows') %}
+    {% set route = app.request.attributes.get('_route') %}
+    {% set params = app.request.attributes.get('_route_params')|merge(app.request.query.all) %}
+    <nav class="pager" aria-label="Pagination">
+        {% if app.request.query.get('cursor') %}
+            <a href="{{ path(route, params|filter((v, k) => k != 'cursor')) }}">« First page</a>
+        {% endif %}
+        <span class="pager-count">{{ page.rows|length }} {{ label }} on this page</span>
+        {% if page.next %}
+            <a href="{{ path(route, params|merge({cursor: page.next})) }}" rel="next">Next page »</a>
+        {% endif %}
+    </nav>
+{% endmacro %}
+
+{# A sortable column header (whitelisted sort names only; resets the cursor). #}
+{% macro sort(listing, name, label) %}
+    {% set route = app.request.attributes.get('_route') %}
+    {% set params = app.request.attributes.get('_route_params')|merge(app.request.query.all)|filter((v, k) => k != 'cursor') %}
+    {% set active = listing.sort == name %}
+    {% set dir = active and listing.dir == 'desc' ? 'asc' : 'desc' %}
+    <a href="{{ path(route, params|merge({sort: name, dir: dir})) }}"{% if active %} aria-sort="{{ listing.dir == 'asc' ? 'ascending' : 'descending' }}"{% endif %}>{{ label }}{% if active %} <span aria-hidden="true">{{ listing.dir == 'asc' ? '▲' : '▼' }}</span><span class="sr">(sorted {{ listing.dir == 'asc' ? 'ascending' : 'descending' }})</span>{% endif %}</a>
+{% endmacro %}
+
+{# Status as text with a style hint (never colour alone). #}
+{% macro status(value, vocabulary) %}<span class="st st-{{ value|default('none') }}">{{ value|label(vocabulary) }}</span>{% endmacro %}
+
+{% macro select(name, label, options, current, any = 'Any') %}
+    <label>{{ label }}
+        <select name="{{ name }}">
+            <option value="">{{ any }}</option>
+            {% for value, text in options %}<option value="{{ value }}"{% if current == value %} selected{% endif %}>{{ text }}</option>{% endfor %}
+        </select>
+    </label>
+{% endmacro %}
+
+{% macro yesno(name, label, current) %}
+    <label>{{ label }}
+        <select name="{{ name }}">
+            <option value="">Any</option>
+            <option value="yes"{% if current == 'yes' %} selected{% endif %}>Yes</option>
+            <option value="no"{% if current == 'no' %} selected{% endif %}>No</option>
+        </select>
+    </label>
+{% endmacro %}
+
+{% macro flag(value) %}{% if value is same as(true) %}Yes{% elseif value is same as(false) %}No{% else %}—{% endif %}{% endmacro %}
+
+{% macro counts(json, vocabulary) %}
+    {% set counts = json|json_counts|filter(v => v > 0) %}
+    {% if counts is empty %}—{% else %}
+        <ul class="counts">{% for k, v in counts %}<li>{{ k|label(vocabulary) }}: {{ v|number_format }}</li>{% endfor %}</ul>
+    {% endif %}
+{% endmacro %}
+
+{% macro csrf() %}<input type="hidden" name="_token" value="{{ csrf_token('dashboard-action') }}">{% endmacro %}

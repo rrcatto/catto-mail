@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.5). Every enum value used in the database, the /v1 API,
+# (specification 2.7). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.3.0"
-specification_version: "2.5"
+vocabulary_version: "2.4.0"
+specification_version: "2.7"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -433,11 +433,6 @@ user_status:
   values:
     active: {origin: contract}
     disabled: {origin: contract, meaning: Cannot log in; memberships retained for audit.}
-
-global_role:
-  description: users.global_role (D-12). NULL for ordinary users. operator -> ROLE_OPERATOR.
-  values:
-    operator: {origin: contract}
 
 client_membership_role:
   description: client_memberships.role (D-12), enforced with Symfony voters per client.

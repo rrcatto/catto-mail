@@ -38,7 +38,10 @@ final class Phase5OperatorCommandTest extends ApiTestCase
     private function operatorEmail(bool $operator = true): string
     {
         $email = 'op.'.bin2hex(random_bytes(4)).'@smarthost-dev.test';
-        $this->service(AccountAdministration::class)->createUser($email, 'Operator', null, $operator, self::actor());
+        $user = $this->service(AccountAdministration::class)->createUser($email, 'Operator', self::actor());
+        if ($operator) {
+            $this->service(\App\Access\AccessControl::class)->grantRoleAsSystem($user, 'OPERATOR', self::actor());
+        }
 
         return $email;
     }

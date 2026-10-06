@@ -15,11 +15,13 @@ use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 
 /**
  * Dashboard access to a client's data (D-12, schema.md §3): through a membership
- * of the client, or as a global operator. Disabled users get nothing.
+ * of the client, or through an installation-wide permission
+ * (PLATFORM.CLIENT.VIEW reads any client, PLATFORM.CLIENT.MANAGE also acts in
+ * any client). Disabled users get nothing.
  *
- *   CLIENT_VIEW    viewer, member, admin
- *   CLIENT_OPERATE member, admin       (e.g. create jobs, manage sending domains)
- *   CLIENT_ADMIN   admin               (API keys, webhook endpoints, memberships)
+ *   CLIENT_VIEW    viewer, member, admin   or PLATFORM.CLIENT.VIEW / PLATFORM.CLIENT.MANAGE
+ *   CLIENT_OPERATE member, admin           or PLATFORM.CLIENT.MANAGE (e.g. sending-domain checks)
+ *   CLIENT_ADMIN   admin                   or PLATFORM.CLIENT.MANAGE (e.g. lifting the client's opt-outs)
  *
  * @extends Voter<string, Client>
  */
@@ -50,7 +52,8 @@ final class ClientVoter extends Voter
         if (!$user instanceof User || $user->isDisabled()) {
             return false;
         }
-        if ($user->isOperator()) {
+        if ($user->hasPermission('PLATFORM.CLIENT.MANAGE')
+            || (self::VIEW === $attribute && $user->hasPermission('PLATFORM.CLIENT.VIEW'))) {
             return true;
         }
         $membership = $this->em->getRepository(ClientMembership::class)->findOneBy(['user' => $user, 'client' => $subject]);

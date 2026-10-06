@@ -43,7 +43,7 @@ final class ClientGlobalSuppressionsCommand extends AdminCommand
         };
         $client = $this->client((string) $input->getArgument('client-id'));
         $changed = $this->suppressions->setGlobalSuppressionCapability($client, $allowed,
-            AuditActor::user($this->operator($input->getOption('operator'))), (string) $input->getOption('note'));
+            AuditActor::user($this->operator($input->getOption('operator'), 'PLATFORM.CLIENT.MANAGE')), (string) $input->getOption('note'));
         $io->writeln('can_submit_global_suppressions: '.($allowed ? 'true' : 'false').($changed ? '' : ' (unchanged)'));
 
         return Command::SUCCESS;

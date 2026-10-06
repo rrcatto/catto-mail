@@ -1,0 +1,107 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Send job{% endblock %}
+{% block body %}
+{% set cid = client.id.toRfc4122 %}
+{% set s = job.summary_counts_json|json_counts %}
+{% set e = job.engagement %}
+<p class="crumbs"><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">Send jobs</a> › Job</p>
+<h1>Send job “{{ job.external_reference }}”</h1>
+<div class="cards">
+    <section class="card">
+        <h2>Job</h2>
+        <dl>
+            <dt>Job id</dt><dd><code>{{ job.id }}</code></dd>
+            <dt>Status</dt><dd>{{ ui.status(job.status, 'send_job_status') }}</dd>
+            <dt>Class</dt><dd>{{ job.message_class|capitalize }}{% if job.list_id %} (List-Id {{ job.list_id }}){% endif %}</dd>
+            <dt>Sender</dt><dd>{{ job.sender_name ? job.sender_name ~ ' ' : '' }}&lt;{{ job.sender_email }}&gt; via {{ job.sending_domain }}</dd>
+            {% if job.reply_to_email %}<dt>Reply-To</dt><dd>{{ job.reply_to_email }}</dd>{% endif %}
+            <dt>Tracking</dt><dd>Opens {{ job.track_opens ? 'on' : 'off' }}, clicks {{ job.track_clicks ? 'on' : 'off' }}</dd>
+            <dt>Created</dt><dd>{{ job.created_at|ts }}</dd>
+            <dt>Queued</dt><dd>{{ job.queued_at|ts }}</dd>
+            <dt>Started</dt><dd>{{ job.started_at|ts }}</dd>
+            <dt>Dispatched to Postfix</dt><dd>{{ job.dispatch_completed_at|ts }}</dd>
+            <dt>Completed</dt><dd>{{ job.completed_at|ts }}</dd>
+        </dl>
+    </section>
+    <section class="card">
+        <h2>Transport outcomes</h2>
+        <table class="kv">
+            <caption class="sr">Messages by current status</caption>
+            <tbody>
+            <tr><th scope="row">Recipients</th><td class="num">{{ job.total_recipients|number_format }}</td></tr>
+            {% for key in ['submitted', 'remote_accepted', 'deferred', 'soft_bounced', 'hard_bounced', 'complained', 'suppressed', 'outcome_unknown', 'failed', 'queued', 'created'] %}
+                <tr><th scope="row">{{ key|label('message_status') }}</th><td class="num">{{ (s[key] ?? 0)|number_format }}</td><td class="num muted">{{ (s[key] ?? 0)|percent(job.total_recipients) }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="muted">“Submitted to Postfix” messages are waiting for their first outcome. “Remote accepted” means the receiving server accepted responsibility; it is not proof of inbox delivery. “Outcome unknown” is not a success.</p>
+    </section>
+    <section class="card">
+        <h2>Recorded engagement</h2>
+        {% if not job.track_opens and not job.track_clicks %}<p>Tracking was not enabled for this job.</p>{% endif %}
+        <dl>
+            <dt>Messages with a recorded open</dt><dd>{{ e.opened_messages|number_format }}</dd>
+            <dt>Recorded open events</dt><dd>{{ e.open_events|number_format }}</dd>
+            <dt>First / last recorded open</dt><dd>{{ e.first_open|ts }} / {{ e.last_open|ts }}</dd>
+            <dt>Messages with a recorded click</dt><dd>{{ e.clicked_messages|number_format }}</dd>
+            <dt>Recorded click events</dt><dd>{{ e.click_events|number_format }}</dd>
+            <dt>First / last recorded click</dt><dd>{{ e.first_click|ts }} / {{ e.last_click|ts }}</dd>
+        </dl>
+        {% include 'dashboard/_engagement_caveat.html.twig' %}
+    </section>
+</div>
+{% if e.links is not empty %}
+<h2>Recorded clicks by link</h2>
+<table>
+    <thead><tr><th scope="col" class="num">Link</th><th scope="col">Target</th><th scope="col" class="num">Click events</th><th scope="col" class="num">Messages</th></tr></thead>
+    <tbody>{% for l in e.links %}
+        <tr><td class="num">{{ l.link_index }}</td><td class="url">{{ l.target_url ?? '—' }}{% if l.targets > 1 %} <small>(differs between messages)</small>{% endif %}</td><td class="num">{{ l.clicks|number_format }}</td><td class="num">{{ l.messages|number_format }}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+
+<h2>Messages</h2>
+<form method="get" class="filters" role="search" aria-label="Filter messages">
+    {{ ui.select('status', 'Status', label_options('message_status'), filters.status) }}
+    <label>Recipient (exact) <input type="text" name="recipient" value="{{ filters.recipient }}" autocomplete="off"></label>
+    <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
+    <button type="submit">Apply</button>
+    <a href="{{ path('dashboard_client_send_job', {clientId: cid, jobId: job.id}) }}">Reset</a>
+</form>
+{% if page.rows is empty %}<p class="empty">No messages match.</p>{% else %}
+<div class="scroll">
+<table class="dense">
+    <thead><tr>
+        <th scope="col">{{ ui.sort(listing, 'recipient', 'Recipient') }}</th>
+        <th scope="col">Recipient reference</th>
+        <th scope="col">{{ ui.sort(listing, 'status', 'Status') }}</th>
+        <th scope="col">Postfix queue id</th>
+        <th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th>
+        <th scope="col">Submitted</th>
+        <th scope="col">Resolved</th>
+        <th scope="col">Recorded opens (first / last)</th>
+        <th scope="col">Recorded clicks (first / last)</th>
+        <th scope="col" class="num">Events</th>
+    </tr></thead>
+    <tbody>
+    {% for m in page.rows %}
+        <tr>
+            <td><a href="{{ path('dashboard_client_message', {clientId: cid, messageId: m.id}) }}">{{ m.recipient_address }}</a></td>
+            <td>{{ m.external_recipient_reference }}</td>
+            <td>{{ ui.status(m.current_status, 'message_status') }}</td>
+            <td>{{ m.postfix_queue_id ?? '—' }}</td>
+            <td>{{ m.created_at|ts }}</td>
+            <td>{{ m.submitted_at|ts }}</td>
+            <td>{{ m.resolved_at|ts }}</td>
+            <td>{{ m.opens }}{% if m.opens %}<br><small>{{ m.first_open|ts }} / {{ m.last_open|ts }}</small>{% endif %}</td>
+            <td>{{ m.clicks }}{% if m.clicks %}<br><small>{{ m.first_click|ts }} / {{ m.last_click|ts }}</small>{% endif %}</td>
+            <td class="num">{{ m.events }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+{{ ui.pager(page, 'messages') }}
+{% endblock %}

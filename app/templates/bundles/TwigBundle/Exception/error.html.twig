@@ -1,0 +1,18 @@
+{# Production error page for HTML requests (the /v1 API answers RFC 9457 problems,
+   the tracking endpoints answer their own minimal responses). Deliberately
+   standalone and generic: it never shows which resource was asked for or why. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ status_code }} {{ status_text }} · Catto Mail Smarthost</title>
+</head>
+<body>
+    <main>
+        <h1>{{ status_code == 404 ? 'Not found' : (status_code == 403 ? 'Access denied' : 'Something went wrong') }}</h1>
+        <p>{{ status_code == 404 ? 'The page does not exist or you do not have access to it.' : (status_code == 403 ? 'You do not have permission for this action.' : 'Please try again later.') }}</p>
+        <p><a href="/dashboard">Back to the dashboard</a></p>
+    </main>
+</body>
+</html>

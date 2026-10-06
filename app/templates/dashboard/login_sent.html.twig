@@ -1,0 +1,10 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Check your email{% endblock %}
+{% block body %}
+<section class="narrow">
+    <h1>Check your email</h1>
+    <p>If that address may sign in, a sign-in link is on its way. It works once and expires in {{ minutes }} minutes.</p>
+    <p class="muted">In development every message, including this one, is captured by Mailpit.</p>
+    <p><a href="{{ path('dashboard_login') }}">Use a different address</a></p>
+</section>
+{% endblock %}

@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.5 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.7 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -75,9 +75,12 @@ erDiagram
     users {
         uuid id PK
         text email UK "case-insensitive"
-        text global_role "operator or NULL"
         text status
     }
+    users ||--o{ user_roles : "holds"
+    roles ||--o{ user_roles : "granted by"
+    roles ||--o{ role_permissions : "permission keys"
+    users |o--o{ auth_login_tokens : "sign-in links"
     client_memberships {
         uuid id PK
         uuid user_id FK
@@ -255,7 +258,9 @@ erDiagram
 | `validation_addresses`, `validation_evidence` | tenant | via `validation_jobs.client_id` |
 | `send_job_recipient_batches`, `send_job_recipients`, `messages` | tenant | via `send_jobs.client_id` |
 | `message_links`, `message_events` | tenant | via `messages → send_jobs.client_id` |
-| `users` | global identity | client data is reached only through `client_memberships`, or as an operator |
+| `users` | global identity | client data is reached only through `client_memberships`, or through installation-wide permissions (`PLATFORM.CLIENT.*`) |
+| `roles`, `role_permissions`, `user_roles` | installation-wide access control | none (administered with `SYSTEM.ROLE.MANAGE` / `PLATFORM.USER.MANAGE`) |
+| `auth_login_tokens` | authentication | none (never readable through the dashboard) |
 | `suppressions` | tenant or global | `client_id`, where NULL = global. A tenant sees its own client-scoped rows and the global opt-outs it reported (`source_client_id`); other global rows are not tenant data (D-30). |
 | `domain_reputation` | tenant or platform | `client_id`, where NULL = platform |
 | `disposable_domains` | global reference data | none |
@@ -263,8 +268,10 @@ erDiagram
 | `delivery_ingest_cursors` | internal (Go) | none |
 | `audit_log` | operator | none |
 
-Another client's resource returns **404**. Dashboard access is checked by Symfony voters over
-memberships, and operators act through `global_role`.
+Another client's resource returns **404**. Dashboard access is checked by Symfony voters: client
+pages over `client_memberships` (viewer, member, admin) or the installation-wide `PLATFORM.CLIENT.VIEW`
+/ `PLATFORM.CLIENT.MANAGE` permissions; operator pages over the permission keys that the user's roles
+grant (`roles`, `role_permissions`, `user_roles`; ADMIN holds every permission).
 
 ## 4. Indexes required by the spec
 
@@ -303,6 +310,7 @@ Other indexes:
 * claimable-work indexes;
 * reconciliation candidates (`messages_unresolved_idx`);
 * soft-bounce rule evaluation (`message_events_soft_bounce_idx`, used with `messages_recipient_address_idx`);
+* recorded-open/click aggregates and the tracking endpoint's per-message check (`message_events_engagement_idx`, partial: `open_recorded`/`click_recorded` only; Phase 6, added after the load test showed whole-table scans of `message_events`);
 * suppressions by source message (`suppressions_source_message_idx`, partial), which also serves the foreign key;
 * opt-out requests by suppression (`global_suppression_requests_suppression_idx`), which serves the foreign key;
 * unpurged content;
@@ -335,7 +343,11 @@ grants below. No runtime role has DDL rights.
 | Table | `smarthost_app` (web + scheduled) | `smarthost_webhook` (worker) | `smarthost_validator` | `smarthost_delivery` |
 |---|---|---|---|---|
 | clients | S I U | S | S | S |
-| users, client_memberships | S I U | – | – | – |
+| users | S I U | – | – | – |
+| client_memberships | S I U D | – | – | – |
+| roles | S I U D | – | – | – |
+| role_permissions, user_roles | S I D | – | – | – |
+| auth_login_tokens | S I U D | – | – | – |
 | sending_domains | S I U | – | – | S |
 | api_keys | S I U | – | – | – |
 | validation_jobs | S I U | S | S U | – |
@@ -349,7 +361,7 @@ grants below. No runtime role has DDL rights.
 | message_links | S D¹ | – | – | S I |
 | message_events | S I³ D¹ | S | – | S I |
 | unmatched_dsns | S U D¹ | – | – | S I U |
-| delivery_ingest_cursors | – | – | – | S I U |
+| delivery_ingest_cursors | S⁴ | – | – | S I U |
 | suppressions | S I U D¹ | – | – | S I |
 | global_suppression_requests | S I D¹ | – | – | – |
 | domain_reputation | S | – | – | S I U |
@@ -366,6 +378,9 @@ is set.
 (the purge).
 
 ³ Open/click events from the tracking endpoints only.
+
+⁴ Read-only: the operator dashboard shows how recently Go advanced the Postfix-log ingest cursor
+(Phase 6).
 
 Suppressions (D-30): Symfony creates only client-reported `recipient_global_opt_out` rows (API)
 and operator blocks (console), and lifts by setting `lifted_at`. Go creates the system

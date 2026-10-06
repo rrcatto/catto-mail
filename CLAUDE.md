@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.5) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.7) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -32,8 +32,15 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
   suppression policy, spool, PostgreSQL integration); `test phase5-e2e` sends DSNs and ARF reports
   through the running pod's Postfix port 25 and DSN spool. Operator workflows are console commands
   (`smarthost:dsn:*`, `smarthost:suppression:*`, `smarthost:client:global-suppressions`, each with
-  `--operator`).
-- Do not start Phase 6 or later work unless the user explicitly asks for it.
+  `--operator`) and, since Phase 6, the operator dashboard.
+- **Phase 6** (tracking and dashboards, spec 2.6): complete (v0.1.6). Public tracking endpoints
+  `/t/o/{token}.gif` and `/t/c/{token}/{n}` (`app/src/Tracking/`, `TrackingController`); client
+  dashboard under `/dashboard/c/{client}` and operator dashboard under `/dashboard/operator`
+  (`app/src/Dashboard/`, `app/src/Controller/Dashboard/`, `app/templates/dashboard/`). Its tests are
+  in `smarthostctl test phase2`; `test phase6-e2e` runs through nginx against the running pod.
+- **Passwordless sign-in, roles and ACL** (spec 2.7): complete (v0.1.6; `app/src/Access/`,
+  `app/src/Security/LoginLink*`, Operator › Users and Roles & permissions).
+- Do not start Phase 7 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -66,6 +73,21 @@ This is a public repository. Documentation, comments, examples, tests, configura
   which denies unknown tables).
 - **API code loads tenant resources only through `TenantScope`**; `client_id` never comes from a
   request. Request bodies are validated against the OpenAPI contract itself.
+- **Dashboard code resolves the client only through `ClientAccess`** (voter; a client the user may
+  not see is a 404) and every dashboard query carries the client id explicitly (DBAL queries are
+  not covered by the ORM tenant filter). Sorts and filters are whitelisted; changes are POST + CSRF
+  through the existing audited services. UI wording: "Remote accepted" (never "delivered"),
+  "Recorded open/click" (never "read").
+- **Dashboard sign-in is passwordless** (spec 2.7): emailed single-use links (`LoginLinkService`),
+  `APP_ADMIN_EMAIL` always gets ADMIN. Operator pages require permission keys
+  (`App\Access\PermissionCatalog`, `#[IsGranted('PLATFORM.…')]`), never role names; ADMIN holds
+  every key. Never reintroduce passwords. Development sign-in emails land in Mailpit
+  (http://localhost:8026); the dashboard is https://localhost:8443/dashboard.
+- **The owner's instructions override the specification**; update the spec to match.
+- **Tracking endpoints** answer unknown, ineligible and valid-but-unrecorded tokens identically,
+  redirect only to the stored `message_links` target, never log tokens and never set cookies.
+- **Images:** `smarthostctl build` rebuilds the images; `install` only renders and installs units.
+  After `build`, run `recreate`.
 - **No undocumented environment variables.** Every variable must appear in
   `docs/contracts/environment.md`. Regenerate the template with
   `python3 infra/lib/smarthost_render.py env-example`, then run

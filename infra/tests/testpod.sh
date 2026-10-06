@@ -37,6 +37,7 @@ app_env=(
   -e TRUSTED_PROXIES=127.0.0.1 -e APP_API_RATE_LIMIT_PER_MINUTE=100000 -e APP_API_MAX_REQUEST_BYTES=10485760
   -e APP_SEND_JOB_MAX_RECIPIENTS=10000 -e APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH=500
   -e APP_ENCRYPTION_KEYS="$ENC_KEY" -e APP_WEBHOOK_SECRET_OVERLAP_HOURS=24 -e APP_DOMAIN_VERIFICATION_RECHECK_HOURS=24
+  -e APP_ADMIN_EMAIL=admin@smarthost-dev.test -e APP_MAIL_FROM=no-reply@smarthost-dev.test -e APP_LOGIN_LINK_TTL_SECONDS=900
 )
 
 testpod_down() { podman pod rm -f "$POD" >/dev/null 2>&1 || true; }
@@ -45,7 +46,8 @@ pg_admin() { podman run --rm -i --pod "$POD" --label project=smarthost -e PGPASS
   psql -X -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres "$@"; }
 infra() { podman run --rm --pod "$POD" --label project=smarthost "${bootstrap_env[@]}" -e SMARTHOST_DB_NAME="$1" \
   -v "$REPO/infra/postgres:/infra:ro" --entrypoint "/infra/$2" "$PG_IMAGE"; }
-app() { podman run --rm --pod "$POD" --label project=smarthost "${app_env[@]}" "$APP_TEST_IMAGE" "$@"; }
+APP_EXTRA=()  # extra podman run arguments for app (e.g. an output volume)
+app() { podman run --rm --pod "$POD" --label project=smarthost "${app_env[@]}" "${APP_EXTRA[@]}" "$APP_TEST_IMAGE" "$@"; }
 
 # testpod_up [extra databases...]: each extra database gets the role bootstrap too.
 testpod_up() {

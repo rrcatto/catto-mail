@@ -26,8 +26,10 @@ file_env() {
 require() { for v in "$@"; do eval "test -n \"\${$v:-}\"" || die "required variable $v is not set"; done; }
 
 file_env SMARTHOST_SUBMISSION_PASSWORD
+file_env APP_MAIL_SUBMISSION_PASSWORD
 require SMARTHOST_ENV SMARTHOST_LIVE_DELIVERY_ENABLED SMARTHOST_BOUNCE_DOMAIN SMARTHOST_VERP_LOCAL_PART \
         SMARTHOST_VERP_DELIMITER SMARTHOST_SUBMISSION_USERNAME SMARTHOST_SUBMISSION_PASSWORD \
+        APP_MAIL_SUBMISSION_USERNAME APP_MAIL_SUBMISSION_PASSWORD \
         SMARTHOST_POSTFIX_OBSERVABILITY_DIR SMARTHOST_DSN_SPOOL_DIR SMARTHOST_SPOOL_GID SMARTHOST_DELIVERY_UID \
         SMARTHOST_OPENDKIM_MILTER_ADDRESS POSTFIX_MYHOSTNAME POSTFIX_TLS_CERT_FILE POSTFIX_TLS_KEY_FILE \
         POSTFIX_MESSAGE_SIZE_LIMIT
@@ -163,8 +165,13 @@ mech_list: PLAIN LOGIN
 sasldb_path: /etc/postfix/sasl/sasldb2
 EOF
 rm -f /etc/postfix/sasl/sasldb2
+# Two submission accounts: the Go delivery daemon and the Symfony web application
+# (dashboard sign-in links). Both go through the OpenDKIM milter.
+[ "$APP_MAIL_SUBMISSION_USERNAME" != "$SMARTHOST_SUBMISSION_USERNAME" ] || die "APP_MAIL_SUBMISSION_USERNAME must differ from SMARTHOST_SUBMISSION_USERNAME"
 printf '%s' "$SMARTHOST_SUBMISSION_PASSWORD" | \
     saslpasswd2 -p -c -f /etc/postfix/sasl/sasldb2 -u "$POSTFIX_MYHOSTNAME" "$SMARTHOST_SUBMISSION_USERNAME"
+printf '%s' "$APP_MAIL_SUBMISSION_PASSWORD" | \
+    saslpasswd2 -p -c -f /etc/postfix/sasl/sasldb2 -u "$POSTFIX_MYHOSTNAME" "$APP_MAIL_SUBMISSION_USERNAME"
 chown root:postfix /etc/postfix/sasl/sasldb2
 chmod 0640 /etc/postfix/sasl/sasldb2
 

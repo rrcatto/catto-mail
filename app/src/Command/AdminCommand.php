@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Access\AccessControl;
 use App\Audit\AuditActor;
 use App\Domain\DomainRuleViolation;
 use App\Entity\Client;
@@ -28,12 +29,14 @@ abstract class AdminCommand extends Command
 {
     protected EntityManagerInterface $em;
     protected DashboardUserProvider $userProvider;
+    protected AccessControl $accessControl;
 
     #[Required]
-    public function setAdminDependencies(EntityManagerInterface $em, DashboardUserProvider $userProvider): void
+    public function setAdminDependencies(EntityManagerInterface $em, DashboardUserProvider $userProvider, AccessControl $accessControl): void
     {
         $this->em = $em;
         $this->userProvider = $userProvider;
+        $this->accessControl = $accessControl;
     }
 
     final protected function execute(InputInterface $input, OutputInterface $output): int
@@ -67,17 +70,19 @@ abstract class AdminCommand extends Command
 
     /**
      * The operator performing an audited D-30/D-05 action (--operator=<login email>):
-     * an enabled user with the global operator role. Their user id is the audit actor
-     * and, for unmatched-DSN match requests, resolution_requested_by.
+     * an enabled user whose roles grant $permission (App\Access\PermissionCatalog).
+     * Their user id is the audit actor and, for unmatched-DSN match requests,
+     * resolution_requested_by.
      */
-    protected function operator(?string $email): User
+    protected function operator(?string $email, string $permission): User
     {
         if (null === $email || '' === trim($email)) {
             throw new DomainRuleViolation('--operator=<operator login email> is required for this action.');
         }
         $user = $this->user(trim($email));
-        if (!$user->isOperator() || $user->isDisabled()) {
-            throw new DomainRuleViolation("$email is not an enabled operator.");
+        $this->accessControl->resolve($user);
+        if ($user->isDisabled() || !$user->hasPermission($permission)) {
+            throw new DomainRuleViolation("$email is not an enabled user with the $permission permission.");
         }
 
         return $user;

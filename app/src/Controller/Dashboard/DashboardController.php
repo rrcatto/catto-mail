@@ -4,54 +4,109 @@ declare(strict_types=1);
 
 namespace App\Controller\Dashboard;
 
-use App\Entity\User;
-use Symfony\Bundle\SecurityBundle\Security;
+use App\Dashboard\ClientAccess;
+use App\Security\LoginLinkService;
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 use Symfony\Component\Security\Http\Authentication\AuthenticationUtils;
+use Symfony\Component\Security\Http\Util\TargetPathTrait;
 
 /**
- * Minimal dashboard authentication foundation (D-12): form login for users with a
- * session, CSRF-protected. The client and operator dashboards are later phases;
- * this only proves the separate login path. API keys are never accepted here.
+ * Dashboard entry points (D-12, passwordless since specification 2.7). The user
+ * enters an email address and receives a single-use sign-in link
+ * (LoginLinkService); the link is redeemed by LoginLinkAuthenticator. There are no
+ * passwords and no self-service registration: an operator creates users in the
+ * dashboard, and APP_ADMIN_EMAIL can always sign in. Sign-out is a POST with a
+ * CSRF token (the firewall's logout listener handles it).
  */
 #[Route('/dashboard')]
-final class DashboardController
+final class DashboardController extends AbstractController
 {
-    #[Route('/login', name: 'dashboard_login', methods: ['GET', 'POST'])]
-    public function login(AuthenticationUtils $utils, CsrfTokenManagerInterface $csrf): Response
-    {
-        $error = $utils->getLastAuthenticationError() ? '<p role="alert">Sign-in failed.</p>' : '';
-        $email = htmlspecialchars($utils->getLastUsername(), \ENT_QUOTES);
-        $token = htmlspecialchars($csrf->getToken('authenticate')->getValue(), \ENT_QUOTES);
+    use TargetPathTrait;
 
-        return new Response(<<<HTML
-            <!doctype html>
-            <html lang="en"><head><meta charset="utf-8"><title>Smarthost sign in</title></head>
-            <body><h1>Smarthost</h1>$error
-            <form method="post" action="/dashboard/login">
-              <label>Email <input type="email" name="email" value="$email" autocomplete="username" required></label>
-              <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-              <input type="hidden" name="_csrf_token" value="$token">
-              <button type="submit">Sign in</button>
-            </form></body></html>
-            HTML, 200, ['Cache-Control' => 'no-store']);
+    public const CSRF_LOGIN = 'login-link';
+
+    #[Route('/login', name: 'dashboard_login', methods: ['GET'])]
+    public function login(AuthenticationUtils $authenticationUtils): Response
+    {
+        if (null !== $this->getUser()) {
+            return $this->redirectToRoute('dashboard_home');
+        }
+        $error = $authenticationUtils->getLastAuthenticationError();
+
+        return $this->render('dashboard/login.html.twig', ['error' => $error?->getMessageKey()]);
     }
 
+    /** Always answers the same way, whether or not a link was sent (no account enumeration). */
+    #[Route('/login', name: 'dashboard_login_request', methods: ['POST'])]
+    public function requestLink(Request $request, LoginLinkService $links): Response
+    {
+        if (!$this->isCsrfTokenValid(self::CSRF_LOGIN, $request->request->getString('_csrf_token'))) {
+            $this->addFlash('error', 'The form expired. Please try again.');
+
+            return $this->redirectToRoute('dashboard_login');
+        }
+        // Symfony remembers the page an anonymous visitor asked for as an absolute URL;
+        // only its path (and query) is kept, and LoginLinkService accepts /dashboard paths only.
+        $target = $this->getTargetPath($request->getSession(), 'dashboard');
+        $returnPath = null;
+        if (null !== $target) {
+            $parts = parse_url($target);
+            $returnPath = ($parts['path'] ?? '').(isset($parts['query']) ? '?'.$parts['query'] : '');
+        }
+        try {
+            $links->request($request->request->getString('email'), $request->getClientIp(), '' === $returnPath ? null : $returnPath);
+        } catch (\RuntimeException $e) {
+            $this->addFlash('error', $e->getMessage());
+
+            return $this->redirectToRoute('dashboard_login');
+        }
+
+        return $this->redirectToRoute('dashboard_login_sent');
+    }
+
+    #[Route('/login/sent', name: 'dashboard_login_sent', methods: ['GET'])]
+    public function sent(): Response
+    {
+        return $this->render('dashboard/login_sent.html.twig', ['minutes' => intdiv((int) $this->getParameter('app.login_link_ttl_seconds'), 60)]);
+    }
+
+    /**
+     * The emailed link. GET is redeemed by LoginLinkAuthenticator before this
+     * controller runs; HEAD (mail-security scanners) is answered without redeeming.
+     */
+    #[Route('/login/verify', name: 'dashboard_login_verify', methods: ['GET', 'HEAD'])]
+    public function verify(Request $request): Response
+    {
+        if ($request->isMethod('HEAD')) {
+            return new Response('', Response::HTTP_NO_CONTENT, ['Cache-Control' => 'no-store']);
+        }
+
+        return $this->redirectToRoute(null === $this->getUser() ? 'dashboard_login' : 'dashboard_home');
+    }
+
+    /**
+     * Platform users land on the system overview (or their first platform page);
+     * a user with one client lands on it; anyone else gets the chooser.
+     */
     #[Route('', name: 'dashboard_home', methods: ['GET'])]
-    public function home(Security $security): Response
+    public function home(ClientAccess $access): Response
     {
-        $user = $security->getUser();
-        $name = $user instanceof User ? htmlspecialchars($user->getEmail(), \ENT_QUOTES) : '';
-        $role = $user instanceof User && $user->isOperator() ? ' (operator)' : '';
+        $user = $access->user();
+        $memberships = $access->memberships();
+        if ($user->hasPermission('PLATFORM.OVERVIEW.VIEW') && [] === $memberships) {
+            return $this->redirectToRoute('dashboard_operator_overview');
+        }
+        if (!$user->isPlatformUser() && 1 === \count($memberships)) {
+            return $this->redirectToRoute('dashboard_client_overview', ['clientId' => $memberships[0]->getClient()->getId()->toRfc4122()]);
+        }
 
-        return new Response("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Smarthost</title></head>"
-            ."<body><p>Signed in as $name$role.</p><p><a href=\"/dashboard/logout\">Sign out</a></p></body></html>",
-            200, ['Cache-Control' => 'no-store']);
+        return $this->render('dashboard/home.html.twig', ['memberships' => $memberships, 'section' => 'home']);
     }
 
-    #[Route('/logout', name: 'dashboard_logout', methods: ['GET'])]
+    #[Route('/logout', name: 'dashboard_logout', methods: ['POST'])]
     public function logout(): never
     {
         throw new \LogicException('Handled by the dashboard firewall.');

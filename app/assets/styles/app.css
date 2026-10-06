@@ -1,0 +1,80 @@
+/* Catto Mail Smarthost dashboard: plain, maintainable CSS (no framework). */
+:root {
+    --fg: #1d2328; --muted: #5b6670; --bg: #ffffff; --panel: #f5f7f9; --line: #d5dbe0;
+    --accent: #1f5f99; --ok: #1d6b3a; --warn: #8a5a00; --bad: #a42a20;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1.45;
+}
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--fg); background: var(--bg); }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+    outline: 3px solid #f0b400; outline-offset: 2px;
+}
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 1rem; top: .5rem; background: #fff; padding: .25rem .5rem; z-index: 10; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .6rem 1.2rem; background: #17324d; color: #fff; }
+.top a { color: #fff; text-decoration: none; font-weight: 600; }
+.top .who { font-size: .95em; }
+.tag { display: inline-block; margin-left: .4rem; padding: 0 .4rem; border: 1px solid currentColor; border-radius: 3px; font-size: .8em; text-transform: uppercase; }
+.inline { display: inline; }
+button.link { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: 0 0 0 .6rem; font: inherit; }
+.nav { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem 1rem; padding: .4rem 1.2rem; background: var(--panel); border-bottom: 1px solid var(--line); }
+.nav ul { display: flex; flex-wrap: wrap; gap: .2rem .9rem; list-style: none; margin: 0; padding: 0; }
+.nav-title { font-weight: 600; color: var(--muted); }
+.nav a[aria-current="page"] { font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; }
+main { padding: 1rem 1.2rem 2rem; max-width: 1500px; }
+.foot { padding: .6rem 1.2rem; color: var(--muted); font-size: .85em; border-top: 1px solid var(--line); }
+h1 { font-size: 1.5rem; margin: .4rem 0 .8rem; }
+h2 { font-size: 1.15rem; margin: 1.4rem 0 .5rem; }
+h3 { font-size: 1rem; margin: .8rem 0 .3rem; }
+.muted, small { color: var(--muted); }
+.crumbs { margin: 0; font-size: .9em; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .4rem 1rem .8rem; }
+.card h2 { margin-top: .5rem; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: .4rem 0; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+.inline-dl { grid-template-columns: max-content 1fr; }
+table { border-collapse: collapse; width: 100%; margin: .4rem 0; }
+th, td { text-align: left; vertical-align: top; padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
+thead th { background: var(--panel); position: sticky; top: 0; }
+table.dense th, table.dense td { padding: .25rem .4rem; font-size: .92em; }
+table.kv th { font-weight: normal; color: var(--muted); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.url, .diag, .token { word-break: break-all; }
+.scroll { overflow-x: auto; }
+.counts, .plain { margin: .2rem 0; padding-left: 1.1rem; }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem .9rem; padding: .6rem .8rem; margin: .5rem 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.filters label, .stack label { display: flex; flex-direction: column; font-size: .9em; gap: .15rem; }
+.stack { display: flex; flex-direction: column; gap: .6rem; max-width: 30rem; }
+form.row { display: flex; gap: .3rem; }
+input, select, textarea, button { font: inherit; padding: .3rem .45rem; border: 1px solid #8a959e; border-radius: 4px; background: #fff; color: var(--fg); }
+button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
+.narrow { max-width: 26rem; }
+.pager { display: flex; gap: 1.2rem; align-items: center; margin: .6rem 0; }
+.pager-count { color: var(--muted); }
+.empty { padding: .8rem; background: var(--panel); border: 1px dashed var(--line); border-radius: 6px; }
+.flash, .warn, .caveat { padding: .5rem .8rem; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); }
+.flash-success { border-color: var(--ok); }
+.flash-error, .warn { border-color: var(--bad); }
+.caveat { font-size: .9em; border-left: 4px solid var(--warn); }
+/* Status text always carries the meaning; the border only reinforces it. */
+.st { display: inline-block; padding: 0 .35rem; border: 1px solid var(--line); border-radius: 3px; white-space: nowrap; }
+.st-remote_accepted, .st-verified, .st-completed, .st-active, .st-deliverable, .st-matched { border-color: var(--ok); }
+.st-deferred, .st-soft_bounced, .st-outcome_unknown, .st-pending, .st-throttled, .st-risky, .st-probably_deliverable, .st-match_requested, .st-open, .st-temporarily_unverifiable { border-color: var(--warn); }
+.st-hard_bounced, .st-complained, .st-failed, .st-suppressed, .st-suspended, .st-closed, .st-undeliverable, .st-disabled { border-color: var(--bad); }
+.timeline { list-style: none; padding: 0; margin: 0; border-left: 3px solid var(--line); }
+.ev { margin: 0 0 .7rem .8rem; padding: .3rem .6rem; background: var(--panel); border-radius: 4px; border-left: 4px solid var(--line); }
+.ev-accepted { border-left-color: var(--ok); }
+.ev-warning { border-left-color: var(--warn); }
+.ev-failure { border-left-color: var(--bad); }
+.ev-engagement { border-left-color: var(--accent); }
+.raw { white-space: pre-wrap; word-break: break-all; max-height: 30rem; overflow: auto; background: var(--panel); padding: .6rem; border: 1px solid var(--line); }
+code { font-size: .9em; }
+@media (max-width: 700px) { dl { grid-template-columns: 1fr; } }
+label.check { flex-direction: row; align-items: center; gap: .4rem; }
+.stack label.check, .filters label.check { display: flex; flex-direction: row; }
+fieldset.perms { border: 1px solid var(--line); border-radius: 6px; margin: .6rem 0; padding: .4rem .8rem; }
+fieldset.perms label { display: block; margin: .25rem 0; }

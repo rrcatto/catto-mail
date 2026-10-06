@@ -1,7 +1,7 @@
 project:
   name: Smarthost
-  specification_version: "2.5"
-  specification_date: "2026-10-05"
+  specification_version: "2.7"
+  specification_date: "2026-10-06"
   original_specification_date: "2026-09-08"
   version_note: >-
     The specification version is a documentation/specification revision number. It is not a
@@ -150,6 +150,8 @@ architecture:
         - client authentication and authorization
         - API keys
         - human dashboard user accounts and client memberships
+        - passwordless dashboard sign-in by single-use emailed links, sent through authenticated Postfix submission (the only mail Symfony sends)
+        - installation-wide roles, permissions and the access-control list
         - sending-domain registration and DNS TXT verification
         - usage metering
         - validation-job creation and result presentation
@@ -337,6 +339,10 @@ project_boundaries:
       - clients
       - users
       - client_memberships
+      - roles
+      - role_permissions
+      - user_roles
+      - auth_login_tokens
       - sending_domains
       - api_keys
       - validation_jobs
@@ -1111,8 +1117,10 @@ inbound_bounce_handling:
       returns the row to open and records the reason in detail_json; no event is created
     dismissal: an operator may dismiss an open row with a written reason (resolution_note); dismissal records resolved_at
     operator_interface: >-
-      until the Phase 6 operator dashboard exists, the workflow is driven by audited Symfony
-      console commands (list, show, match, dismiss)
+      the operator dashboard (Phase 6: unmatched-DSN list, detail with parsed evidence and
+      candidates, match request, dismissal with a written reason) and the audited Symfony console
+      commands (list, show, match, dismiss) both only record the request through the same
+      application service; Go applies a match
   classifications:
     - hard_bounce
     - soft_bounce
@@ -1215,6 +1223,40 @@ message_tracking:
         - reject unknown, expired or inapplicable tokens
         - map the token to the stored message/link
         - never expose raw recipient email addresses
+    endpoints:
+      # Phase 6 (specification 2.6)
+      open: GET /t/o/{token}.gif
+      click: GET /t/c/{token}/{link_index}
+      eligibility: >-
+        a token is accepted only if it is well formed (base64url, 32 to 64 characters), names a
+        message that was handed to Postfix (postfix_queue_id set) whose send job enables that kind
+        of tracking, and, when APP_RETENTION_TRACKING_DAYS is set, the message is not older than
+        that; anything else is treated exactly like an unknown token
+      responses: >-
+        open: always the same 43-byte transparent GIF with status 200, whatever the token; click:
+        302 to exactly the stored message_links.target_url (re-checked as an absolute http/https
+        URL without whitespace or control characters), otherwise the same plain 404 for an
+        unknown token, link index, ineligible message or any other URL under /t/; every response
+        is Cache-Control no-store, private and Referrer-Policy no-referrer, without cookies,
+        session or JavaScript; HEAD is answered but never recorded; no recipient, client or
+        message data appears in any response
+      recording_rule: >-
+        events are append-only open_recorded / click_recorded rows with event_source
+        tracking_endpoint, no source key and nothing about the requester (no IP address, no user
+        agent); click metadata_json carries link_index. To bound automated repetition a request is
+        answered but not recorded when the same message had an open recorded in the last 60
+        seconds (opens), the same message and link had a click recorded in the last 10 seconds
+        (clicks), the message already has 1000 events of that type, or the requesting address
+        exceeded 1200 tracking requests per minute; a per-message advisory lock makes the check
+        and insert atomic. Recording never changes the transport status
+      aggregates: >-
+        dashboards report messages with at least one recorded open or click, total recorded
+        events, first and last recorded times, and clicks per stored link; a click is never
+        counted as an open, and no recorded figure is presented as proof of reading
+      privacy: >-
+        tracking tokens are not logged: the application's request log channel records only
+        warnings, malformed tracking URLs are answered by a fallback route rather than a logged
+        routing error, and nginx writes tracking URLs to its access log with the token redacted
     open_tracking:
       method: random_token_tracking_pixel
       route_example: /t/o/{token}.gif
@@ -1405,15 +1447,43 @@ schema:
         - created_at
         - can_submit_global_suppressions
     users:
-      purpose: human dashboard login accounts; never API keys
+      purpose: human dashboard accounts (passwordless, emailed sign-in links); never API keys
       key_fields:
         - id
         - email
-        - password_hash
-        - global_role
+        - display_name
         - status
         - created_at
         - last_login_at
+    roles:
+      purpose: installation-wide roles (built-in ADMIN and OPERATOR, plus custom roles); specification 2.7
+      key_fields:
+        - id
+        - role_key
+        - name
+        - is_builtin
+    role_permissions:
+      purpose: permission keys a role grants (ADMIN needs no rows - it holds every permission)
+      key_fields:
+        - role_id
+        - permission_key
+    user_roles:
+      purpose: roles held by users, with who granted them
+      key_fields:
+        - user_id
+        - role_id
+        - assigned_by
+        - assigned_at
+    auth_login_tokens:
+      purpose: single-use emailed sign-in links (SHA-256 only) and the request history for rate limits
+      key_fields:
+        - email
+        - user_id
+        - token_hash
+        - return_path
+        - requested_ip_hash
+        - expires_at
+        - used_at
     client_memberships:
       key_fields:
         - id
@@ -1788,8 +1858,11 @@ security:
     - store signing secrets encrypted at rest with application-managed keys
   dashboard_authentication:
     - human users authenticate as users through Symfony Security, never with API keys
-    - client access comes from client_memberships with a client role
-    - operators hold a global operator role independent of any client membership
+    - authentication is passwordless (specification 2.7) - a single-use sign-in link emailed to the user's address; only its SHA-256 is stored; it expires after APP_LOGIN_LINK_TTL_SECONDS; requests are limited per address and per client address; the answer never reveals whether an account exists
+    - the link is built from SMARTHOST_PUBLIC_BASE_URL, never from a request Host header; HEAD requests (mail scanners) never consume it
+    - APP_ADMIN_EMAIL can always request a link; its account is created on first sign-in and receives the ADMIN role at every sign-in
+    - installation-wide authorisation uses permission keys (App\Access\PermissionCatalog) granted by roles (roles, role_permissions, user_roles); ADMIN holds every permission and cannot be reduced; SYSTEM.* permissions belong to ADMIN alone; only ADMIN manages roles and grants ADMIN
+    - client access comes from client_memberships with a client role, or from the PLATFORM.CLIENT.VIEW / PLATFORM.CLIENT.MANAGE permissions
   tracking_security:
     - no raw recipient email in URLs
     - opaque random tokens of at least 192 bits, validated by format and server-side lookup
@@ -1953,6 +2026,56 @@ user_interfaces:
     - clear distinction between validation certainty and delivery certainty
     - no claim that recorded open equals proven human read
     - outcome_unknown is never presented as delivered
+  phase_6_implementation:
+    # Specification 2.6: what the Phase 6 dashboards provide and how.
+    authentication: >-
+      passwordless since specification 2.7 - /dashboard/login asks for an email address (CSRF) and
+      emails a single-use link to /dashboard/login/verify; sign-out is a POST with a CSRF token; no
+      self-service registration (operators create users on the Users page); APP_ADMIN_EMAIL always
+      may sign in and receives ADMIN; API keys never authenticate a browser
+    access_control: >-
+      operator pages each require a permission key (PLATFORM.OVERVIEW.VIEW, PLATFORM.CLIENT.VIEW/
+      MANAGE, PLATFORM.USER.VIEW/MANAGE, PLATFORM.DSN.VIEW/MANAGE, PLATFORM.SUPPRESSION.VIEW/
+      MANAGE, PLATFORM.AUDIT.VIEW, PLATFORM.WEBHOOK.VIEW, SYSTEM.ROLE.VIEW/MANAGE); built-in roles
+      ADMIN (every permission, fixed) and OPERATOR (every PLATFORM.* permission, editable); custom
+      roles are created and edited on the Roles page; changes apply at each holder's next request
+    client_access: >-
+      every client page is under /dashboard/c/{client id}; a client the user may not see (no
+      membership, insufficient role, disabled user) is answered exactly like a missing one (404),
+      and every query carries the client id; reads need a viewer role, domain verification a
+      member role, lifting the client's own global opt-out an admin role plus the D-37 rule
+    client_pages:
+      - overview (validation and sending counters from the per-job counters, recorded engagement of the last 30 days, sending domains, usage this month)
+      - validation jobs (status, external reference and date filters) and job detail with paginated, filterable, sortable address results
+      - validation result export as CSV, streamed in keyset batches; columns are exactly the OpenAPI ValidationAddress fields; formula-like cells are prefixed with an apostrophe
+      - send jobs (filters as for validation jobs) and job detail with transport outcomes, recorded engagement, clicks per link and the paginated message list
+      - message event timeline (interpreted fields only; never tokens or source keys)
+      - suppressions visible in full (client-scoped and own reported opt-outs) and this client's suppressed messages with only the broad reason of a global suppression, never its reporter, reference or ids
+      - sending domains (verification record, status, DKIM status, whether sending is permitted, DNS check action)
+      - usage per month and individual usage records
+    operator_pages:
+      - system overview from durable database signals (work queues, worker leases, newest results, Postfix-log ingest cursor, messages per status, rates per client over 7 days, suppressions, unmatched DSNs, webhook outbox)
+      - clients (status filter, search) and client detail (status change, global opt-out capability with a note, domains, API key metadata, members, webhook endpoints)
+      - unmatched DSNs (status and classification filters), detail with parsed evidence and candidates, match request and dismissal
+      - suppressions (address, reason, state and scope filters, operator provenance), operator block creation, lifting with a required note
+      - audit log (action, actor, target and date filters; secret-like keys redacted on display)
+      - webhook outbox state, labelled as outbox state only until Phase 7 delivers webhooks
+      - users (create, enable/disable, send a sign-in link, grant and revoke roles, add/change/remove client memberships) and roles & permissions (ADMIN only)
+    lists: >-
+      keyset (cursor) pagination over (sort expression, id); sort names and filter keys are
+      whitelisted; values are bound parameters; a cursor whose values do not fit the sort type
+      starts again at the first page
+    http_security: >-
+      every change is a POST with a CSRF token and goes through the existing audited application
+      service; dashboard responses carry a Content-Security-Policy with a per-request nonce for
+      the import map (same-origin scripts and styles only, no CDN), frame-ancestors none,
+      X-Frame-Options DENY, nosniff, Referrer-Policy same-origin and Cache-Control no-store;
+      production error pages are generic
+    not_in_phase_6:
+      - validation upload in the browser (jobs are created through the API)
+      - API key and webhook endpoint management in the browser (audited console commands remain; users, memberships and roles are managed in the browser since 2.7)
+      - Postfix queue depth and snapshot age (the snapshots are read only by the Go daemon; the overview shows the messages Smarthost considers to be in Postfix)
+      - LiveComponent (server-rendered GET forms and links did not need it)
 
 smtp_reputation_and_deliverability:
   production_prerequisites:
@@ -2090,7 +2213,7 @@ implementation_phases:
       - global suppression records with provenance (D-30)
       - trusted-client recipient global opt-out API and operator capability
       - suppression lifting (client and operator) with audit
-      - unmatched DSN handling and operator resolution (console commands until Phase 6)
+      - unmatched DSN handling and operator resolution (console commands; the operator dashboard since Phase 6)
       - processed spool retention
     acceptance:
       - synthetic DSNs resolve exact messages
@@ -2291,4 +2414,29 @@ revision_history:
       - D-36
       - D-37
       - D-38
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.6"
+    date: "2026-10-05"
+    summary: >-
+      Phase 6 tracking and dashboards. Specifies the tracking endpoints' eligibility, identical
+      responses for unknown tokens, the bounded recording rule (one recorded open per message per
+      60 seconds, one recorded click per message and link per 10 seconds, at most 1000 events of
+      a type per message, a per-address request limit that only skips the write), token-free
+      logging, and the dashboards' scope, access model, keyset pagination and HTTP security.
+      Adds the message_events engagement index and read-only web access to the Postfix-log
+      ingest cursor for the operator overview. No architecture, ownership or protocol change.
+    decisions_incorporated: []
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.7"
+    date: "2026-10-06"
+    summary: >-
+      Passwordless dashboard sign-in with roles, permissions and an editable access-control list,
+      by owner instruction. Users sign in with single-use links emailed through authenticated
+      Postfix submission (Mailpit in development); passwords and users.global_role are removed;
+      APP_ADMIN_EMAIL always receives ADMIN (every permission); OPERATOR replaces the operator flag;
+      operator pages require permission keys; users, roles and memberships are managed in the
+      browser. New tables roles, role_permissions, user_roles, auth_login_tokens; new APP_ADMIN_EMAIL,
+      APP_MAIL_*, APP_LOGIN_LINK_TTL_SECONDS settings; the development public URL is
+      https://localhost:8443 so emailed links open in a browser.
+    decisions_incorporated: []
     decision_log: docs/architecture/open-decisions.md

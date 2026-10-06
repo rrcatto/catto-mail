@@ -15,5 +15,11 @@ testpod_up "${DB}_migrations" "${DB}_reference"
 echo "phase2-test: reference schema -> ${DB}_reference (comparison only)"
 pg_admin -d "${DB}_reference" <"$REPO/docs/schema/reference-schema.sql"
 
+# Test observations (Phase 6 dashboard query plans, memory and query counts) are
+# written to the gitignored infra/.generated/test-output/.
+OUT="$REPO/infra/.generated/test-output"
+mkdir -p "$OUT"
+APP_EXTRA=(-v "$OUT:/srv/test-output:Z")
+
 echo "phase2-test: PHPUnit"
 app php -d memory_limit=1G vendor/bin/phpunit "$@"

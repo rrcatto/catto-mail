@@ -23,7 +23,9 @@ final class Catalog
             WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname NOT IN $exclude ORDER BY 1");
         $columns = [];
         foreach ($c->fetchAllAssociative("SELECT c.relname AS t, a.attname AS col, format_type(a.atttypid, a.atttypmod) AS type,
-                a.attnotnull AS notnull, pg_get_expr(d.adbin, d.adrelid) AS def, a.attnum
+                a.attnotnull AS notnull, pg_get_expr(d.adbin, d.adrelid) AS def,
+                -- position among the visible columns: a dropped column leaves a gap in attnum
+                row_number() OVER (PARTITION BY c.oid ORDER BY a.attnum) AS attnum
             FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
             WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped AND c.relname NOT IN $exclude

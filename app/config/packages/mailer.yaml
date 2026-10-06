@@ -1,0 +1,13 @@
+# Transactional mail of the web application (only the passwordless sign-in links):
+# authenticated submission to Postfix on the internal network, exactly like the
+# Go delivery daemon. Postfix signs through OpenDKIM and, in development (capture
+# mode), relays everything to Mailpit. Postfix's submission certificate is the
+# pod's own and is not verified (the connection never leaves the pod), as for Go.
+framework:
+    mailer:
+        dsn: 'smtp://%env(urlencode:APP_MAIL_SUBMISSION_USERNAME)%:%env(urlencode:secret:APP_MAIL_SUBMISSION_PASSWORD)%@%env(APP_MAIL_SUBMISSION_HOST)%:%env(APP_MAIL_SUBMISSION_PORT)%?verify_peer=0'
+
+when@test:
+    framework:
+        mailer:
+            dsn: 'null://null'

@@ -1,10 +1,11 @@
 # Development Environment
 
-**Status:** Phases 1–5 complete (Phase 5: inbound DSN, complaint and global suppression
-processing, D-30, v0.1.5). `smarthostctl verify` passes all 176 checks (§6; `--clean`
-additionally starts from destroyed volumes), and
-`smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e` and
-`test phase5-e2e` the end-to-end runs (§7).
+**Status:** Phases 1–6 complete (Phase 5: inbound DSN, complaint and global suppression
+processing, D-30, v0.1.5; Phase 6: tracking and dashboards with passwordless sign-in, roles and
+ACL, v0.1.6). `smarthostctl verify`
+passes all 176 checks (§6; `--clean` additionally starts from destroyed volumes), and
+`smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e`,
+`test phase5-e2e` and `test phase6-e2e` the end-to-end runs (§7).
 
 ## 1. Requirements
 
@@ -111,6 +112,7 @@ flowchart TD
 | `smarthostctl test [phase2\|phase3\|phase4\|phase5] [args]` | Runs the Phase 2 (PHPUnit), Phase 3 (pytest + end to end) or Phase 4/5 (Go unit + PostgreSQL integration, one suite) suite in throwaway, network-less pods (§7); without a phase, all of them. Does not touch the running environment. |
 | `smarthostctl test phase4-e2e [A B C D E]` | Phase 4 end to end against the **running** pod's Postfix, OpenDKIM and Mailpit (§7). It stops and restarts Smarthost containers only (OpenDKIM, Mailpit, delivery). |
 | `smarthostctl test phase5-e2e [A B C D E F G]` | Phase 5 end to end against the **running** pod: DSNs and ARF reports through Postfix port 25 and the real DSN spool (§7). It creates a second test client and stops/starts only the delivery container. |
+| `smarthostctl test phase6-e2e` | Phase 6 end to end against the **running** pod through nginx: tracking from a delivered message, open-redirect attempts, the dashboards as two client users and an operator, token-free logs (§7). It creates test clients and users and stops nothing. |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
 | `smarthostctl migrate` | Runs the `db-migrate` and `db-grants` tasks in the running pod (after `recreate` with a rebuilt app image that brings new migrations, `start` also runs them). |
 
@@ -264,8 +266,9 @@ infra/bin/smarthostctl console smarthost:dev:bootstrap [--operator-email you@sma
 This creates (or reuses) an active development client and the sending domain
 `smarthost-dev.test` and **marks it verified without DNS**, with DKIM active and selector
 `phase1`, matching the disposable key from `smarthostctl dkim-dev-key`. It refuses to run unless
-`SMARTHOST_ENV` is `development` or `test`. A new API key (and, optionally, an operator with a
-random password) is printed **once**; only its SHA-256 hash is stored.
+`SMARTHOST_ENV` is `development` or `test`. A new API key is printed **once**; only its SHA-256
+hash is stored. `--operator-email` also creates a user with the OPERATOR role, who signs in with an
+emailed link like everyone else.
 
 ```sh
 K=shk_...   # the printed key
@@ -276,11 +279,31 @@ curl -sk https://127.0.0.1:8443/v1/send-jobs -H "Authorization: Bearer $K" \
 
 Other administration (clients, keys, users, memberships, sending domains, webhook endpoints) is
 done with the `smarthost:*` console commands (`console list smarthost`), never through undocumented
-API endpoints. Submitted send jobs stay `queued` until the Go delivery daemon exists (Phase 4);
-nothing creates messages or talks to Postfix yet. Validation jobs are processed by the Python
-validator (Phase 3). The development pod has no Internet route, so real domains classify as
-`undeliverable` (NXDOMAIN) there; meaningful validation results come from the fake DNS/SMTP
-scenarios of `smarthostctl test phase3`.
+API endpoints.
+
+### Dashboard sign-in (passwordless)
+
+1. Open **https://localhost:8443/dashboard** (from Windows too; the development certificate is
+   self-signed, so accept the browser warning once).
+2. Enter the administrator address, `APP_ADMIN_EMAIL` in `infra/.env` (development default
+   `admin@smarthost-dev.test`), and choose *Email me a sign-in link*.
+3. Open Mailpit at **http://localhost:8026**: the sign-in email is there (all development mail is
+   captured; nothing reaches the Internet). Click *Sign in*. The link works once and expires after
+   `APP_LOGIN_LINK_TTL_SECONDS` (15 minutes).
+4. The administrator account is created on first sign-in and holds the **ADMIN** role (every
+   permission). Under *Operator* you can add users (*Users*: roles, client memberships, *Email a
+   sign-in link*) and define roles (*Roles & permissions*). There are no passwords anywhere.
+
+To use your own address, set `APP_ADMIN_EMAIL` in `infra/.env`, then `smarthostctl install` and
+`smarthostctl recreate`. Client users see only their clients (`/dashboard/c/<client-id>`); users with
+platform permissions also get `/dashboard/operator`. The tracking endpoints `/t/o/<token>.gif` and
+`/t/c/<token>/<n>` are public; tracking and sign-in links in Mailpit point at
+`SMARTHOST_PUBLIC_BASE_URL` (`https://localhost:8443` in development), so they open in the browser.
+Images are rebuilt with `smarthostctl build` (not `install`), then `smarthostctl recreate`.
+
+The development pod has no Internet route, so real domains classify as `undeliverable` (NXDOMAIN)
+there; meaningful validation results come from the fake DNS/SMTP scenarios of
+`smarthostctl test phase3`.
 
 ### Test suites
 
@@ -306,9 +329,9 @@ application role; DNS is stubbed and nothing reaches the Internet.
 | unit | D-18 normalisation (including IDNA), canonical request hashing, the keyring, fail-closed configuration, log format |
 | contract | `/v1` routes are exactly the OpenAPI operations; OpenAPI enums equal the PHP enums |
 | schema | The migrated catalog equals `reference-schema.sql` (tables, columns, defaults, constraints, indexes); migrations up/down/up and per-migration rollback; ORM mapping equals the database; CHECKs equal the vocabulary; grants equal `schema.md` §6; least-privilege behaviour; critical CHECK/UNIQUE/FK behaviour |
-| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API and the Phase 5 operator commands; every response is validated against the OpenAPI contract |
+| integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API and the Phase 5 operator commands; every API response is validated against the OpenAPI contract. Phase 6: tracking endpoints (opens, clicks, open-redirect attacks, expiry, privacy, logs), tracking statistics, client and operator dashboards (pages, filters, keyset pagination, CSV export, CSRF, terminology, headers), two-client isolation, operator-only access, and the 10,000-row load test (query counts, memory, EXPLAIN ANALYZE of every page query, written to `infra/.generated/test-output/phase6-dashboard-observations.txt`) |
 
-Latest run (v0.1.5): 177 tests and 1,838 assertions, all passing. Unit includes the shared D-32
+Latest run (v0.1.6): 225 tests and 3,306 assertions, all passing (v0.1.5: 177). Unit includes the shared D-32
 vectors; integration includes the D-31 client-status rules, the D-30 global opt-out API
 (`GlobalSuppressionApiTest`, including multi-process concurrency) and the Phase 5 operator commands
 (`Phase5OperatorCommandTest`); schema includes the D-30 constraints and the six-migration rollback.
@@ -374,3 +397,14 @@ messages to Mailpit and then injects synthetic DSNs and ARF reports over SMTP to
 | G | 15 DSNs while the daemon is down, 3 left as crashed claims, a worker SIGKILLed mid-pass: all recorded exactly once, stale claims reclaimed, old processed files deleted by retention while their events remain |
 
 Latest run: A–G, 44/44 checks pass.
+
+**Phase 6 end to end** (`infra/tests/phase6-e2e.sh`, `smarthostctl test phase6-e2e`) runs
+everything through nginx → PHP-FPM, as a mail client or browser would:
+
+| Part | Proves |
+|---|---|
+| T | A tracked subscription message is delivered to Mailpit; its HTML has the pixel and one rewritten link (the unsubscribe link is untouched, no address in any tracking URL). The pixel is a 43-byte GIF, `no-store`, no cookie; one `open_recorded` (an immediate repeat is not recorded); an unknown token gets the identical pixel. The click redirects exactly to the stored target and records `click_recorded` with the link index; a query string or `Referer` cannot change the target; other indexes, unknown tokens and URL-shaped paths are 404 without redirect |
+| D | Anonymous → login; passwordless sign-in (link emailed through Postfix to Mailpit, DKIM-signed, single use; an unknown address gets the same answer and no email; `APP_ADMIN_EMAIL` gets ADMIN; an OPERATOR cannot open roles); client pages, timeline with the recorded events and no token or delivery/read claims, clicks per link, CSV export (formula cell neutralised); 403 for the operator area and 404 for another client; client B's user gets 404 for every client A page; operator pages and worker health; unmatched-DSN dismissal (audited, no event created); operator block and lift with a note (row kept, audited); GET sign-out does nothing, POST with CSRF ends the session |
+| L | Neither the nginx access log (tracking URLs shown as `/t/o/[token].gif`, `/t/c/[token]/1`) nor the application log contains the token |
+
+Latest run (v0.1.6): 75/75 checks pass.

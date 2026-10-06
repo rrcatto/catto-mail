@@ -38,7 +38,7 @@ final class SuppressionLiftCommand extends AdminCommand
     {
         $id = (string) $input->getArgument('suppression-id');
         $s = $this->suppressions->find($id) ?? throw new DomainRuleViolation("No suppression $id.");
-        $lifted = $this->suppressions->lift($s, $this->operator($input->getOption('operator')), (string) $input->getOption('note'));
+        $lifted = $this->suppressions->lift($s, $this->operator($input->getOption('operator'), 'PLATFORM.SUPPRESSION.MANAGE'), (string) $input->getOption('note'));
         $io->writeln('lifted: '.($lifted ? 'true' : 'false (already lifted)'));
         if (SuppressionScopeType::Address === $s->getScopeType()) {
             $remaining = $this->suppressions->search($s->getAddressOrDomain(), null, true, 1000);

@@ -12,22 +12,20 @@ use App\Entity\ClientMembership;
 use App\Entity\User;
 use App\Enum\ClientMembershipRole;
 use App\Enum\ClientStatus;
-use App\Enum\GlobalRole;
 use App\Security\DashboardUserProvider;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
 /**
  * Administrative changes to clients, dashboard users and client memberships
- * (D-12). Every change is audited; passwords are hashed with Symfony's
- * PasswordHasher and never logged.
+ * (D-12). Every change is audited. There are no passwords: users sign in with
+ * emailed single-use links (App\Security\LoginLinkService); installation-wide
+ * roles are managed by App\Access\AccessControl.
  */
 final class AccountAdministration
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly AuditLogger $audit,
-        private readonly UserPasswordHasherInterface $hasher,
         private readonly DashboardUserProvider $users,
     ) {
     }
@@ -65,39 +63,37 @@ final class AccountAdministration
     }
 
     /** Login emails are unique case-insensitively (users_email_uq). */
-    public function createUser(string $email, ?string $displayName, ?string $plainPassword, bool $operator, AuditActor $actor): User
+    public function createUser(string $email, ?string $displayName, AuditActor $actor): User
     {
         $email = trim($email);
-        if (!filter_var($email, \FILTER_VALIDATE_EMAIL)) {
+        if (!filter_var($email, \FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 320) {
             throw new DomainRuleViolation('The login email is not valid.');
         }
         if (null !== $this->users->findByEmail($email)) {
             throw new DomainRuleViolation('A user with this login email already exists (emails are case-insensitive).');
         }
-        $user = new User($email, $displayName);
-        $user->setGlobalRole($operator ? GlobalRole::Operator : null);
-        if (null !== $plainPassword) {
-            $this->assertPassword($plainPassword);
-            $user->setPasswordHash($this->hasher->hashPassword($user, $plainPassword));
-        }
+        $user = new User($email, null === $displayName || '' === trim($displayName) ? null : trim($displayName));
 
         return $this->em->wrapInTransaction(function () use ($user, $actor): User {
             $this->em->persist($user);
             $this->em->flush();
-            $this->audit->record($actor, 'user.created', 'user', $user->getId()->toRfc4122(),
-                ['email' => $user->getEmail(), 'global_role' => $user->getGlobalRole()?->value, 'has_password' => null !== $user->getPassword()]);
+            $this->audit->record($actor, 'user.created', 'user', $user->getId()->toRfc4122(), ['email' => $user->getEmail()]);
 
             return $user;
         });
     }
 
-    public function setPassword(User $user, string $plainPassword, AuditActor $actor): void
+    public function setDisplayName(User $user, ?string $displayName, AuditActor $actor): void
     {
-        $this->assertPassword($plainPassword);
-        $this->em->wrapInTransaction(function () use ($user, $plainPassword, $actor): void {
-            $user->setPasswordHash($this->hasher->hashPassword($user, $plainPassword));
+        $before = $user->getDisplayName();
+        $user->setDisplayName($displayName);
+        if ($before === $user->getDisplayName()) {
+            return;
+        }
+        $this->em->wrapInTransaction(function () use ($user, $before, $actor): void {
             $this->em->flush();
-            $this->audit->record($actor, 'user.password_set', 'user', $user->getId()->toRfc4122());
+            $this->audit->record($actor, 'user.display_name_changed', 'user', $user->getId()->toRfc4122(),
+                ['before' => $before, 'after' => $user->getDisplayName()]);
         });
     }
 
@@ -113,20 +109,7 @@ final class AccountAdministration
         });
     }
 
-    public function setOperator(User $user, bool $operator, AuditActor $actor): void
-    {
-        if ($user->isOperator() === $operator) {
-            return;
-        }
-        $this->em->wrapInTransaction(function () use ($user, $operator, $actor): void {
-            $user->setGlobalRole($operator ? GlobalRole::Operator : null);
-            $this->em->flush();
-            $this->audit->record($actor, 'user.global_role_changed', 'user', $user->getId()->toRfc4122(),
-                ['global_role' => $user->getGlobalRole()?->value]);
-        });
-    }
-
-    /** Adds the membership or changes its role (memberships are not deleted: no DELETE grant). */
+    /** Adds the membership or changes its role. */
     public function setMembership(User $user, Client $client, ClientMembershipRole $role, AuditActor $actor): ClientMembership
     {
         return $this->em->wrapInTransaction(function () use ($user, $client, $role, $actor): ClientMembership {
@@ -149,10 +132,23 @@ final class AccountAdministration
         });
     }
 
-    private function assertPassword(string $plain): void
+    /** Removes the user's membership of the client (audited); false when there was none. */
+    public function removeMembership(User $user, Client $client, AuditActor $actor): bool
     {
-        if (mb_strlen($plain) < 12 || mb_strlen($plain) > 4096) {
-            throw new DomainRuleViolation('Passwords must be 12 to 4096 characters long.');
+        $membership = $this->em->getRepository(ClientMembership::class)->findOneBy(['user' => $user, 'client' => $client]);
+        if (null === $membership) {
+            return false;
         }
+
+        return $this->em->wrapInTransaction(function () use ($membership, $user, $client, $actor): bool {
+            $id = $membership->getId()->toRfc4122();
+            $role = $membership->getRole()->value;
+            $this->em->remove($membership);
+            $this->em->flush();
+            $this->audit->record($actor, 'client_membership.removed', 'client_membership', $id, [
+                'user_id' => $user->getId()->toRfc4122(), 'client_id' => $client->getId()->toRfc4122(), 'role' => $role]);
+
+            return true;
+        });
     }
 }

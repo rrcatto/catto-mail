@@ -1,0 +1,29 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Usage{% endblock %}
+{% block body %}
+<h1>Usage</h1>
+<h2>By month (last 12 months)</h2>
+{% if usage.months is empty %}<p class="empty">No usage recorded yet.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">Month</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
+    <tbody>{% for m in usage.months %}<tr><td>{{ m.month }}</td><td class="num">{{ (m.validation_addresses ?? 0)|number_format }}</td><td class="num">{{ (m.messages_submitted ?? 0)|number_format }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+<h2>Usage records</h2>
+<form method="get" class="filters" role="search" aria-label="Filter usage records">
+    {{ ui.select('type', 'Type', label_options('usage_type'), filters.type) }}
+    <button type="submit">Apply</button>
+</form>
+{% if usage.records.rows is empty %}<p class="empty">No usage records match.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Type</th><th scope="col" class="num">Quantity</th><th scope="col">For</th></tr></thead>
+    <tbody>{% for u in usage.records.rows %}
+        <tr><td>{{ u.occurred_at|ts }}</td><td>{{ u.usage_type|label('usage_type') }}</td><td class="num">{{ u.quantity|number_format }}</td>
+            <td>{% if u.reference_type == 'validation_job' %}<a href="{{ path('dashboard_client_validation_job', {clientId: client.id.toRfc4122, jobId: u.reference_id}) }}">Validation job</a>{% elseif u.reference_type == 'send_job' %}<a href="{{ path('dashboard_client_send_job', {clientId: client.id.toRfc4122, jobId: u.reference_id}) }}">Send job</a>{% elseif u.reference_type == 'message' %}<a href="{{ path('dashboard_client_message', {clientId: client.id.toRfc4122, messageId: u.reference_id}) }}">Message</a>{% else %}{{ u.reference_type }}{% endif %}</td></tr>
+    {% endfor %}</tbody>
+</table>
+{% endif %}
+{{ ui.pager(usage.records, 'records') }}
+<p class="muted">Usage is recorded for later billing; no billing or payment happens here.</p>
+{% endblock %}

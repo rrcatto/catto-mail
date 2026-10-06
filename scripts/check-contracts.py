@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smarthost contract consistency check (specification 2.5).
+"""Smarthost contract consistency check (specification 2.7).
 
 Cross-checks the canonical YAML specification, the human specification and the
 normative contract files so they cannot drift silently:
@@ -49,8 +49,8 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.5"
-EXPECTED_SPEC_DATE = "2026-10-05"
+EXPECTED_SPEC_VERSION = "2.7"
+EXPECTED_SPEC_DATE = "2026-10-06"
 # Decisions that must be incorporated across the revision history (all of D-01..D-38).
 EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
 
@@ -98,7 +98,6 @@ OPENAPI_COUNT_OBJECTS = {
 DDL_ENUMS = {
     ("clients", "status"): "client_status",
     ("users", "status"): "user_status",
-    ("users", "global_role"): "global_role",
     ("client_memberships", "role"): "client_membership_role",
     ("sending_domains", "status"): "sending_domain_status",
     ("sending_domains", "dkim_status"): "dkim_status",
@@ -158,6 +157,8 @@ HUMAN_REQUIRED_TOPICS = [
     "List-Unsubscribe-Post", "external_address_reference", "lease_expires_at",
     "source event key", "Reply-To", "Revision History",
     "recipient_global_opt_out", "global suppression", "can_submit_global_suppressions",
+    "recorded open", "recorded click", "open redirect", "keyset", "/t/o/{token}.gif", "/t/c/{token}/{link_index}",
+    "APP_ADMIN_EMAIL", "single-use sign-in link", "ADMIN", "OPERATOR",
 ]
 
 failures: list[str] = []

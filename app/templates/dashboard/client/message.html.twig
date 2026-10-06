@@ -1,0 +1,42 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Message{% endblock %}
+{% block body %}
+{% set cid = client.id.toRfc4122 %}
+<p class="crumbs"><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">Send jobs</a> › <a href="{{ path('dashboard_client_send_job', {clientId: cid, jobId: message.send_job_id}) }}">{{ message.job_reference }}</a> › Message</p>
+<h1>Message to {{ message.recipient_address }}</h1>
+<dl class="inline-dl">
+    <dt>Message id</dt><dd><code>{{ message.id }}</code></dd>
+    <dt>Recipient reference</dt><dd>{{ message.external_recipient_reference }}</dd>
+    <dt>Current status</dt><dd>{{ ui.status(message.current_status, 'message_status') }}</dd>
+    <dt>Postfix queue id</dt><dd>{{ message.postfix_queue_id ?? '—' }}</dd>
+    <dt>Created</dt><dd>{{ message.created_at|ts }}</dd>
+    <dt>Resolved</dt><dd>{{ message.resolved_at|ts }}</dd>
+    <dt>Recorded opens</dt><dd>{{ message.opens }} (first {{ message.first_open|ts }}, last {{ message.last_open|ts }})</dd>
+    <dt>Recorded clicks</dt><dd>{{ message.clicks }} (first {{ message.first_click|ts }}, last {{ message.last_click|ts }})</dd>
+</dl>
+
+<h2>Event timeline</h2>
+<p class="muted">Events are append-only and listed in the order they happened. Transport events come from Postfix and inbound DSNs; recorded opens and clicks come from the tracking endpoints.</p>
+{% if page.rows is empty %}<p class="empty">No events yet.</p>{% else %}
+<ol class="timeline">
+{% for ev in page.rows %}
+    {% set kind = ev.event_type in ['open_recorded', 'click_recorded'] ? 'engagement' : (ev.event_type in ['hard_bounce', 'complaint', 'submission_failed'] ? 'failure' : (ev.event_type in ['deferred', 'soft_bounce', 'connection_failure', 'transport_outcome_unknown', 'dsn_unmatched'] ? 'warning' : (ev.event_type == 'remote_accepted' ? 'accepted' : 'info'))) %}
+    <li class="ev ev-{{ kind }}">
+        <div class="ev-head"><time datetime="{{ ev.occurred_at }}">{{ ev.occurred_at|ts }}</time> <strong>{{ ev.event_type|label('event_type') }}</strong> <small>({{ ev.event_source|label('event_source') }})</small></div>
+        <dl class="inline-dl">
+            {% if ev.smtp_code or ev.enhanced_status_code %}<dt>SMTP status</dt><dd>{{ ev.smtp_code ?? '' }} {{ ev.enhanced_status_code ?? '' }}</dd>{% endif %}
+            {% if ev.failure_scope %}<dt>Failure scope</dt><dd>{{ ev.failure_scope }}</dd>{% endif %}
+            {% if ev.remote_host %}<dt>Remote host</dt><dd>{{ ev.remote_host }}</dd>{% endif %}
+            {% if ev.diagnostic %}<dt>Diagnostic</dt><dd class="diag">{{ ev.diagnostic }}</dd>{% endif %}
+            {% if ev.event_type == 'message_suppressed' and ev.suppression_reason %}<dt>Reason</dt><dd>{{ ev.suppression_reason|label('suppression_reason_client') }}</dd>{% endif %}
+            {% if ev.event_type == 'click_recorded' and ev.link_index %}<dt>Link</dt><dd>#{{ ev.link_index }}</dd>{% endif %}
+            {% if ev.event_type == 'remote_accepted' %}<dt>Meaning</dt><dd>The receiving server accepted responsibility (not proof of inbox delivery).</dd>{% endif %}
+            {% if ev.event_type == 'open_recorded' %}<dt>Meaning</dt><dd>The tracking image was requested (not proof the message was read).</dd>{% endif %}
+        </dl>
+    </li>
+{% endfor %}
+</ol>
+{% endif %}
+{{ ui.pager(page, 'events') }}
+{% endblock %}

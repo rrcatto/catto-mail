@@ -10,7 +10,7 @@ use Symfony\Component\Security\Core\Exception\CustomUserMessageAccountStatusExce
 use Symfony\Component\Security\Core\User\UserCheckerInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
-/** Disabled users and invited users without a password cannot log in or stay logged in. */
+/** Disabled users cannot sign in or stay signed in (checked on every request). */
 final class DashboardUserChecker implements UserCheckerInterface
 {
     public function checkPreAuth(UserInterface $user, ?TokenInterface $token = null): void
@@ -20,9 +20,6 @@ final class DashboardUserChecker implements UserCheckerInterface
         }
         if ($user->isDisabled()) {
             throw new CustomUserMessageAccountStatusException('This account is disabled.');
-        }
-        if (null === $user->getPassword()) {
-            throw new CustomUserMessageAccountStatusException('This account has no password yet.');
         }
     }
 

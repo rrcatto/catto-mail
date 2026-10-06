@@ -9,6 +9,8 @@ Production ports:
   the shared DSN Maildir spool, where the Go delivery daemon claims and processes it (DSNs and ARF
   complaints, Phase 5). No milter applies, and port 25 never relays.
 - **587:** authenticated submission, with the OpenDKIM milter (`milter_default_action = tempfail`).
+  Two SASL accounts: the Go delivery daemon (`SMARTHOST_SUBMISSION_*`) and the Symfony application,
+  which sends only the dashboard sign-in emails (`APP_MAIL_SUBMISSION_*`).
 
 Postfix writes its log (`maillog_file`) and periodic atomic `postqueue -j` snapshots into the
 shared observability volume, which Go reads read-only. In development, Postfix relays only to
