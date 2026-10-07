@@ -23,12 +23,21 @@ final class ApiKeyCreateCommand extends AdminCommand
     protected function configure(): void
     {
         $this->addArgument('client-id', InputArgument::REQUIRED)
-            ->addOption('name', null, InputOption::VALUE_REQUIRED, 'Display name');
+            ->addOption('name', null, InputOption::VALUE_REQUIRED, 'Descriptive name (e.g. production server, rotation 2026-10)')
+            ->addOption('expires', null, InputOption::VALUE_REQUIRED, 'Optional expiry, e.g. 2027-01-31T00:00:00Z');
     }
 
     protected function handle(InputInterface $input, SymfonyStyle $io): int
     {
-        [$key, $raw] = $this->keys->create($this->client((string) $input->getArgument('client-id')), $input->getOption('name'), $this->actor());
+        $expires = null;
+        if (null !== $input->getOption('expires')) {
+            try {
+                $expires = new \DateTimeImmutable((string) $input->getOption('expires'));
+            } catch (\Exception) {
+                throw new \InvalidArgumentException('--expires is not a date/time.');
+            }
+        }
+        [$key, $raw] = $this->keys->create($this->client((string) $input->getArgument('client-id')), $input->getOption('name'), $this->actor(), $expires);
         $io->writeln('api_key_id: '.$key->getId()->toRfc4122());
         $io->writeln('api_key: '.$raw);
         $io->note('The raw key is shown once and cannot be recovered; only its SHA-256 hash is stored.');

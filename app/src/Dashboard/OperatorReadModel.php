@@ -26,7 +26,11 @@ final class OperatorReadModel
     public const CLIENT_SORTS = [
         'created' => ['c.created_at', 'timestamptz'],
         'name' => ['c.company_name', 'text'],
+        'status_changed' => ['c.status_changed_at', 'timestamptz'],
     ];
+
+    /** Phase 9 alert list. */
+    public const ALERT_SORTS = ['observed' => ['a.last_observed_at', 'timestamptz']];
 
     public const DSN_SORTS = ['received' => ['d.received_at', 'timestamptz']];
 
@@ -96,7 +100,9 @@ final class OperatorReadModel
             'unmatched_dsns' => array_map('intval', $c->fetchAllKeyValue(
                 'SELECT status, count(*) FROM unmatched_dsns WHERE status IN (\'open\', \'match_requested\') GROUP BY status')),
             'webhooks' => $this->webhookSummary(),
+            'delivery' => $this->deliveryStatus(),
             'clients' => array_map('intval', $c->fetchAllKeyValue('SELECT status, count(*) FROM clients GROUP BY status ORDER BY status')),
+            'alerts' => array_map('intval', $c->fetchAllKeyValue('SELECT severity, count(*) FROM client_alerts WHERE resolved_at IS NULL GROUP BY severity')),
             'rate_window_days' => self::RATE_WINDOW_DAYS,
         ];
     }
@@ -156,7 +162,10 @@ final class OperatorReadModel
 
         return $this->keyset->page(<<<'SQL'
             c.id::text AS id, c.company_name, c.contact_email, c.status, c.plan, c.created_at, c.can_submit_global_suppressions,
-            (SELECT count(*) FROM sending_domains d WHERE d.client_id = c.id AND d.status = 'verified') AS verified_domains
+            c.origin, c.status_changed_at, c.approved_at,
+            (SELECT count(*) FROM sending_domains d WHERE d.client_id = c.id AND d.status = 'verified') AS verified_domains,
+            (SELECT count(*) FROM client_alerts a WHERE a.client_id = c.id AND a.resolved_at IS NULL) AS open_alerts,
+            (SELECT CASE WHEN bool_or(a.severity = 'critical') THEN 'critical' WHEN count(*) > 0 THEN 'warning' END FROM client_alerts a WHERE a.client_id = c.id AND a.resolved_at IS NULL) AS worst_alert
             SQL, 'clients c', $where, $params, $listing, self::CLIENT_SORTS, 'c.id');
     }
 
@@ -168,7 +177,8 @@ final class OperatorReadModel
         }
         $c = $this->connection;
         $client = $c->fetchAssociative(<<<'SQL'
-            SELECT id::text AS id, company_name, contact_email, status, plan, created_at, can_submit_global_suppressions
+            SELECT id::text AS id, company_name, contact_email, status, plan, created_at, can_submit_global_suppressions,
+                   origin, billing_contact_email, abuse_contact_email, status_changed_at, approved_at, closed_at, policy_acceptance_required
               FROM clients WHERE id = ?
             SQL, [$clientId]);
         if (false === $client) {
@@ -194,6 +204,70 @@ final class OperatorReadModel
             SQL, [$clientId]);
 
         return $client;
+    }
+
+    /**
+     * Reputation alerts across clients (Phase 9), with the client's current status.
+     *
+     * @param array{state?: string, severity?: string, metric?: string, client?: string} $filters
+     *
+     * @return array{rows: list<array<string, mixed>>, next: ?string}
+     */
+    public function alerts(array $filters, Listing $listing): array
+    {
+        $where = [match ($filters['state'] ?? '') {
+            'resolved' => 'a.resolved_at IS NOT NULL',
+            'all' => 'true',
+            default => 'a.resolved_at IS NULL',
+        }];
+        $params = [];
+        foreach (['severity' => 'a.severity', 'metric' => 'a.metric'] as $key => $column) {
+            if ('' !== ($filters[$key] ?? '')) {
+                $where[] = "$column = ?";
+                $params[] = $filters[$key];
+            }
+        }
+        if (ClientReadModel::isUuid($filters['client'] ?? '')) {
+            $where[] = 'a.client_id = ?';
+            $params[] = $filters['client'];
+        }
+
+        return $this->keyset->page(<<<'SQL'
+            a.id::text AS id, a.client_id::text AS client_id, c.company_name, c.status AS client_status, a.metric, a.window_hours,
+            a.severity, a.numerator, a.denominator, a.value, a.threshold, a.first_observed_at, a.last_observed_at, a.resolved_at,
+            a.acknowledged_at, a.acknowledgement_note, (SELECT u.email FROM users u WHERE u.id = a.acknowledged_by) AS acknowledged_by
+            SQL, 'client_alerts a JOIN clients c ON c.id = a.client_id', $where, $params, $listing, self::ALERT_SORTS, 'a.id');
+    }
+
+    /**
+     * The newest reputation metrics of every client with traffic in the window, riskiest
+     * first (Phase 9).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function reputation(int $windowHours, int $limit = 100): array
+    {
+        $rows = $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT m.*, m.client_id::text AS client_id, c.company_name, c.status AS client_status,
+                   (SELECT count(*) FROM client_alerts a WHERE a.client_id = m.client_id AND a.resolved_at IS NULL) AS open_alerts
+              FROM client_reputation_metrics m JOIN clients c ON c.id = m.client_id
+             WHERE m.window_hours = ? AND (m.messages_submitted > 0 OR m.validation_addresses > 0 OR m.suppressed > 0 OR m.webhook_failures > 0)
+             ORDER BY (m.complaints::numeric / GREATEST(m.messages_submitted, 1)) DESC,
+                      (m.hard_bounces::numeric / GREATEST(m.messages_submitted, 1)) DESC, c.company_name
+             LIMIT ?
+            SQL, [$windowHours, $limit]);
+        foreach ($rows as $i => $r) {
+            $rows[$i] += ClientAccountReadModel::rates($r);
+        }
+
+        return $rows;
+    }
+
+    public function reputationComputedAt(): ?string
+    {
+        $at = $this->connection->fetchOne('SELECT max(computed_at) FROM client_reputation_metrics');
+
+        return false === $at || null === $at ? null : (string) $at;
     }
 
     /**
@@ -381,6 +455,25 @@ final class OperatorReadModel
             SELECT c.id::text AS client_id, c.company_name, c.status AS client_status, m.role, m.created_at
               FROM client_memberships m JOIN clients c ON c.id = m.client_id WHERE m.user_id = ? ORDER BY lower(c.company_name)
             SQL, [$userId]);
+    }
+
+    /**
+     * Go delivery daemons (delivery_heartbeats, Phase 8): live/held/paused state, the
+     * warm-up ceiling and the Postfix queue depth of the newest queue snapshot, as Go
+     * last saw them. Bounded: daemons seen in the last day.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function deliveryStatus(): array
+    {
+        return $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT worker_id, version, started_at, last_seen_at, stopped_at, live_delivery, send_work_held, outbound_paused,
+                   global_rate_per_minute, queue_snapshot_at, queue_active, queue_deferred, queue_hold, queue_incoming,
+                   submitted, temporary_failures, dsns_processed,
+                   stopped_at IS NULL AND last_seen_at > now() - interval '2 minutes' AS alive,
+                   queue_snapshot_at IS NOT NULL AND queue_snapshot_at > now() - interval '5 minutes' AS snapshot_fresh
+              FROM delivery_heartbeats WHERE last_seen_at > now() - interval '1 day' ORDER BY last_seen_at DESC LIMIT 10
+            SQL);
     }
 
     /** @return array{events_awaiting_fanout: int, deliveries: array<string, int>, workers: list<array<string, mixed>>} */

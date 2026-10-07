@@ -2,7 +2,224 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.8.
+the *specification* version, which is 2.10.
+
+## [Unreleased]
+
+## [0.1.8] - 2026-10-07
+
+Phases 8 and 9, repository side (specifications 2.9 and 2.10): production readiness (production
+topology, `smarthostctl prod`, preflight, socket-activated ingress, held/live/paused delivery,
+backups, upgrades, runbook, local rehearsal) and public SaaS hardening (below). Software version
+0.1.8 (Symfony application, Go delivery daemon, validator, production image tag). The live
+production steps remain the operator's.
+
+Phase 9: public SaaS hardening, repository side (specification 2.10). Public onboarding stays
+disabled, and no billing provider is chosen. Plans, prices, the policy text, threshold
+calibration and opening public onboarding are owner decisions
+(`docs/production/onboarding.md`).
+
+### Added (Phase 9)
+- **Client lifecycle:**
+  - `pending_approval`, `active`, `throttled`, `suspended` and `closed`, with a permission per
+    transition (`PLATFORM.CLIENT.APPROVE`, `PLATFORM.CLIENT.RESTRICT`);
+  - a mandatory reason, re-checked under a row lock;
+  - audited as `client.approved`, `client.throttled`, `client.suspended`,
+    `client.reactivated`, `client.unthrottled` and `client.closed`;
+  - `status_changed_at`, `approved_at` and `closed_at`;
+  - `closed` is final.
+- **Public onboarding gate** `APP_PUBLIC_ONBOARDING_ENABLED` (false). No public route; one gated
+  entry point fixed to `pending_approval`.
+- **Service-policy acceptance** by version (`APP_ACCEPTABLE_USE_POLICY_VERSION`,
+  `client_policy_acceptances`):
+  - client admins accept in the dashboard; operators record an acceptance with a reference;
+  - approval is blocked until the version in force is accepted.
+- **Client metadata:** billing and abuse contacts and origin; operator-only private notes
+  (`client_notes`).
+- **Per-client limits** (`client_limits`) under installation ceilings:
+  - the API rate per client;
+  - validation jobs and addresses per day and month;
+  - send jobs and recipients per day and month;
+  - recipients per job;
+  - API keys, webhook endpoints and sending domains.
+- **Quota enforcement:**
+  - concurrency-safe counters (`client_quota_usage`) admitted in the creating transaction;
+  - a refusal is `429 quota-exceeded`, with `Retry-After` and a `quota` member;
+  - count limits are re-checked under a client row lock.
+- **API keys:** names and optional expiry (`api_keys.expires_at`); client-admin key management
+  in the dashboard; operator key management; `smarthost:api-key:list`.
+- **Usage:**
+  - period summaries (current day, current month, previous month, custom);
+  - reconciliation against validation jobs and accepted messages (`smarthost:usage:reconcile`);
+  - deterministic JSON/CSV export (`smarthost:usage:export`, audited);
+  - at most one unit per message (unique index).
+- **Billing boundary:** provider-neutral statements (`billing_statements`,
+  `billing_statement_lines`: draft → finalized → exported, or void; quantities only).
+- **Reputation monitoring:**
+  - per-client 24-hour and 7-day metrics (`client_reputation_metrics`);
+  - warning/critical alerts (`client_alerts`) for the hard-bounce, complaint and deferral rates
+    and volume increases, with numerator and denominator;
+  - acknowledgement; no automatic action;
+  - `smarthost:reputation evaluate|acknowledge` and the production timer
+    `<instance>-reputation-evaluate.timer` (every 15 minutes).
+- **Operator dashboard:**
+  - client page (lifecycle, policy, limits and quotas, reputation, API keys, webhooks, usage,
+    statements, private notes, audit history);
+  - approval queue and status filters;
+  - Alerts, Usage and reconciliation pages.
+- **Client dashboard:** API keys, policy acceptance, limits and usage by period, finalized
+  statements, webhook endpoint health.
+- **Public API documentation** at `/docs/api`: `docs/api/integration-guide.md` and the OpenAPI
+  contract.
+- **Permissions:** `PLATFORM.CLIENT.APPROVE`, `PLATFORM.CLIENT.RESTRICT`,
+  `PLATFORM.CLIENT_LIMIT.MANAGE`, `PLATFORM.CLIENT_KEY.MANAGE`, `PLATFORM.USAGE.VIEW`,
+  `PLATFORM.USAGE.EXPORT`, `PLATFORM.ABUSE.VIEW` and `PLATFORM.ABUSE.MANAGE` (granted to OPERATOR
+  by the migration).
+- **Console commands:** `smarthost:client:limits`, `smarthost:client:account`,
+  `smarthost:usage:summary`, `smarthost:usage:reconcile`, `smarthost:usage:export`,
+  `smarthost:billing:statement` and `smarthost:reputation`.
+- **Preflight:** the onboarding gate, the policy version in force, and the age of the last
+  reputation evaluation.
+- **Documentation:** `docs/production/onboarding.md` (checklist, operations, and the criteria
+  for opening public onboarding).
+- **Tests:**
+  - lifecycle, quotas (including an 8-process race), usage and billing, reputation, Phase 9
+    dashboard;
+  - a two-client tenant-isolation review;
+  - query plans at 1,000,000 usage records (`phase9-query-plans.txt`);
+  - rehearsal checks: timer, approval, quota through nginx, public docs, evaluation.
+
+### Changed (Phase 9)
+- `smarthost:client:set-status` requires `--operator` and `--note`; `prod client-status` passes
+  them through.
+- Clients are created through `ClientLifecycle`. New clients require policy acceptance unless
+  created active by an operator; existing clients are exempt.
+- The `(client_id, occurred_at)` usage index covers `usage_type` and `quantity` (index-only
+  period sums).
+- Production per-instance units moved to `infra/systemd/production/`; the machine helper's
+  `ingress-install`/`ingress-uninstall` became `instance-install`/`instance-uninstall`.
+- `smarthost:dev:bootstrap` (development and test only) revokes its oldest earlier `development`
+  keys when the development client is at its API-key limit, so repeated end-to-end runs keep
+  working. Limit refusals state both the current count and the limit.
+- OpenAPI 1.0.0-draft.8; status vocabulary 2.5.0; 39 tables.
+
+Phase 8: repository-side production readiness (specification 2.9). The software version is
+unchanged until the owner releases it. The live steps (VPS, DNS and PTR, certificates, seed and
+bounce smoke tests, traffic rollout) are performed by the operator from the runbook.
+
+### Added (Phase 8)
+- **Production topology** (`infra/podman/smarthost-production.sh.in`):
+  - eight standalone persistent rootless containers on `<instance>-internal` (no route out),
+    `<instance>-ingress` (internal; nginx and Postfix only) and `<instance>-egress`;
+  - egress only for Postfix, validator, webhook worker and application DNS; no published ports;
+  - fixed internal addresses with `/etc/hosts` entries;
+  - no Mailpit or fake SMTP;
+  - D-35 persistent-object lifecycle.
+
+  The development pod is unchanged. Network matrix and states: `docs/production/README.md`.
+- **`smarthostctl prod`** (`infra/bin/smarthostctl-prod`), refusing any non-production
+  configuration:
+  - configuration: `init-env` (secrets generated on the host), `check`, `render`;
+  - lifecycle: `build` (tagged `SMARTHOST_IMAGE_TAG`), `tls set|self-signed`, `install`, `start`,
+    `stop`, `restart`, `status`, `recreate`, `replace`, `migrate`, `logs`, `console`;
+  - checks: `preflight`, `dns-checklist`, `firewall`;
+  - `dkim`, `live-enable`, `live-disable`, `pause`, `resume`, `pause-status`, `client-status`,
+    `ops-status`, `queue`;
+  - `backup`, `restore`, `upgrade`, `rollback`, `seed-test`.
+
+  The development commands now refuse a production `.env`.
+- **Production configuration profile** in the environment contract, generated into
+  `infra/production.env.example`. New variables:
+  - deployment: `SMARTHOST_INSTANCE`, `SMARTHOST_IMAGE_TAG`, `SMARTHOST_INTERNAL_SUBNET`,
+    `SMARTHOST_EGRESS_SUBNET`, `SMARTHOST_EGRESS_ENABLED`, `SMARTHOST_PUBLIC_IPV4`,
+    `POSTFIX_SMTP_BIND`, `SMARTHOST_SSH_PORT`;
+  - `DELIVERY_GLOBAL_RATE_PER_MINUTE`, `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE`;
+  - `APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS`.
+
+  Production safety rules apply in `prod check` and in every rendering. A retention section
+  explains every `APP_RETENTION_*` category.
+- **Held mode** (production before live activation):
+  - Postfix has no relayhost, refuses outbound recipients temporarily (450), and delivers only
+    the dashboard sign-in mail;
+  - the Go daemon claims no send jobs.
+
+  `live-enable` runs the activation preflight, audits, and recreates Postfix and the delivery
+  daemon. `install`/`recreate` refuse a live configuration whose activation preflight fails.
+- **Production preflight** (`infra/lib/smarthost_preflight.py`, stdlib):
+  - PASS/WARN/FAIL for config, host, runtime, exposure, ingress, TLS, DNS (A, PTR, FCrDNS, MX, SPF incl. an
+    evaluator, DMARC), DKIM (database, OpenDKIM and DNS key agree), Postfix (incl. a live relay
+    refusal test on port 25, no mail sent) and delivery;
+  - `--activation`, `--json`, `--smtp-egress-probe`;
+  - a DNS checklist and an nftables ruleset generator.
+- **Client addresses preserved: a socket-activated ingress** (networking closeout, owner
+  instruction).
+  - Rootless port forwarding replaced every client address with one internal address (measured).
+  - Instead, the service user's systemd binds 443 and 25 (`<instance>-ingress.socket`, from
+    `infra/systemd/production/`), and `<instance>-ingress.service` starts the persistent nginx
+    container with both sockets.
+  - HTTPS reaches Symfony with the client as `REMOTE_ADDR`; `TRUSTED_PROXIES` is now empty in
+    production (a configuration rule), so forwarded headers are ignored.
+  - SMTP is passed by an nginx `stream` server (`infra/nginx/production/`) to Postfix's
+    PROXY-protocol listener `postfix-ingress:25` on the ingress network. Postfix logs and checks
+    the real peer.
+  - The production nginx HTTPS template is derived from the development one at build time.
+  - nginx has no Podman restart policy: systemd restarts it with the sockets.
+  - `smarthostctl prod ingress-check` proves it on the host with two loopback source addresses;
+    it is part of `preflight --activation`.
+  - New variable `SMARTHOST_INGRESS_SUBNET`; `POSTFIX_SMTP_BIND` is also read by nginx.
+- **Host prerequisite check**: `preflight --section host` covers OS, Podman, lingering and
+  `net.ipv4.ip_unprivileged_port_start` (running and persisted) against the configured binds.
+  `prod install`/`create`/`start`/`recreate`/`replace`/`upgrade` run it first and print the
+  remediation.
+- **Launch decisions recorded**: IPv4-only delivery, validator SMTP probing disabled, retention
+  unset (no automatic deletion). See `docs/production/README.md` §5.
+- **Production DKIM keys**: `smarthost-dkim-key` in the OpenDKIM image, with generate, activate,
+  retire, dns, pubkey and list. Several domains and selectors, planned rotation; keys never leave
+  OpenDKIM.
+- **Emergency pause**: `smarthost-postfix-control pause|resume|status`.
+  - Postfix sets `defer_transports=smtp`, and the flag is durable.
+  - The Go daemon stops claiming and submitting within a poll interval.
+  - Audited (`delivery.outbound_paused` / `_resumed`), and requires the new ADMIN-only permission
+    `SYSTEM.DELIVERY.CONTROL`.
+- **Warm-up and throttling**:
+  - an installation-wide submission ceiling (`DELIVERY_GLOBAL_RATE_PER_MINUTE`, hard spacing);
+  - the existing `throttled` client status now paces that client
+    (`DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE`), refreshed at every lease renewal.
+- **`delivery_heartbeats`** (migration `Version20261008000100`): written by the Go daemon with the
+  delivery state, warm-up ceiling and Postfix queue depth (active, deferred, hold, incoming) of the
+  newest queue snapshot. Shown on Operator › Overview ("Delivery state and Postfix queue").
+- Console commands:
+  - `smarthost:ops:status [--json]`: backlogs, messages by status, `outcome_unknown`, delivery
+    state, queue depth, rates per client, suppressions, unmatched DSNs, webhooks;
+  - `smarthost:ops:record`: audit of installation-wide delivery controls.
+- **Backup and restore** (database, DKIM keys and tables, configuration, TLS secrets where Podman
+  exports them, manifest with checksums), **upgrade/rollback**, and the owned **seed-test** tool
+  (`infra/lib/smarthost_seedtest.py`: public API only, at most 10 operator-owned addresses,
+  delivered or bounce expectation).
+- **Runbook** `docs/production/runbook.md`, from VPS preparation to recovery, with the external
+  actions listed.
+- Tests:
+  - `smarthostctl test phase8`: configuration rules, rendered topology, DNS/SPF/DKIM/DMARC/TLS and
+    preflight logic with fixtures, Postfix modes, DKIM tool, shellcheck;
+  - `smarthostctl test phase8-rehearsal`: the production topology deployed locally without
+    Internet egress, covering held mode, preflight, controls, backup/restore, upgrade and D-35;
+  - Go integration tests: hold, pause, throttle, ceiling, heartbeat;
+  - PHP tests: `SafetyGuard` production rules, webhook header bound and connect timeout.
+
+### Changed (Phase 8)
+- Postfix:
+  - each submission account may only use its own envelope senders (`reject_sender_login_mismatch`):
+    the delivery daemon its VERP return paths, the web application `APP_MAIL_FROM`;
+  - port 25 disables VRFY and requires HELO;
+  - production refuses any relayhost.
+- Symfony `SafetyGuard`: with `SMARTHOST_ENV=production`, it refuses the debug kernel
+  (`APP_ENV=dev`), a non-https base URL and a webhook private-host allowlist. The deployment rules
+  require `APP_ENV=prod`.
+- Webhook worker: a distinct connect timeout (`max_connect_duration`) and a 16 KiB response-header
+  bound.
+- The systemd units drive the rendered topology script (`@TOPOLOGY@`): the pod in development, the
+  production script in production.
+- The Go delivery daemon has a `version` command and logs its rates and delivery state at start.
 
 ## [0.1.7] - 2026-10-06
 

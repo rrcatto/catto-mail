@@ -66,7 +66,7 @@ wait_healthy() {
   return 1
 }
 
-submit() { tools "$TOOLS" submit "$1" editor@smarthost-dev.test "$2"; }
+submit() { tools "$TOOLS" submit "$1" editor@smarthost-dev.test "$2" "bounce@$(ev SMARTHOST_BOUNCE_DOMAIN)"; }
 dkim_txt() { podman exec smarthost-opendkim sh -c 'cat "$OPENDKIM_KEY_DIR"/smarthost-dev.test/phase1.txt' > "$GEN/verify/dkim-public.txt"; }
 dkim_verify() { tools -v "$GEN/verify/dkim-public.txt:/t/key.txt:ro" "$TOOLS" dkim-verify "$1" /t/key.txt; }
 others_snapshot() { podman ps -a --format '{{.ID}} {{.Names}} {{.State}} {{.StartedAt}}' | grep -v ' smarthost-' | sort; }

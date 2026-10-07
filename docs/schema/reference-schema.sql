@@ -1,5 +1,6 @@
 -- =============================================================================
--- Smarthost reference schema — specification 2.7 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5, engagement index in 2.6, access control in 2.7)
+-- Smarthost reference schema — specification 2.10 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5, engagement index in 2.6, access control in 2.7,
+-- webhooks in 2.8, delivery heartbeats in 2.9, client lifecycle, limits, quotas, billing boundary and reputation in 2.10)
 -- =============================================================================
 --
 -- THIS IS NOT A MIGRATION. Symfony/Doctrine migrations (Phase 2) are the sole
@@ -36,8 +37,22 @@ CREATE TABLE clients (
     plan           text        NOT NULL,
     created_at     timestamptz NOT NULL DEFAULT now(),
     -- D-30: operator-granted capability to report recipient global opt-outs. Never set by the client.
-    can_submit_global_suppressions  boolean  NOT NULL DEFAULT false
+    can_submit_global_suppressions  boolean  NOT NULL DEFAULT false,
+    -- Specification 2.10 (Phase 9): account lifecycle and operational metadata.
+    -- How the client record came to exist; public_application requires APP_PUBLIC_ONBOARDING_ENABLED.
+    origin                      text        NOT NULL DEFAULT 'operator' CHECK (origin IN ('operator', 'public_application')),
+    billing_contact_email       text        NULL,                -- when distinct from contact_email
+    abuse_contact_email         text        NULL,                -- abuse/security contact
+    status_changed_at           timestamptz NOT NULL DEFAULT now(),
+    approved_at                 timestamptz NULL,                -- first transition to active
+    closed_at                   timestamptz NULL,
+    -- Whether approval needs an acceptance of the policy version in force (APP_ACCEPTABLE_USE_POLICY_VERSION).
+    -- Operator-created internal clients may be exempt explicitly.
+    policy_acceptance_required  boolean     NOT NULL DEFAULT true,
+    CONSTRAINT clients_closed_has_time CHECK (status <> 'closed' OR closed_at IS NOT NULL)
 );
+CREATE INDEX clients_status_changed_idx ON clients (status, status_changed_at);   -- approval queue, status filter
+
 
 -- Dashboard accounts (D-12). Passwordless: sign-in is by single-use emailed link
 -- (auth_login_tokens). API keys are never browser credentials. Installation-wide
@@ -149,10 +164,70 @@ CREATE TABLE api_keys (
     name          text        NULL,
     created_at    timestamptz NOT NULL DEFAULT now(),
     last_used_at  timestamptz NULL,
-    revoked_at    timestamptz NULL
+    revoked_at    timestamptz NULL,
+    expires_at    timestamptz NULL,                                           -- Phase 9: optional expiry; NULL = none
+    CONSTRAINT api_keys_expiry_after_creation CHECK (expires_at IS NULL OR expires_at > created_at)
 );
 CREATE UNIQUE INDEX api_keys_key_hash_uq ON api_keys (key_hash);
 CREATE INDEX api_keys_client_id_idx ON api_keys (client_id);
+
+-- Per-client operational limits (Phase 9). One optional row per client; NULL means
+-- "no client-specific limit": the installation ceiling (where one exists) applies. A
+-- client limit may lower an installation ceiling, never raise it (enforced by the
+-- application, which uses min(client limit, ceiling)).
+CREATE TABLE client_limits (
+    client_id                     uuid        PRIMARY KEY REFERENCES clients (id),
+    api_requests_per_minute       integer     NULL CHECK (api_requests_per_minute >= 1),
+    validation_jobs_per_day       integer     NULL CHECK (validation_jobs_per_day >= 0),
+    validation_addresses_per_day  bigint      NULL CHECK (validation_addresses_per_day >= 0),
+    validation_addresses_per_month bigint     NULL CHECK (validation_addresses_per_month >= 0),
+    send_jobs_per_day             integer     NULL CHECK (send_jobs_per_day >= 0),
+    send_recipients_per_day       bigint      NULL CHECK (send_recipients_per_day >= 0),
+    send_recipients_per_month     bigint      NULL CHECK (send_recipients_per_month >= 0),
+    max_recipients_per_send_job   integer     NULL CHECK (max_recipients_per_send_job BETWEEN 1 AND 10000),
+    max_api_keys                  integer     NULL CHECK (max_api_keys >= 0),
+    max_webhook_endpoints         integer     NULL CHECK (max_webhook_endpoints >= 0),
+    max_sending_domains           integer     NULL CHECK (max_sending_domains >= 0),
+    updated_at                    timestamptz NOT NULL DEFAULT now()
+);
+
+-- Admitted-work counters per client, metric and UTC period (Phase 9 quotas). Incremented
+-- in the transaction that admits the work (INSERT ... ON CONFLICT DO UPDATE ... RETURNING),
+-- so concurrent requests serialise on the row and a rolled-back request leaves no count.
+-- Derived data: reconcilable against validation_jobs, send_jobs and send_job_recipient_batches.
+CREATE TABLE client_quota_usage (
+    client_id     uuid        NOT NULL REFERENCES clients (id),
+    metric        text        NOT NULL CHECK (metric IN ('validation_jobs', 'validation_addresses', 'send_jobs', 'send_recipients')),
+    period        text        NOT NULL CHECK (period IN ('day', 'month')),
+    period_start  date        NOT NULL,                          -- UTC calendar day or first day of the UTC month
+    used          bigint      NOT NULL CHECK (used >= 0),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (client_id, metric, period, period_start),
+    CONSTRAINT client_quota_usage_month_start CHECK (period <> 'month' OR extract(day FROM period_start) = 1)
+);
+
+-- Private operator notes about a client account (Phase 9). Never shown to the client.
+CREATE TABLE client_notes (
+    id              uuid        PRIMARY KEY,
+    client_id       uuid        NOT NULL REFERENCES clients (id),
+    author_user_id  uuid        NULL REFERENCES users (id),      -- NULL for console/system notes
+    note            text        NOT NULL CHECK (length(note) BETWEEN 1 AND 4000),
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX client_notes_client_created_idx ON client_notes (client_id, created_at);
+
+-- Acceptances of the service policy (acceptable use) by version (Phase 9). Append-only and
+-- content-neutral: the policy text lives outside the application; only its version is recorded.
+CREATE TABLE client_policy_acceptances (
+    id                   uuid        PRIMARY KEY,
+    client_id            uuid        NOT NULL REFERENCES clients (id),
+    policy_version       text        NOT NULL CHECK (policy_version ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'),
+    accepted_at          timestamptz NOT NULL DEFAULT now(),
+    accepted_by_user_id  uuid        NULL REFERENCES users (id),
+    source               text        NOT NULL CHECK (source IN ('client_dashboard', 'operator_recorded')),
+    reference            text        NULL CHECK (length(reference) <= 255)   -- e.g. a signed agreement's reference
+);
+CREATE UNIQUE INDEX client_policy_acceptances_client_version_uq ON client_policy_acceptances (client_id, policy_version);
 
 -- -----------------------------------------------------------------------------
 -- Validation
@@ -408,6 +483,9 @@ CREATE INDEX message_events_soft_bounce_idx ON message_events (message_id, occur
 -- Phase 6: recorded-open/click aggregates and the tracking endpoint's per-message check.
 CREATE INDEX message_events_engagement_idx ON message_events (message_id, occurred_at)
     WHERE event_type IN ('open_recorded', 'click_recorded');
+-- Phase 9: reputation evaluation counts these events per client in a time window across all messages.
+CREATE INDEX message_events_reputation_idx ON message_events (occurred_at)
+    WHERE event_type IN ('hard_bounce', 'soft_bounce', 'deferred', 'complaint', 'transport_outcome_unknown', 'message_suppressed');
 
 -- DSNs that resolve to no message (D-05). Operator-scoped; retained after resolution.
 CREATE TABLE unmatched_dsns (
@@ -549,8 +627,46 @@ CREATE TABLE usage_records (
     reference_id    uuid        NOT NULL,
     occurred_at     timestamptz NOT NULL
 );
-CREATE INDEX usage_records_client_occurred_idx ON usage_records (client_id, occurred_at);
+-- Phase 9: covering (usage_type, quantity) so period sums per client are index-only scans
+-- (measured in tests/Integration/Phase9QueryPlanTest).
+CREATE INDEX usage_records_client_occurred_idx ON usage_records (client_id, occurred_at) INCLUDE (usage_type, quantity);
 CREATE INDEX usage_records_reference_idx ON usage_records (reference_type, reference_id);
+-- Phase 9: a message is metered at most once (Go's acceptance transaction already guarantees it).
+CREATE UNIQUE INDEX usage_records_message_once_uq ON usage_records (reference_id)
+    WHERE usage_type = 'message_submitted' AND reference_type = 'message';
+
+-- Provider-neutral billing boundary (Phase 9): per client and billing period, the metered
+-- usage totals and their reconciliation and export state. No prices or money: pricing,
+-- invoicing and payment belong to the external billing system.
+CREATE TABLE billing_statements (
+    id                     uuid        PRIMARY KEY,
+    client_id              uuid        NOT NULL REFERENCES clients (id),
+    period_start           date        NOT NULL,                  -- inclusive, UTC
+    period_end             date        NOT NULL,                  -- exclusive, UTC
+    status                 text        NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'finalized', 'exported', 'void')),
+    reconciliation_status  text        NOT NULL CHECK (reconciliation_status IN ('consistent', 'inconsistent')),
+    reconciliation_json    jsonb       NOT NULL DEFAULT '{}'::jsonb,   -- the findings of the last reconciliation
+    reconciled_at          timestamptz NOT NULL,
+    created_at             timestamptz NOT NULL DEFAULT now(),
+    finalized_at           timestamptz NULL,
+    exported_at            timestamptz NULL,
+    external_reference     text        NULL CHECK (length(external_reference) <= 255),  -- the billing system's id
+    voided_at              timestamptz NULL,
+    CONSTRAINT billing_statements_period CHECK (period_end > period_start),
+    CONSTRAINT billing_statements_finalized_has_time CHECK (status NOT IN ('finalized', 'exported') OR finalized_at IS NOT NULL),
+    CONSTRAINT billing_statements_exported_complete CHECK (status <> 'exported' OR (exported_at IS NOT NULL AND external_reference IS NOT NULL)),
+    CONSTRAINT billing_statements_void_has_time CHECK (status <> 'void' OR voided_at IS NOT NULL)
+);
+CREATE UNIQUE INDEX billing_statements_client_period_uq ON billing_statements (client_id, period_start, period_end) WHERE status <> 'void';
+CREATE INDEX billing_statements_period_idx ON billing_statements (period_start, status);
+
+CREATE TABLE billing_statement_lines (
+    id            uuid        PRIMARY KEY,
+    statement_id  uuid        NOT NULL REFERENCES billing_statements (id),
+    usage_type    text        NOT NULL CHECK (usage_type IN ('validation_address', 'message_submitted')),
+    quantity      bigint      NOT NULL CHECK (quantity >= 0)
+);
+CREATE UNIQUE INDEX billing_statement_lines_statement_type_uq ON billing_statement_lines (statement_id, usage_type);
 
 -- Client webhook registration (D-10). Secrets are encrypted with the
 -- application keyring (APP_ENCRYPTION_KEYS); *_key_id names the key used.
@@ -643,6 +759,79 @@ CREATE TABLE webhook_worker_heartbeats (
     events_fanned_out     bigint      NOT NULL DEFAULT 0 CHECK (events_fanned_out >= 0)
 );
 CREATE INDEX webhook_worker_heartbeats_seen_idx ON webhook_worker_heartbeats (last_seen_at);
+
+-- One row per Go delivery daemon (Phase 8): delivery state, warm-up ceiling and the
+-- Postfix queue depth of the newest snapshot, for the operator dashboard.
+CREATE TABLE delivery_heartbeats (
+    worker_id               text        PRIMARY KEY,
+    version                 text        NOT NULL,
+    started_at              timestamptz NOT NULL,
+    last_seen_at            timestamptz NOT NULL,
+    stopped_at              timestamptz NULL,
+    live_delivery           boolean     NOT NULL,
+    send_work_held          boolean     NOT NULL,
+    outbound_paused         boolean     NOT NULL,
+    global_rate_per_minute  integer     NOT NULL CHECK (global_rate_per_minute >= 0),
+    queue_snapshot_at       timestamptz NULL,
+    queue_active            integer     NULL CHECK (queue_active >= 0),
+    queue_deferred          integer     NULL CHECK (queue_deferred >= 0),
+    queue_hold              integer     NULL CHECK (queue_hold >= 0),
+    queue_incoming          integer     NULL CHECK (queue_incoming >= 0),
+    submitted               bigint      NOT NULL DEFAULT 0 CHECK (submitted >= 0),
+    temporary_failures      bigint      NOT NULL DEFAULT 0 CHECK (temporary_failures >= 0),
+    dsns_processed          bigint      NOT NULL DEFAULT 0 CHECK (dsns_processed >= 0),
+    CONSTRAINT delivery_heartbeats_queue_complete CHECK (
+        (queue_snapshot_at IS NULL) = (queue_active IS NULL)
+        AND (queue_active IS NULL) = (queue_deferred IS NULL)
+        AND (queue_deferred IS NULL) = (queue_hold IS NULL)
+        AND (queue_hold IS NULL) = (queue_incoming IS NULL))
+);
+CREATE INDEX delivery_heartbeats_seen_idx ON delivery_heartbeats (last_seen_at);
+
+-- Per-client reputation metrics of the last evaluation (Phase 9, smarthost:reputation:evaluate):
+-- transport facts counted in a bounded window (24 h, 7 days); one row per client and window.
+CREATE TABLE client_reputation_metrics (
+    client_id                 uuid          NOT NULL REFERENCES clients (id),
+    window_hours              smallint      NOT NULL CHECK (window_hours IN (24, 168)),
+    computed_at               timestamptz   NOT NULL,
+    messages_submitted        bigint        NOT NULL CHECK (messages_submitted >= 0),   -- reached Postfix in the window
+    validation_addresses      bigint        NOT NULL CHECK (validation_addresses >= 0),
+    hard_bounces              bigint        NOT NULL CHECK (hard_bounces >= 0),         -- messages with a hard_bounce event in the window
+    soft_bounces              bigint        NOT NULL CHECK (soft_bounces >= 0),
+    deferrals                 bigint        NOT NULL CHECK (deferrals >= 0),
+    provider_policy_failures  bigint        NOT NULL CHECK (provider_policy_failures >= 0),
+    complaints                bigint        NOT NULL CHECK (complaints >= 0),
+    suppressed                bigint        NOT NULL CHECK (suppressed >= 0),           -- messages suppressed instead of sent
+    outcome_unknown           bigint        NOT NULL CHECK (outcome_unknown >= 0),
+    webhook_failures          bigint        NOT NULL CHECK (webhook_failures >= 0),     -- deliveries that failed permanently in the window
+    previous_daily_average    numeric(14,2) NULL,                                      -- messages/day over the 7 days before the last 24 h
+    PRIMARY KEY (client_id, window_hours)
+);
+
+-- Operator warnings raised when a metric crosses a configured threshold (Phase 9). Inferred
+-- risk, never an automatic action: the operator throttles or suspends explicitly.
+CREATE TABLE client_alerts (
+    id                    uuid          PRIMARY KEY,
+    client_id             uuid          NOT NULL REFERENCES clients (id),
+    metric                text          NOT NULL CHECK (metric IN ('hard_bounce_rate', 'complaint_rate', 'deferral_rate', 'volume_increase')),
+    window_hours          smallint      NOT NULL CHECK (window_hours IN (24, 168)),
+    severity              text          NOT NULL CHECK (severity IN ('warning', 'critical')),
+    numerator             numeric(18,2) NOT NULL CHECK (numerator >= 0),
+    denominator           numeric(18,2) NOT NULL CHECK (denominator >= 0),
+    value                 numeric(14,4) NOT NULL,                  -- percent for rates, a factor for volume_increase
+    threshold             numeric(14,4) NOT NULL,
+    first_observed_at     timestamptz   NOT NULL,
+    last_observed_at      timestamptz   NOT NULL,
+    resolved_at           timestamptz   NULL,                      -- the metric fell below the warning threshold
+    acknowledged_at       timestamptz   NULL,
+    acknowledged_by       uuid          NULL REFERENCES users (id),
+    acknowledgement_note  text          NULL,
+    CONSTRAINT client_alerts_observed_order CHECK (last_observed_at >= first_observed_at),
+    CONSTRAINT client_alerts_ack_complete CHECK ((acknowledged_at IS NULL) = (acknowledgement_note IS NULL))
+);
+CREATE UNIQUE INDEX client_alerts_open_uq ON client_alerts (client_id, metric, window_hours) WHERE resolved_at IS NULL;
+CREATE INDEX client_alerts_observed_idx ON client_alerts (last_observed_at, id);
+CREATE INDEX client_alerts_client_idx ON client_alerts (client_id, last_observed_at);
 
 CREATE TABLE audit_log (
     id           uuid        PRIMARY KEY,

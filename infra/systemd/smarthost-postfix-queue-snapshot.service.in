@@ -5,4 +5,4 @@ Description=Smarthost atomic Postfix queue snapshot (postqueue -j)
 
 [Service]
 Type=oneshot
-ExecStart=@GENERATED@/podman/smarthost-pod.sh postfix-exec smarthost-queue-snapshot
+ExecStart=@GENERATED@/podman/@TOPOLOGY@ postfix-exec smarthost-queue-snapshot

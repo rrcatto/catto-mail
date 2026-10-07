@@ -30,6 +30,9 @@ final class ProblemResponder
         if ([] !== $problem->errors) {
             $body['errors'] = $problem->errors;
         }
+        foreach ($problem->extensions as $member => $value) {
+            $body[$member] ??= $value;
+        }
         $response = new JsonResponse($body, $problem->status, $problem->headers + ['Cache-Control' => 'no-store']);
         $response->headers->set('Content-Type', 'application/problem+json');
         $response->setEncodingOptions(\JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Controller\Dashboard;
 
 use App\Audit\AuditActor;
-use App\Client\AccountAdministration;
 use App\Dashboard\ClientAccess;
 use App\Dashboard\ClientReadModel;
 use App\Dashboard\Listing;
@@ -13,7 +12,6 @@ use App\Dashboard\OperatorReadModel;
 use App\Domain\DomainRuleViolation;
 use App\Dsn\UnmatchedDsnAdministration;
 use App\Entity\Client;
-use App\Enum\ClientStatus;
 use App\Enum\SuppressionReason;
 use App\Enum\SuppressionScopeType;
 use App\Suppression\SuppressionAdministration;
@@ -61,38 +59,6 @@ final class OperatorDashboardController extends AbstractController
 
         return $this->page('clients.html.twig', 'clients', [
             'page' => $this->read->clients($filters, $listing), 'filters' => $filters, 'listing' => $listing]);
-    }
-
-    #[Route('/clients/{id}', name: 'dashboard_operator_client', methods: ['GET'])]
-    #[IsGranted('PLATFORM.CLIENT.VIEW')]
-    public function client(string $id): Response
-    {
-        $client = $this->read->client($id) ?? throw new NotFoundHttpException('Not found.');
-
-        return $this->page('client.html.twig', 'clients', ['c' => $client, 'statuses' => ClientStatus::cases()]);
-    }
-
-    #[Route('/clients/{id}/status', name: 'dashboard_operator_client_status', methods: ['POST'])]
-    #[IsGranted('PLATFORM.CLIENT.MANAGE')]
-    public function setClientStatus(string $id, Request $request, AccountAdministration $accounts): RedirectResponse
-    {
-        $client = $this->loadClient($id);
-        $this->assertCsrf($request);
-        $status = ClientStatus::tryFrom($request->request->getString('status'));
-        if (null === $status) {
-            $this->addFlash('error', 'Unknown client status.');
-        } elseif ($status === $client->getStatus()) {
-            $this->addFlash('info', 'The client already has that status.');
-        } else {
-            try {
-                $accounts->setClientStatus($client, $status, AuditActor::user($this->access->user()));
-                $this->addFlash('success', \sprintf('Client status set to %s.', $status->value));
-            } catch (DomainRuleViolation $e) {
-                $this->addFlash('error', $e->getMessage());
-            }
-        }
-
-        return $this->redirectToRoute('dashboard_operator_client', ['id' => $id]);
     }
 
     #[Route('/clients/{id}/global-suppressions', name: 'dashboard_operator_client_capability', methods: ['POST'])]

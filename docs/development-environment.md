@@ -1,8 +1,10 @@
 # Development Environment
 
-**Status:** Phases 1–6 complete (Phase 5: inbound DSN, complaint and global suppression
+**Status:** Phases 1–7 complete (Phase 5: inbound DSN, complaint and global suppression
 processing, D-30, v0.1.5; Phase 6: tracking and dashboards with passwordless sign-in, roles and
-ACL, v0.1.6; Phase 7 Smarthost side: the webhook worker, specification 2.8, v0.1.7). `smarthostctl verify`
+ACL, v0.1.6; Phase 7 Smarthost side: the webhook worker, specification 2.8, v0.1.7); Phases 8 and
+9 repository side (production tooling and rehearsal, public SaaS hardening, specification 2.10,
+v0.1.8). `smarthostctl verify`
 passes all 176 checks (§6; `--clean` additionally starts from destroyed volumes), and
 `smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e`,
 `test phase5-e2e`, `test phase6-e2e` and `test phase7-e2e` the end-to-end runs (§7).
@@ -113,6 +115,9 @@ flowchart TD
 | `smarthostctl test phase4-e2e [A B C D E]` | Phase 4 end to end against the **running** pod's Postfix, OpenDKIM and Mailpit (§7). It stops and restarts Smarthost containers only (OpenDKIM, Mailpit, delivery). |
 | `smarthostctl test phase5-e2e [A B C D E F G]` | Phase 5 end to end against the **running** pod: DSNs and ARF reports through Postfix port 25 and the real DSN spool (§7). It creates a second test client and stops/starts only the delivery container. |
 | `smarthostctl test phase6-e2e` | Phase 6 end to end against the **running** pod through nginx: tracking from a delivered message, open-redirect attempts, the dashboards as two client users and an operator, token-free logs (§7). It creates test clients and users and stops nothing. |
+| `smarthostctl test phase8` | Phase 8 production tooling without network (§8): configuration rules, the rendered production topology, the preflight logic with DNS/host/TLS fixtures, Postfix held/live/pause modes and sender ownership, the DKIM key tool, shellcheck. Throwaway containers only. |
+| `smarthostctl test phase8-rehearsal` | Deploys the **production** topology on this engine as the separate instance `smarthost-rehearsal` (no Internet egress, loopback ports 18443 and 12525) through `smarthostctl prod`, exercises it (§8) and removes it. It never touches the development pod. |
+| `smarthostctl prod <command>` | **Production only** (refuses this development `.env`): see `docs/production/runbook.md`. |
 | `smarthostctl test phase7-e2e` | Phase 7 end to end against the **running** pod: an external client using only the API and the signed webhooks verified by a local receiver container (`smarthost-test-webhook-receiver`, alias `webhook-receiver`, removed afterwards). It creates a test client, SIGKILLs and restarts the webhook-worker container once, and stops nothing else (§7). |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
 | `smarthostctl migrate` | Runs the `db-migrate` and `db-grants` tasks in the running pod (after `recreate` with a rebuilt app image that brings new migrations, `start` also runs them). |
@@ -335,7 +340,10 @@ application role; DNS is stubbed and nothing reaches the Internet.
 | schema | The migrated catalog equals `reference-schema.sql` (tables, columns, defaults, constraints, indexes); migrations up/down/up and per-migration rollback; ORM mapping equals the database; CHECKs equal the vocabulary; grants equal `schema.md` §6; least-privilege behaviour; critical CHECK/UNIQUE/FK behaviour |
 | integration | Authentication, tenant isolation, idempotency (including concurrent retries from separate processes), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API and the Phase 5 operator commands; every API response is validated against the OpenAPI contract. Phase 6: tracking endpoints (opens, clicks, open-redirect attacks, expiry, privacy, logs), tracking statistics, client and operator dashboards (pages, filters, keyset pagination, CSV export, CSRF, terminology, headers), two-client isolation, operator-only access, and the 10,000-row load test (query counts, memory, EXPLAIN ANALYZE of every page query, written to `infra/.generated/test-output/phase6-dashboard-observations.txt`). Phase 7: the webhook worker (contract body and signature, fan-out, retry policy, leases and fencing, DNS rebinding and SSRF, limits, rotation), dashboard webhook management, the web process without the worker's credentials, and the webhook query plans at 180,000 deliveries (`phase7-webhook-query-plans.txt`) |
 
-Latest run (v0.1.7): 244 tests and 3,774 assertions, all passing (v0.1.6: 225; v0.1.5: 177). Unit includes the shared D-32
+Latest run (v0.1.8): 272 tests and 4,410 assertions, all passing (v0.1.7: 244; v0.1.6: 225; v0.1.5: 177). Phase 9 adds
+the lifecycle, quota (including an 8-process race), usage and billing, reputation, dashboard,
+two-client tenant-isolation and query-plan tests (`phase9-query-plans.txt` in
+`infra/.generated/test-output/`, 1,000,000 usage records). Unit includes the shared D-32
 vectors; integration includes the D-31 client-status rules, the D-30 global opt-out API
 (`GlobalSuppressionApiTest`, including multi-process concurrency) and the Phase 5 operator commands
 (`Phase5OperatorCommandTest`); schema includes the D-30 constraints and the six-migration rollback.
@@ -354,7 +362,7 @@ vectors; integration includes the D-31 client-status rules, the D-30 global opt-
    server's command log contains `DATA` or `BDAT`. The report is written to
    `infra/.generated/phase3-e2e-report.json`.
 
-Latest run: 295 pytest tests passed; end to end PASS (details in `CHANGELOG.md`).
+Latest run (v0.1.8): 295 pytest tests passed; end to end PASS (details in `CHANGELOG.md`).
 
 **Phase 4** (`infra/tests/phase4-test.sh`) builds the delivery `test` image (gofmt and go vet run
 during the build), runs the Go unit tests with no network (D-32 vectors, identifiers and VERP,
@@ -378,7 +386,8 @@ is stopped:
 Latest runs: Go unit tests (10 packages) and 14 integration tests pass; end to end A–E pass (the
 10,000-recipient job completed in about two minutes with a peak RSS of 25 MiB). After Phase 5 (v0.1.5): Go
 unit tests in 13 packages and 28 integration tests pass; A–E pass again (10,000 recipients in
-185 s, peak RSS 26.6 MiB, with the per-message pre-submission suppression check).
+185 s, peak RSS 26.6 MiB, with the per-message pre-submission suppression check). v0.1.8: the Go
+unit tests and 33 integration tests pass; `test phase4-e2e` 21/21.
 
 **Phase 5** uses the same Go harness (`smarthostctl test phase5`): DSN and ARF fixtures
 (`delivery/internal/dsn/testdata`), the failure-scope classifier, the spool processor, and
@@ -400,7 +409,7 @@ messages to Mailpit and then injects synthetic DSNs and ARF reports over SMTP to
 | F | Unmatched DSN → `smarthost:dsn:show` → `smarthost:dsn:match` → Go resolution (event, operator, suppression); dismissal requires a reason |
 | G | 15 DSNs while the daemon is down, 3 left as crashed claims, a worker SIGKILLed mid-pass: all recorded exactly once, stale claims reclaimed, old processed files deleted by retention while their events remain |
 
-Latest run: A–G, 44/44 checks pass.
+Latest run (v0.1.8): 50/50 checks pass.
 
 **Phase 6 end to end** (`infra/tests/phase6-e2e.sh`, `smarthostctl test phase6-e2e`) runs
 everything through nginx → PHP-FPM, as a mail client or browser would:
@@ -411,7 +420,7 @@ everything through nginx → PHP-FPM, as a mail client or browser would:
 | D | Anonymous → login; passwordless sign-in (link emailed through Postfix to Mailpit, DKIM-signed, single use; an unknown address gets the same answer and no email; `APP_ADMIN_EMAIL` gets ADMIN; an OPERATOR cannot open roles); client pages, timeline with the recorded events and no token or delivery/read claims, clicks per link, CSV export (formula cell neutralised); 403 for the operator area and 404 for another client; client B's user gets 404 for every client A page; operator pages and worker health; unmatched-DSN dismissal (audited, no event created); operator block and lift with a note (row kept, audited); GET sign-out does nothing, POST with CSRF ends the session |
 | L | Neither the nginx access log (tracking URLs shown as `/t/o/[token].gif`, `/t/c/[token]/1`) nor the application log contains the token |
 
-Latest run (v0.1.6): 75/75 checks pass.
+Latest run (v0.1.8): 75/75 checks pass.
 
 **Phase 7 end to end** (`infra/tests/phase7-e2e.sh`, `smarthostctl test phase7-e2e`) plays the
 first client application. Its driver (`phase7_e2e.py`) holds only an API key and reads only the
@@ -435,4 +444,65 @@ heartbeat.
 Each run registers its endpoint at its own receiver path (`/hooks/client-<timestamp>`), waits until
 no earlier send work is queued or processing, and disables its endpoints on exit.
 
-Latest run (v0.1.7): 38/38 checks pass.
+Latest run (v0.1.8): 38/38 checks pass.
+
+## 8. Production tooling and the rehearsal (Phase 8)
+
+The development environment is unchanged: the pod, Mailpit capture, the internal network without
+an Internet route, and D-35. Production is a separate topology and command family
+(`docs/production/README.md`, `docs/production/runbook.md`). Two suites test it locally.
+
+**`smarthostctl test phase8`** runs only throwaway containers with `--network none`:
+- the unit tests in `infra/tests/phase8/`: the production configuration rules and template,
+  init-env, the rendered production topology, the DNS wire client, SPF/DKIM/DMARC/TLS logic, the
+  grant matrix, and every preflight section with DNS and host fixtures (including the low-port
+  host check and the ingress section against a preserving and a collapsing fake ingress);
+- shellcheck;
+- the Postfix modes: held, live, capture, relayhost refusal, pause at start and at runtime, sender
+  ownership, port-25 hardening, and the production PROXY-protocol listener (the header's address
+  is the logged peer; development keeps the plain listener);
+- the nginx templates: production listens on the ingress binds and passes SMTP with the PROXY
+  protocol; development renders unchanged;
+- the production DKIM key tool.
+
+**`smarthostctl test phase8-rehearsal`** deploys the production topology as `smarthost-rehearsal`:
+- `SMARTHOST_ENV=production`, live delivery off, `SMARTHOST_EGRESS_ENABLED=false` (every network
+  internal), and the ingress socket on `127.0.0.1:18443` and `127.0.0.1:12525`. Its systemd units
+  `smarthost-rehearsal-ingress.socket/.service` are installed in the Podman machine's user
+  manager. `smarthostctl prod` reaches that manager through `SMARTHOST_HOSTCTL`, a tool location it
+  sets itself for a WSL engine; the unprivileged ports need no sysctl.
+- configuration under `infra/.generated/rehearsal/`;
+- images tagged `:rehearsal` and `:rehearsal2`.
+
+It uses only `smarthostctl prod` (with `SMARTHOST_DOTENV`/`SMARTHOST_GENERATED` pointing at the
+rehearsal configuration). It checks:
+- the configuration rules, build, TLS, install (with the ingress units) and healthy start;
+- the topology: networks, membership, no published ports, the ingress socket and nginx under it;
+- client addresses:
+  - a rootlessport control container shows two clients collapsed to one address;
+  - through the ingress, the same two loopback sources stay distinct in nginx and Postfix
+    (`prod ingress-check`);
+  - Symfony keeps them apart (the sign-in limiter's per-address hash), and ignores a forged
+    `X-Forwarded-For`;
+  - after an nginx crash, systemd restarts it with the sockets;
+- held mode: an API send job is not claimed, Postfix refuses campaign mail with 450, the sign-in
+  mail is queued;
+- sender ownership, and the queue-depth heartbeat;
+- the preflight, and the refused live activation;
+- the audited pause and resume, and the refusal for an OPERATOR;
+- backup and restore, D-35 stop/start (stop releases the ingress socket), and an upgrade to a new
+  tag (client addresses still preserved).
+
+It also checks that no development container changed, and then removes every rehearsal container,
+volume, network, secret and image.
+
+Latest runs (v0.1.8): `test phase8` 25/25 (49 unit tests); `test phase8-rehearsal` 52/52,
+including the Phase 9 section (reputation timer, approval with a reason, a quota refusal through
+nginx, the public API documentation, the evaluation through the timer's command path; rehearsal
+preflight: 53 PASS, 0 WARN, 0 FAIL, 1 SKIP; `prod ingress-check` 7/7 PASS).
+
+**Phase 1 verification note (specification 2.9).** Each submission account may use only its own
+envelope senders. The verification client therefore submits with the VERP envelope sender
+`bounce@<bounce domain>`, while the header From stays `editor@smarthost-dev.test`, so the DKIM
+check is unchanged.
+

@@ -69,7 +69,9 @@ final class OperatorDashboardTest extends DashboardTestCase
         $overview = self::text($this->page('/dashboard/operator'));
         self::assertStringContainsString('Validation (Python worker)', $overview);
         self::assertStringContainsString('Operator View Co', $overview, 'cross-client rates');
-        self::assertStringContainsString('not shown here', $overview, 'no invented Postfix queue depth');
+        // Phase 8: the queue depth comes only from the delivery daemon's durable heartbeat; without
+        // one, the card says so instead of inventing a figure.
+        self::assertStringContainsString('Delivery state and Postfix queue', $overview);
         $clients = $this->crawler('/dashboard/operator/clients?q=Operator%20View');
         self::assertSame(1, $clients->filter('tbody tr')->count());
         $detail = self::text($this->page('/dashboard/operator/clients/'.$client->getId()->toRfc4122()));
@@ -90,9 +92,12 @@ final class OperatorDashboardTest extends DashboardTestCase
         $operator = $this->newUser(true);
         $this->signIn($operator);
         $page = "/dashboard/operator/clients/$id";
-        $this->submit($page, "$page/status", ['status' => 'active']);
+        // Phase 9: approval needs the policy version in force and a reason.
+        $this->container()->get(\App\Client\ClientLifecycle::class)->recordPolicyAcceptance($this->reload($client), 'aup-test-1',
+            \App\Enum\PolicyAcceptanceSource::OperatorRecorded, self::actor(), null, 'order form');
+        $this->submit($page, "$page/status", ['status' => 'active', 'note' => 'reviewed']);
         self::assertSame('active', Db::owner()->fetchOne('SELECT status FROM clients WHERE id = ?', [$id]));
-        $audit = Db::owner()->fetchAssociative("SELECT actor_type, actor_id FROM audit_log WHERE action = 'client.status_changed' AND target_id = ? ORDER BY occurred_at DESC LIMIT 1", [$id]);
+        $audit = Db::owner()->fetchAssociative("SELECT actor_type, actor_id FROM audit_log WHERE action = 'client.approved' AND target_id = ? ORDER BY occurred_at DESC LIMIT 1", [$id]);
         self::assertSame(['actor_type' => 'user', 'actor_id' => $operator->getId()->toRfc4122()], $audit);
 
         $this->submit($page, "$page/global-suppressions", ['setting' => 'enable', 'note' => '']);

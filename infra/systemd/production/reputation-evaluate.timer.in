@@ -1,0 +1,10 @@
+# catto-mail production: every 15 minutes, the client reputation evaluation (Phase 9).
+# Started and stopped by the topology script (smarthost-production.sh start/stop).
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: client reputation evaluation every 15 minutes
+
+[Timer]
+OnActiveSec=2min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Unit=${SMARTHOST_INSTANCE}-reputation-evaluate.service

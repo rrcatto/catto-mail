@@ -106,7 +106,11 @@ func newEnv(t *testing.T) *env {
 func (e *env) worker(id string) *worker.Worker {
 	cfg := *e.cfg
 	cfg.WorkerID = id
-	log := logx.New("error", "json")
+	level := "error"
+	if os.Getenv("PHASE4_DEBUG") != "" {
+		level = "debug"
+	}
+	log := logx.New(level, "json")
 	w := worker.New(&cfg, e.st, log)
 	w.SMTP.TLS = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	w.SettleDelay, w.AmbiguityDeadline = 200*time.Millisecond, 3*time.Second

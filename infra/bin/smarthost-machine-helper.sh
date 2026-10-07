@@ -5,8 +5,12 @@
 #
 # It manages only the systemd user units around the persistent `smarthost` pod
 # (D-35): `smarthost.service` (start/stop at boot/shutdown, linked into
-# default.target.wants) and the two Postfix timers. It never creates or removes
-# Podman objects.
+# default.target.wants) and the two Postfix timers. In production (Phase 8) the
+# rendered units also include the instance's own production units
+# (<instance>-ingress.socket/.service, the socket-activated nginx;
+# <instance>-reputation-evaluate.service/.timer). `instance-install`/`instance-uninstall`
+# handle only those, for a production instance other than the default one (the local
+# rehearsal). It never creates or removes Podman objects.
 set -eu
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 GENERATED="$(cd "$(dirname "$0")/../.generated" && pwd)"
@@ -47,6 +51,32 @@ case "$action" in
         rm -f "$UNIT_DIR"/smarthost.service "$UNIT_DIR"/smarthost-* "$WANTS/smarthost.service"
         systemctl --user daemon-reload
         echo "removed the systemd units; the pod, its containers and the volumes are untouched"
+        ;;
+    instance-install)
+        # instance-install <generated dir under infra/.generated> <instance>: the instance's production units
+        dir="$(cd "${1:?generated dir}" && pwd)"; inst="${2:?instance}"
+        case "$dir" in "$GENERATED"|"$GENERATED"/*) ;; *) echo "not under $GENERATED: $dir" >&2; exit 64 ;; esac
+        case "$inst" in *[!a-z0-9-]*|"") echo "bad instance name" >&2; exit 64 ;; esac
+        mkdir -p "$UNIT_DIR"
+        n=0
+        for unit in "$dir/systemd/$inst"-*; do
+            [ -e "$unit" ] || continue
+            cp "$unit" "$UNIT_DIR"/; n=$((n + 1))
+        done
+        systemctl --user daemon-reload
+        echo "installed $n units of instance $inst"
+        ;;
+    instance-uninstall)
+        inst="${1:?instance}"
+        case "$inst" in *[!a-z0-9-]*|"") echo "bad instance name" >&2; exit 64 ;; esac
+        for unit in "$UNIT_DIR/$inst"-*; do
+            [ -e "$unit" ] || continue
+            systemctl --user stop "$(basename "$unit")" 2>/dev/null || true
+            rm -f "$unit"
+        done
+        systemctl --user daemon-reload
+        systemctl --user reset-failed "$inst-*" 2>/dev/null || true
+        echo "removed the units of instance $inst"
         ;;
     systemctl) exec systemctl --user "$@" ;;
     journal) exec journalctl --user --no-pager "$@" ;;

@@ -88,6 +88,27 @@ abstract class AdminCommand extends Command
         return $user;
     }
 
+    /** Period options of the usage and billing commands: --period NAME, --month YYYY-MM, or --from/--to dates. */
+    protected function addPeriodOptions(): void
+    {
+        $this->addOption('period', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'current_day, current_month or previous_month')
+            ->addOption('month', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'A calendar month, YYYY-MM (UTC)')
+            ->addOption('from', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period start date YYYY-MM-DD (UTC, inclusive)')
+            ->addOption('to', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period end date YYYY-MM-DD (UTC, exclusive)');
+    }
+
+    protected function usagePeriod(InputInterface $input, string $default = 'current_month'): \App\Usage\UsagePeriod
+    {
+        if (null !== $input->getOption('from') || null !== $input->getOption('to')) {
+            return \App\Usage\UsagePeriod::custom((string) $input->getOption('from'), (string) $input->getOption('to'));
+        }
+        if (null !== $input->getOption('month')) {
+            return \App\Usage\UsagePeriod::month((string) $input->getOption('month'));
+        }
+
+        return \App\Usage\UsagePeriod::named((string) ($input->getOption('period') ?? $default));
+    }
+
     protected function webhookEndpoint(string $id): WebhookEndpoint
     {
         return $this->find(WebhookEndpoint::class, $id) ?? throw new DomainRuleViolation("No webhook endpoint $id.");

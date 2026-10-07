@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.8 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.10 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -26,6 +26,9 @@ Enum values come from [`../contracts/status-vocabulary.yaml`](../contracts/statu
 | Leased work uses `claimed_by`, `lease_expires_at`, `attempt_count`, `next_attempt_at` and `last_error`. | `architecture.work_claiming` |
 | Rendered content is transient and is purged on Postfix acceptance. Other retention periods are configurable. | `compliance.retention` |
 | Foreign keys never cascade deletes. | convention |
+| Client status changes follow the lifecycle transitions (Phase 9); `closed` is final and records `closed_at`. | `saas_operations.client_lifecycle` |
+| Admitted work is counted per client in `client_quota_usage` in the transaction that admits it; per-client limits (`client_limits`) can only lower installation ceilings. | `saas_operations.client_limits` |
+| Usage records are append-only; a message is metered at most once (`usage_records_message_once_uq`). Billing statements hold quantities only, never prices. | `saas_operations.usage_and_billing` |
 
 ## 2. Entity-relationship diagram
 
@@ -255,6 +258,9 @@ erDiagram
 | `clients` | tenant root | `id` |
 | `global_suppression_requests` | tenant | `client_id` (the reporting client; D-38) |
 | `client_memberships`, `sending_domains`, `api_keys`, `validation_jobs`, `send_jobs`, `usage_records`, `webhook_endpoints`, `webhook_events`, `webhook_deliveries` | tenant | `client_id` |
+| `client_limits`, `client_quota_usage`, `client_policy_acceptances`, `billing_statements` | tenant (Phase 9) | `client_id` |
+| `billing_statement_lines` | tenant (Phase 9) | via `billing_statements.client_id` |
+| `client_notes`, `client_reputation_metrics`, `client_alerts` | operator only (Phase 9) | `client_id`, but never shown to the client (private notes, inferred risk) |
 | `validation_addresses`, `validation_evidence` | tenant | via `validation_jobs.client_id` |
 | `send_job_recipient_batches`, `send_job_recipients`, `messages` | tenant | via `send_jobs.client_id` |
 | `message_links`, `message_events` | tenant | via `messages → send_jobs.client_id` |
@@ -267,6 +273,7 @@ erDiagram
 | `unmatched_dsns` | operator only | none until matched |
 | `delivery_ingest_cursors` | internal (Go) | none |
 | `webhook_worker_heartbeats` | internal (webhook worker) | none |
+| `delivery_heartbeats` | internal (Go delivery daemon) | none |
 | `audit_log` | operator | none |
 
 Another client's resource returns **404**. Dashboard access is checked by Symfony voters: client
@@ -320,7 +327,15 @@ Other indexes:
 * webhook dashboards (Phase 7, added after the query-plan review showed whole-table scans):
   `webhook_deliveries_endpoint_status_idx` (per-endpoint counts), `webhook_deliveries_created_idx`
   and `webhook_events_created_idx` (cross-client delivery and outbox lists, the bounded summary);
-* worker heartbeats by recency (`webhook_worker_heartbeats_seen_idx`).
+* worker heartbeats by recency (`webhook_worker_heartbeats_seen_idx`, `delivery_heartbeats_seen_idx`);
+* Phase 9: the approval queue and status filter (`clients_status_changed_idx`), notes per client,
+  one acceptance per client and policy version, one message-metering row per message
+  (`usage_records_message_once_uq`), period usage sums as index-only scans
+  (`usage_records_client_occurred_idx` covers `usage_type` and `quantity`), one non-void billing statement per client and period, the
+  billing-period list, one open alert per client, metric and window (`client_alerts_open_uq`),
+  the alert lists (`client_alerts_observed_idx`, `client_alerts_client_idx`) and the reputation
+  evaluation's time window over bounce, complaint, deferral, outcome-unknown and suppression events
+  (`message_events_reputation_idx`, partial).
 
 ## 5. Key table-level rules (enforced by CHECK)
 
@@ -336,6 +351,13 @@ Other indexes:
 | `global_suppression_requests` | One row per (`client_id`, `operation`, `idempotency_key`); `operation` from the vocabulary (`create_global_opt_out`); `response_status` is 201 (created) or 200 (already active). |
 | `validation_addresses` | A suggestion has both a reason code and a confidence. A claimed row has a lease. |
 | `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. |
+| `clients` | `closed` requires `closed_at`; `origin` is `operator` or `public_application`. |
+| `api_keys` | `expires_at`, when set, is after `created_at`. |
+| `client_limits` | Every limit is non-negative (API rate ≥ 1; recipients per send job 1–10000). |
+| `client_quota_usage` | `metric` and `period` from the vocabulary; a month period starts on day 1. |
+| `client_policy_acceptances` | One row per client and policy version; the version is a short token; `source` is `client_dashboard` or `operator_recorded`. |
+| `billing_statements` | `period_end > period_start`; finalized and exported statements carry `finalized_at`; exported ones `exported_at` and the billing system's `external_reference`; void ones `voided_at`. One non-void statement per client and period. |
+| `client_alerts` | `metric`, `severity` and `window_hours` from the vocabulary; an acknowledgement has its time and note together. |
 
 ## 6. Database roles and table access (D-15)
 
@@ -355,6 +377,8 @@ grants below. No runtime role has DDL rights.
 | auth_login_tokens | S I U D | – | – | – |
 | sending_domains | S I U | – | – | S |
 | api_keys | S I U | – | – | – |
+| client_limits, client_quota_usage | S I U | – | – | – |
+| client_notes, client_policy_acceptances | S I | – | – | – |
 | validation_jobs | S I U | S | S U | – |
 | validation_addresses | S I D¹ | – | S U | – |
 | validation_evidence | S D¹ | – | S I | – |
@@ -371,10 +395,14 @@ grants below. No runtime role has DDL rights.
 | global_suppression_requests | S I D¹ | – | – | – |
 | domain_reputation | S | – | – | S I U |
 | usage_records | S I D¹ | – | I | I |
+| billing_statements | S I U | – | – | – |
+| billing_statement_lines | S I U | – | – | – |
+| client_reputation_metrics, client_alerts | S I U | – | – | – |
 | webhook_endpoints | S I U | S | – | – |
 | webhook_events | S I | S U | I | I |
 | webhook_deliveries | S | S I U | – | – |
 | webhook_worker_heartbeats | S | S I U | – | – |
+| delivery_heartbeats | S | – | – | S I U |
 | audit_log | S I D¹ | I | I | I |
 
 ¹ `DELETE` is used only by the configured retention commands, and only when a retention period

@@ -49,8 +49,8 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.8"
-EXPECTED_SPEC_DATE = "2026-10-06"
+EXPECTED_SPEC_VERSION = "2.10"
+EXPECTED_SPEC_DATE = "2026-10-07"
 # Decisions that must be incorporated across the revision history (all of D-01..D-38).
 EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
 
@@ -130,9 +130,19 @@ DDL_ENUMS = {
     ("webhook_deliveries", "status"): "webhook_delivery_status",
     ("audit_log", "actor_type"): "audit_actor_type",
     ("global_suppression_requests", "operation"): "global_suppression_request_operation",
+    # Phase 9 (specification 2.10)
+    ("clients", "origin"): "client_origin",
+    ("client_quota_usage", "metric"): "quota_metric",
+    ("client_quota_usage", "period"): "quota_period",
+    ("client_policy_acceptances", "source"): "policy_acceptance_source",
+    ("billing_statements", "status"): "billing_statement_status",
+    ("billing_statements", "reconciliation_status"): "billing_reconciliation_status",
+    ("billing_statement_lines", "usage_type"): "usage_type",
+    ("client_alerts", "metric"): "client_alert_metric",
+    ("client_alerts", "severity"): "client_alert_severity",
 }
 
-ENV_CONSUMERS = {"app", "webhook-worker", "validator", "delivery", "postfix", "opendkim",
+ENV_CONSUMERS = {"app", "webhook-worker", "validator", "delivery", "postfix", "opendkim", "deployment",
                  "postgres", "bootstrap", "mailpit", "fake-smtp", "proxy"}
 
 # Concepts the specification has removed; they must not reappear in any
@@ -381,7 +391,7 @@ def check_ddl(spec: dict, vocab: dict, sql: str, schema_md: str) -> None:
         if table not in tables:
             continue
         columns = set(re.findall(
-            r"^\s{4}(\w+)\s+(?:uuid|text|integer|bigint|smallint|boolean|jsonb|timestamptz)\b",
+            r"^\s{4}(\w+)\s+(?:uuid|text|integer|bigint|smallint|boolean|jsonb|timestamptz|date|numeric)\b",
             tables[table], re.M))
         for field in definition["key_fields"]:
             col = re.sub(r"_(nullable_for_global|nullable)$", "", field)
@@ -459,6 +469,30 @@ def check_environment(spec: dict, api: dict, env_md: str, env_example: str) -> N
     check(example.get("DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD") == "3"
           and example.get("DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS") == "30",
           ".env.example: soft-bounce defaults must be 3 within 30 days (D-18)")
+    check_production_template(contract)
+
+
+def check_production_template(contract: dict[str, bool]) -> None:
+    """Phase 8 (spec 2.9): the production template is complete, secret-free and safe by default."""
+    path = ROOT / "infra/production.env.example"
+    check(path.is_file(), "infra/production.env.example missing (smarthost_render.py env-example)")
+    if not path.is_file():
+        return
+    prod = dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", path.read_text(encoding="utf-8"), re.M))
+    check(set(prod) == set(contract), f"production.env.example and the contract differ: {sorted(set(prod) ^ set(contract))}")
+    for name, is_secret in contract.items():
+        if is_secret:
+            check(prod.get(name, "") == "", f"production.env.example: secret '{name}' must be empty")
+    for name, want in {"SMARTHOST_ENV": "production", "APP_ENV": "prod", "SMARTHOST_LIVE_DELIVERY_ENABLED": "false",
+                       "POSTFIX_RELAYHOST": "", "APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS": "", "VALIDATOR_SMTP_ROUTE_OVERRIDE": "",
+                       "VALIDATOR_SMTP_PROBE_ENABLED": "false", "SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS": "false",
+                       "SMARTHOST_EGRESS_ENABLED": "true"}.items():
+        check(prod.get(name) == want, f"production.env.example: {name} must be '{want}' (got '{prod.get(name)}')")
+    rate = prod.get("DELIVERY_GLOBAL_RATE_PER_MINUTE", "0")
+    check(rate.isdigit() and int(rate) > 0, "production.env.example: warm-up starts with a global ceiling (DELIVERY_GLOBAL_RATE_PER_MINUTE > 0)")
+    for name, value in prod.items():
+        if name.startswith("APP_RETENTION_") and name != "APP_RETENTION_STAGED_CONTENT_DAYS":
+            check(value == "", f"production.env.example: {name} must not hard-code a long-term period")
 
 
 # ---------------------------------------------------------------------------

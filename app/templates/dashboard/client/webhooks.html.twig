@@ -15,6 +15,8 @@
         <dt>Events</dt><dd>{{ e.subscribed_event_types|json_counts|join(', ') }}</dd>
         <dt>Signing secret created</dt><dd>{{ e.signing_secret_created_at|ts }}{% if e.rotation_overlap %} (previous secret still signs until {{ e.previous_signing_secret_expires_at|ts }}){% endif %}</dd>
         <dt>Deliveries</dt><dd>{{ e.pending }} pending or retrying; last 7 days: {{ e.delivered }} delivered, {{ e.failed }} failed</dd>
+        <dt>Last successful delivery</dt><dd>{{ e.last_delivered_at|ts }}</dd>
+        {% if e.failures_since_success > 0 %}<dt>Failed since the last success</dt><dd><strong>{{ e.failures_since_success }}</strong> deliveries failed permanently: check the endpoint (the failed deliveries below show the last response).</dd>{% endif %}
     </dl>
     {% if may_manage %}
     <details>

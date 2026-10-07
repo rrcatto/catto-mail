@@ -92,3 +92,27 @@ func ConsecutiveFresh(snaps []Snapshot, interval time.Duration, now time.Time) [
 	}
 	return snaps[i:]
 }
+
+// Depth is the Postfix queue depth of the newest snapshot (Phase 8: the durable
+// queue signal for the operator dashboard). ok is false without any snapshot.
+func Depth(dir string) (at time.Time, counts map[string]int, ok bool, err error) {
+	snaps, err := List(dir)
+	if err != nil || len(snaps) == 0 {
+		return time.Time{}, nil, false, err
+	}
+	newest := snaps[len(snaps)-1]
+	ids, err := Load(newest.Path)
+	if err != nil {
+		return time.Time{}, nil, false, err
+	}
+	counts = map[string]int{"active": 0, "deferred": 0, "hold": 0, "incoming": 0}
+	for _, queue := range ids {
+		switch queue {
+		case "active", "deferred", "hold":
+			counts[queue]++
+		default: // incoming, maildrop
+			counts["incoming"]++
+		}
+	}
+	return newest.Time, counts, true, nil
+}

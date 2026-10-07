@@ -24,6 +24,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON auth_login_tokens TO :"app";
 GRANT SELECT, INSERT, UPDATE ON sending_domains TO :"app";
 GRANT SELECT ON sending_domains TO :"delivery";
 GRANT SELECT, INSERT, UPDATE ON api_keys TO :"app";
+-- Client lifecycle, limits and quotas, notes and policy acceptances (Phase 9, specification 2.10).
+GRANT SELECT, INSERT, UPDATE ON client_limits, client_quota_usage TO :"app";
+GRANT SELECT, INSERT ON client_notes, client_policy_acceptances TO :"app";
 
 -- Validation
 GRANT SELECT, INSERT, UPDATE ON validation_jobs TO :"app";
@@ -70,6 +73,10 @@ GRANT SELECT, INSERT, UPDATE ON domain_reputation TO :"delivery";
 -- Metering, webhooks, audit
 GRANT SELECT, INSERT, DELETE ON usage_records TO :"app";
 GRANT INSERT ON usage_records TO :"validator", :"delivery";
+-- Billing boundary and reputation monitoring (Phase 9): Symfony only (dashboard and console).
+GRANT SELECT, INSERT, UPDATE ON billing_statements TO :"app";
+GRANT SELECT, INSERT, UPDATE ON billing_statement_lines TO :"app";
+GRANT SELECT, INSERT, UPDATE ON client_reputation_metrics, client_alerts TO :"app";
 GRANT SELECT, INSERT, UPDATE ON webhook_endpoints TO :"app";
 GRANT SELECT ON webhook_endpoints TO :"webhook";
 GRANT SELECT, INSERT ON webhook_events TO :"app";
@@ -80,6 +87,9 @@ GRANT SELECT, INSERT, UPDATE ON webhook_deliveries TO :"webhook";
 -- Webhook worker liveness (Phase 7): written by the worker, read by the operator dashboard.
 GRANT SELECT, INSERT, UPDATE ON webhook_worker_heartbeats TO :"webhook";
 GRANT SELECT ON webhook_worker_heartbeats TO :"app";
+-- Delivery daemon status and Postfix queue depth (Phase 8): written by Go, read by the dashboard.
+GRANT SELECT, INSERT, UPDATE ON delivery_heartbeats TO :"delivery";
+GRANT SELECT ON delivery_heartbeats TO :"app";
 GRANT SELECT, INSERT, DELETE ON audit_log TO :"app";
 GRANT INSERT ON audit_log TO :"webhook", :"validator", :"delivery";
 

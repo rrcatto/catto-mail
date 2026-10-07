@@ -1,0 +1,13 @@
+# catto-mail production: client reputation evaluation (Phase 9, specification 2.10).
+# Rendered by `smarthostctl prod render` as <instance>-reputation-evaluate.service; run
+# every 15 minutes by <instance>-reputation-evaluate.timer, which the topology script
+# starts and stops with the containers. It recomputes the per-client metrics and opens,
+# updates or resolves operator alerts (smarthost:reputation evaluate); it never changes a
+# client. Skipped while the application container is not running.
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: client reputation evaluation
+
+[Service]
+Type=oneshot
+Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
+ExecStart=@GENERATED@/podman/smarthost-production.sh app-exec php bin/console smarthost:reputation evaluate

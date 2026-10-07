@@ -1,0 +1,27 @@
+# catto-mail production ingress: nginx with the sockets of <instance>-ingress.socket
+# (specification 2.9, Phase 8 networking). Rendered by `smarthostctl prod render` as
+# <instance>-ingress.service; do not edit the rendered copy.
+#
+# Starts the existing, persistent nginx container (D-35: never created or removed
+# here) with systemd's listening sockets. Podman passes them into the container
+# (LISTEN_FDS) and nginx inherits them (NGINX="3;4;"). HTTPS client addresses reach
+# Symfony as REMOTE_ADDR; SMTP connections go on to Postfix with the PROXY protocol.
+#
+# Podman runs locally here, because the API socket (CONTAINER_HOST) cannot pass file
+# descriptors. nginx has no Podman restart policy: a restart by Podman would come
+# back without the sockets. Instead, a crash ends `podman start --attach` and
+# systemd starts it again with the same sockets. A stop (topology `stop`, or a
+# `podman stop`) ends it cleanly.
+[Unit]
+Description=catto-mail ingress ${SMARTHOST_INSTANCE}: nginx with the inherited HTTPS and SMTP sockets
+Requires=${SMARTHOST_INSTANCE}-ingress.socket
+After=${SMARTHOST_INSTANCE}-ingress.socket
+
+[Service]
+UnsetEnvironment=CONTAINER_HOST CONTAINER_CONNECTION
+ExecStart=/usr/bin/podman start --attach ${SMARTHOST_INSTANCE}-nginx
+ExecStop=/usr/bin/podman stop --time 10 ${SMARTHOST_INSTANCE}-nginx
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30

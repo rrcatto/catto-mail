@@ -31,6 +31,10 @@ class ApiKey implements TenantOwned
     #[ORM\Column(type: 'timestamptz', nullable: true)]
     private ?\DateTimeImmutable $revokedAt = null;
 
+    /** Phase 9: optional expiry; an expired key fails authentication like a revoked one. */
+    #[ORM\Column(type: 'timestamptz', nullable: true)]
+    private ?\DateTimeImmutable $expiresAt = null;
+
     public function __construct(
         #[ORM\ManyToOne(targetEntity: Client::class)]
         #[ORM\JoinColumn(name: 'client_id', nullable: false)]
@@ -55,6 +59,20 @@ class ApiKey implements TenantOwned
     public function getLastUsedAt(): ?\DateTimeImmutable { return $this->lastUsedAt; }
     public function getRevokedAt(): ?\DateTimeImmutable { return $this->revokedAt; }
     public function isRevoked(): bool { return null !== $this->revokedAt; }
+    public function getExpiresAt(): ?\DateTimeImmutable { return $this->expiresAt; }
+
+    public function setExpiresAt(?\DateTimeImmutable $expiresAt): void { $this->expiresAt = $expiresAt; }
+
+    public function isExpired(?\DateTimeImmutable $at = null): bool
+    {
+        return null !== $this->expiresAt && $this->expiresAt <= ($at ?? Clock::now());
+    }
+
+    /** Authenticates: neither revoked nor expired. */
+    public function isUsable(?\DateTimeImmutable $at = null): bool
+    {
+        return !$this->isRevoked() && !$this->isExpired($at);
+    }
 
     public function revoke(): void
     {

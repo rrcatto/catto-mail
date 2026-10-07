@@ -257,6 +257,90 @@ Made while implementing the Smarthost side of Phase 7. They are recorded in spec
 | Webhook delivery retention: `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS`. Empty means no automatic deletion until a production policy sets a period; no deletion machinery is built now. | `compliance.retention`, environment contract |
 | Production `APP_WEBHOOK_*` values are chosen in Phase 8. These are later hardening, not needed for correctness now: a distinct connect timeout, a response-header bound, public-certificate webhook testing and several live worker containers. | `webhooks.delivery_contract.production_settings` |
 
+### Phase 8 implementation choices (specification 2.9, 2026-10-06)
+
+Made while implementing repository-side production readiness. They are recorded in specification
+2.9 (`podman_environment.production_topology`, `production_operations`). The development pod
+(D-35) is unchanged.
+
+| Choice | Where |
+|---|---|
+| Production is eight standalone persistent containers on an internal and an egress network, not a pod: pod members share one network namespace, so a pod cannot give components different connectivity. Only Postfix, the validator, the webhook worker and the application join the egress network. (The networking closeout below replaced the published 443/25 ports with a socket-activated ingress and added the ingress network.) | `infra/podman/smarthost-production.sh.in`, `docs/production/README.md` |
+| Fixed internal addresses (.10–.17) and `/etc/hosts` entries for the service names. A probe on Podman 6 showed both resolvers answer, but Ubuntu 24.04 ships Podman 4.9 with an older aardvark-dns; `/etc/hosts` is deterministic. The egress network is listed first for dual-homed containers. | production topology |
+| Production tooling is a separate command family (`smarthostctl prod`, `infra/bin/smarthostctl-prod`). It requires `SMARTHOST_ENV=production`, and the development commands refuse a production `.env`. The same renderer validates and renders both. `@TOPOLOGY@` points the systemd units at the right script. | `infra/bin/`, `infra/lib/smarthost_render.py` |
+| The production template is generated from a *Production profile* table in the environment contract, which stays the only variable list. `prod init-env` generates the secrets on the host. A rehearsal (`SMARTHOST_EGRESS_ENABLED=false`, no Internet at all) may use reserved names; anything with egress may not. | environment contract, renderer |
+| Held mode: production with live delivery off has no relayhost, and `retry(8)` is the default transport. Postfix therefore refuses outbound recipients with a temporary 450 at submission (observed in the rehearsal), instead of queueing them. The sign-in sender keeps `smtp`, so operators can sign in before activation. Go claims no send jobs. | `postfix/entrypoint.sh`, `delivery/internal/config` |
+| Emergency pause: a durable flag in the observability volume. Postfix (writer) applies `defer_transports=smtp`; Go (read-only) stops claiming and submitting. The pause survives restarts and needs no new database table. | `postfix/control.sh`, `delivery/internal/worker` |
+| Installation-wide delivery controls (live-enable/disable, pause/resume) need the new `SYSTEM.DELIVERY.CONTROL` key (ADMIN only, no migration: ADMIN holds every key). They are audited with operator and note *before* acting (`smarthost:ops:record`). | `app/src/Command/OpsRecordCommand.php` |
+| Warm-up ceiling `DELIVERY_GLOBAL_RATE_PER_MINUTE`: a hard per-daemon spacing in the pacing limiter, checked with the per-domain limits. Production runs one delivery daemon, so it is installation-wide. The `throttled` client status, which existed but had no effect, now paces that client at `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE`, refreshed at every lease renewal. | `delivery/internal/pacing` |
+| Postfix queue depth for the dashboard: Go reads the newest queue snapshot it already reads for reconciliation and records it in `delivery_heartbeats`, with the delivery state and warm-up ceiling. No web request runs a Postfix command. | migration `Version20261008000100` |
+| Submission sender ownership (`reject_sender_login_mismatch`) in every environment. The Phase 1 verification client now uses a VERP envelope sender with the same header From. | `postfix/entrypoint.sh`, `infra/tests/phase1_client.py` |
+| Production DKIM keys are generated with `openssl genpkey` (PKCS#8; OpenDKIM signing verified) inside OpenDKIM. Generation never overwrites, a new key does not sign until activated, and the active selector cannot be retired. | `opendkim/dkim-key.sh` |
+| Webhooks: a distinct connect timeout through Symfony's standard `max_connect_duration`, and a 16 KiB response-header bound checked on the first chunk (libcurl's own cap is 300 KB). Both fit the existing worker unchanged. | `WebhookDispatcher` |
+| The preflight is stdlib Python running on the host, with its own small DNS client and SPF evaluator (no macros, `ptr` not relied on) and `openssl` for certificates, so the host needs no extra packages. Host, DNS and TLS are injectable for tests. | `infra/lib/smarthost_preflight.py` |
+| Backups are pg_dump plus volume exports plus the `.env`. Restore drops and recreates the database in the existing topology. Rollback restores the pre-upgrade database, because released migrations are not reversed in place. | `smarthostctl prod backup/restore/upgrade/rollback` |
+
+### Phase 8 networking closeout (owner instruction, specification 2.9, 2026-10-06)
+
+The owner required, for production:
+- the real remote address at nginx/Symfony and at Postfix;
+- an explicit, verified host setting for the rootless binding of 25 and 443.
+
+The owner also accepted the remaining Phase 8 review items as launch decisions.
+
+| Decision | Where |
+|---|---|
+| **Rootless low ports:** the host sets `net.ipv4.ip_unprivileged_port_start=25` in `/etc/sysctl.d/60-catto-mail-ports.conf`. It is system-wide: any local user may bind 25–1023, and 1–24 stay privileged. Accepted for a dedicated single-purpose host. `prod preflight --section host` checks the running value against the configured binds and that a `sysctl.d` file persists it. `install`/`create`/`start`/`recreate`/`replace`/`upgrade` refuse to proceed and print the remediation. | runbook §1, `docs/production/README.md` §2.2 |
+| **Client addresses: socket activation.** The service user's systemd binds `PROXY_HTTPS_BIND` and `POSTFIX_SMTP_BIND` (`<instance>-ingress.socket`), and `<instance>-ingress.service` starts the persistent nginx container with them (`podman start --attach`, `LISTEN_FDS`, `NGINX=3;4;`). nginx sees every client address. HTTPS reaches Symfony as `REMOTE_ADDR`. SMTP goes to Postfix over a new internal `<instance>-ingress` network (nginx and Postfix only) with the PROXY protocol (`smtpd_upstream_proxy_protocol=haproxy` on `postfix-ingress:25`). No container publishes a port. | `infra/systemd/production/`, `infra/nginx/production/`, `postfix/entrypoint.sh`, README §2.1 |
+| Chosen on measured behaviour, on the development machine (Podman 6.0, the engine the rehearsal runs on): published ports (rootlessport) showed two loopback clients as one address (the container's own); pasta did the same for loopback-originated clients. A pasta container cannot also join a Podman network, and host networking would expose nginx to the whole host. Socket activation kept 127.0.0.7/127.0.0.9 distinct, survived an nginx crash (systemd restarts it with the same sockets) and stops cleanly. A restart by Podman alone loses the sockets, so nginx has no Podman restart policy and is started only through its unit. | README §2.1 |
+| `TRUSTED_PROXIES` is empty in production (a configuration rule). No proxy stands in front of nginx, so Symfony's client address is `REMOTE_ADDR`, and client-sent `X-Forwarded-For` is ignored. Under the earlier published-port design the client address seen by nginx lay inside the internal subnet that `TRUSTED_PROXIES` had to equal, so forwarded headers from any client would have been trusted. | renderer, environment contract |
+| The production nginx HTTPS template is derived at image build time from the development one, with only the `listen` line changed (the build fails otherwise). The development configuration renders byte-identically. | `infra/nginx/Containerfile` |
+| Proof: `smarthostctl prod ingress-check` (= `preflight --section ingress`, part of `--activation`). It connects from two random loopback sources through each bind and requires both addresses, distinct, in the nginx access log and the Postfix log. One shared address is a FAIL. Loopback sources prove the general case because no proxy process sits in the path. | `infra/lib/smarthost_preflight.py` |
+| **IPv4-only initial production.** IPv6 can be added later as a separate sending identity with its own forward DNS, PTR, SPF authorisation and reputation monitoring. | README §5 |
+| **Validator SMTP RCPT probing stays disabled.** Validation runs its other stages. Enabling it later is an explicit operator decision, because it creates outbound SMTP activity from the sending host that can affect its reputation. | README §5 |
+| **Retention stays unset:** empty means no automatic deletion, until an operational and compliance decision. No new deletion machinery. | contract, runbook §16 |
+
+### Phase 9 implementation choices (specification 2.10, 2026-10-07)
+
+Made while implementing public SaaS hardening on the repository side. They are recorded in
+specification 2.10 (`saas_operations`). The owner's instructions fixed four things:
+- extend the existing client model;
+- keep public onboarding disabled with no public route;
+- choose no billing provider;
+- take no automatic action on alerts.
+
+| Choice | Where |
+|---|---|
+| Lifecycle transitions are a fixed table with a permission per transition: approval and reactivation of a suspended client need `PLATFORM.CLIENT.APPROVE`; throttling and suspension need `PLATFORM.CLIENT.RESTRICT`. Reactivation is the stronger right because it reverses a safety decision. Nothing returns to `pending_approval`; `closed` is final. A reason is mandatory. The rule is checked before the transaction and again under the row lock. | `ClientStatusTransitions`, `ClientLifecycle` |
+| The only path that could ever create a public applicant is `ClientLifecycle::apply`, gated by `APP_PUBLIC_ONBOARDING_ENABLED` and fixed to `pending_approval`. No route calls it. | `ClientLifecycle` |
+| Policy acceptance stores versions only, never text. New clients require it. Clients created active by an operator, and every client that existed before the migration, are exempt (`policy_acceptance_required = false`), so Phase 9 changes nothing for them. | migration `Version20261009000100` |
+| Quotas are per-period counters (`client_quota_usage`), not sums over `usage_records`. A sum cannot be made concurrency-safe without locking the client, while `INSERT … ON CONFLICT DO UPDATE … RETURNING` in the admitting transaction is atomic and rolls back with it. Proven by an 8-process race. Counters measure admitted work (recipients when added); `usage_records` stays the billing truth (units for accepted messages). | `QuotaEnforcer`, `QuotaTest` |
+| A refused quota is `429 quota-exceeded`, a new problem type distinct from `rate-limited`, with `Retry-After` and a `quota` member. Clients can tell "slow down" from "wait for the next period". | OpenAPI 1.0.0-draft.8 |
+| Count limits (keys, endpoints, domains) are re-checked under `SELECT … FOR UPDATE` on the client row. Rare, so serialising them per client costs nothing. | `ApiKeyManager`, `WebhookEndpointService`, `SendingDomainService` |
+| Installation ceilings are environment variables. A client limit can only lower them; volume quotas have no ceiling. | `ClientLimitPolicy` |
+| At most one `message_submitted` unit per message (unique partial index). The Go daemon already wrote one unit per accepted message; the index makes double billing impossible. The `(client_id, occurred_at)` usage index now covers `usage_type` and `quantity`: the query-plan review measured period sums as heap-bound (831 ms for the evaluation at 1,000,000 records; 309 ms after the change, index-only). | migration, `Phase9QueryPlanTest` |
+| Billing statements freeze quantities of an ended period (draft → finalized → exported, or void). Finalizing reconciles first and refuses stale totals. There are no prices, so any billing provider can consume the export later. | `BillingStatementService` |
+| Reputation metrics are recomputed by a periodic evaluation (a production systemd timer every 15 minutes, advisory-locked), not on each page view. Each kind of event counts a message once. Rates need a minimum sample. Alerts are rows updated in place, resolved on recovery and re-opened as new rows; an escalation clears an acknowledgement. | `ReputationEvaluator`, `infra/systemd/production/reputation-evaluate.*` |
+| Production per-instance units moved from `infra/systemd/ingress/` to `infra/systemd/production/`. The machine helper installs every `<instance>-*` unit (`instance-install`). | `smarthost-machine-helper.sh` |
+| The public API documentation is served by Symfony at `/docs/api`, from the same files as the contract, without authentication or session. No documentation generator was added. | `ApiDocumentationController` |
+| Console commands that change Phase 9 state name the acting operator (`--operator`) and check the same permission keys as the dashboard. `smarthost:client:set-status` now requires `--operator` and `--note` (incompatible with Phase 8 usage; `prod client-status` passes them through). | `app/src/Command/` |
+
+### Business decisions left to the owner (Phase 9)
+
+None of these blocks the repository work; the defaults are safe.
+
+- **Plans, prices and quotas:** which limits each plan gets. The schema holds limits per client;
+  plans are only a label (`clients.plan`).
+- **Billing system:** which system consumes the usage export and statements, and how payment and
+  dunning work.
+- **Service-policy text and version:** what clients accept. `APP_ACCEPTABLE_USE_POLICY_VERSION`
+  is empty until then, so approval needs no acceptance.
+- **Thresholds:** the `APP_REPUTATION_*` defaults are conservative starting points, to be
+  calibrated on live traffic.
+- **Retention:** of usage records, statements, alerts and notes (unset like the rest; no
+  deletion).
+- **Opening public onboarding:** the criteria are in `docs/production/onboarding.md`.
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are
@@ -279,16 +363,21 @@ None of them required an architectural change.
 None. D-31 to D-34 were resolved on 2026-10-03, D-35 and D-30 on 2026-10-04, D-36 to D-38 on
 2026-10-05 (see §1).
 
-Points to confirm before production (not blocking Phase 8 planning): a CA file variable so Go can verify
-Postfix's submission certificate; an index for reconciliation candidates at production volume
-(neither the Phase 5 nor the Phase 6 query-plan review found a query that needs it); retention
-commands for the configured `APP_RETENTION_SUPPRESSIONS_DAYS` / `APP_RETENTION_UNMATCHED_DSN_DAYS` /
-`APP_RETENTION_TRACKING_DAYS` periods (empty, so no deletion, until the compliance policy sets them;
-tracking expiry is already enforced by the endpoints); whether Go should publish the Postfix queue
-depth and snapshot age to the database so the operator overview can show them; an index on
-`suppressions (created_at, id)` if the unfiltered operator suppression list grows large (a sorted
-scan, 33 ms at 20,000 rows in the Phase 6 load test); and whether
-browser-based validation upload and API-key management are wanted (console commands and the API
-cover them today; webhook endpoints are managed in the dashboard since specification 2.8). The
-production webhook settings and the webhook-delivery retention period belong to Phase 8 and the
-compliance policy.
+Points to confirm with live traffic (not blocking):
+- a CA file variable so Go can verify Postfix's submission certificate;
+- an index for reconciliation candidates at production volume (no query-plan review up to Phase
+  9 found a query that needs it);
+- an index for the per-client usage reconciliation of accepted messages, if a client's monthly
+  volume makes it slow (458 ms at 60,000 messages among 260,000 in the Phase 9 review);
+- an index on `suppressions (source_event_id)` if a future retention job deletes message events
+  (production never deletes them today);
+- retention commands for the `APP_RETENTION_*` periods (empty, so no deletion, until the
+  compliance policy sets them; tracking expiry is already enforced by the endpoints);
+- an index on `suppressions (created_at, id)` if the unfiltered operator suppression list grows
+  large (a sorted scan, 33 ms at 20,000 rows in the Phase 6 load test);
+- whether browser-based validation upload is wanted (the API covers it).
+
+Resolved since: the Postfix queue depth is in `delivery_heartbeats` (Phase 8); the production
+webhook settings are in the production profile (Phase 8); API keys are managed in both
+dashboards (Phase 9). The Phase 9 business decisions are listed in §2 (*Business decisions left
+to the owner*).

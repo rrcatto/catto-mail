@@ -12,6 +12,7 @@ COPY entrypoint.sh       /usr/local/bin/smarthost-postfix-entrypoint
 COPY healthcheck.sh      /usr/local/bin/smarthost-postfix-healthcheck
 COPY queue-snapshot.sh   /usr/local/bin/smarthost-queue-snapshot
 COPY logrotate.sh        /usr/local/bin/smarthost-postfix-logrotate
+COPY control.sh          /usr/local/bin/smarthost-postfix-control
 RUN chmod 0755 /usr/local/bin/smarthost-*
 
 EXPOSE 25 587

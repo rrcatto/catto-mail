@@ -54,6 +54,8 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 final class WebhookDispatcher
 {
     public const MAX_RESPONSE_BYTES = 65536;
+    /** Response-header bound (Phase 8): larger header blocks fail the attempt (libcurl itself caps them at 300 KB). */
+    public const MAX_RESPONSE_HEADER_BYTES = 16384;
     public const EXCERPT_CHARS = 1024;
     public const NOTIFY_CHANNEL = 'smarthost_webhook_work';
 
@@ -73,9 +75,14 @@ final class WebhookDispatcher
         #[Autowire('%app.webhook.lease_seconds%')] private readonly int $leaseSeconds,
         #[Autowire('%app.webhook.retry_base_seconds%')] private readonly int $retryBaseSeconds,
         #[Autowire('%app.webhook.retry_max_seconds%')] private readonly int $retryMaxSeconds,
+        #[Autowire('%app.webhook.connect_timeout_seconds%')] private ?int $connectTimeoutSeconds = null,
     ) {
+        $this->connectTimeoutSeconds ??= min(5, $this->timeoutSeconds);
         if ($this->leaseSeconds <= $this->timeoutSeconds) {
             throw new \InvalidArgumentException('APP_WEBHOOK_LEASE_SECONDS must exceed APP_WEBHOOK_TIMEOUT_SECONDS.');
+        }
+        if ($this->connectTimeoutSeconds < 1 || $this->connectTimeoutSeconds > $this->timeoutSeconds) {
+            throw new \InvalidArgumentException('APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS must be between 1 and APP_WEBHOOK_TIMEOUT_SECONDS.');
         }
     }
 
@@ -195,6 +202,7 @@ final class WebhookDispatcher
                 'max_redirects' => 0,
                 'timeout' => (float) $this->timeoutSeconds,
                 'max_duration' => (float) $this->timeoutSeconds,
+                'max_connect_duration' => (float) $this->connectTimeoutSeconds,
                 'buffer' => false,
                 'verify_peer' => true,
                 'verify_host' => true,
@@ -231,6 +239,13 @@ final class WebhookDispatcher
                     }
                     if ($chunk->isFirst()) {
                         $response->getStatusCode(); // acknowledges non-2xx statuses so the stream does not throw
+                        $headerBytes = array_sum(array_map('strlen', (array) $response->getInfo('response_headers')));
+                        if ($headerBytes > self::MAX_RESPONSE_HEADER_BYTES) {
+                            $response->cancel();
+                            $done[$id] = true;
+                            $this->retryOrFail($workerId, $claim, null, \sprintf('Response headers exceed %d bytes.', self::MAX_RESPONSE_HEADER_BYTES), null, null);
+                            continue;
+                        }
                     }
                     $content = $chunk->getContent();
                     $bodies[$id] = ($bodies[$id] ?? '').$content;

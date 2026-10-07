@@ -404,8 +404,15 @@ final class ClientReadModel
                                                               AND d.created_at > now() - interval '7 days') AS delivered,
                    (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_endpoint_id = e.id AND d.status = 'pending') AS pending,
                    (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_endpoint_id = e.id AND d.status = 'failed'
-                                                              AND d.created_at > now() - interval '7 days') AS failed
-              FROM webhook_endpoints e WHERE e.client_id = ? ORDER BY e.created_at
+                                                              AND d.created_at > now() - interval '7 days') AS failed,
+                   last_ok.delivered_at AS last_delivered_at,
+                   -- Phase 9: repeated failures (permanently failed deliveries since the newest successful one).
+                   (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_endpoint_id = e.id AND d.status = 'failed'
+                       AND d.created_at > COALESCE(last_ok.created_at, '-infinity')) AS failures_since_success
+              FROM webhook_endpoints e
+              LEFT JOIN LATERAL (SELECT d.created_at, d.delivered_at FROM webhook_deliveries d
+                                  WHERE d.webhook_endpoint_id = e.id AND d.status = 'delivered' ORDER BY d.created_at DESC LIMIT 1) last_ok ON true
+             WHERE e.client_id = ? ORDER BY e.created_at
             SQL, [$clientId]);
     }
 
@@ -453,13 +460,19 @@ final class ClientReadModel
     public function usage(string $clientId, ?string $type, Listing $listing, int $months = 12): array
     {
         $monthsRows = $this->connection->fetchAllAssociative(<<<'SQL'
-            SELECT to_char(date_trunc('month', occurred_at), 'YYYY-MM') AS month,
-                   sum(quantity) FILTER (WHERE usage_type = 'validation_address') AS validation_addresses,
-                   sum(quantity) FILTER (WHERE usage_type = 'message_submitted') AS messages_submitted
-              FROM usage_records
-             WHERE client_id = ? AND occurred_at >= date_trunc('month', now()) - make_interval(months => ?)
-             GROUP BY 1 ORDER BY 1 DESC
-            SQL, [$clientId, $months - 1]);
+            -- One index-only range sum per month (usage_records_client_occurred_idx covers the
+            -- columns), so no sort of the client's records (Phase 9 query-plan review).
+            SELECT to_char(m, 'YYYY-MM') AS month, u.validation_addresses, u.messages_submitted
+              FROM generate_series(date_trunc('month', now()) - make_interval(months => ?), date_trunc('month', now()), interval '1 month') AS m
+              CROSS JOIN LATERAL (
+                SELECT count(*) AS records,
+                       sum(quantity) FILTER (WHERE usage_type = 'validation_address') AS validation_addresses,
+                       sum(quantity) FILTER (WHERE usage_type = 'message_submitted') AS messages_submitted
+                  FROM usage_records WHERE client_id = ? AND occurred_at >= m AND occurred_at < m + interval '1 month'
+              ) u
+             WHERE u.records > 0
+             ORDER BY m DESC
+            SQL, [$months - 1, $clientId]);
         $where = ['u.client_id = ?'];
         $params = [$clientId];
         self::filterEquals($where, $params, 'u.usage_type', $type);

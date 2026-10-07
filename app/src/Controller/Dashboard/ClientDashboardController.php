@@ -41,6 +41,7 @@ final class ClientDashboardController extends AbstractController
     public function __construct(
         private readonly ClientAccess $access,
         private readonly ClientReadModel $read,
+        private readonly \App\Dashboard\ClientAccountReadModel $account,
     ) {
     }
 
@@ -49,7 +50,9 @@ final class ClientDashboardController extends AbstractController
     {
         $client = $this->access->client($clientId);
 
-        return $this->page('client/overview.html.twig', $client, 'overview', ['o' => $this->read->overview($clientId)]);
+        return $this->page('client/overview.html.twig', $client, 'overview', ['o' => $this->read->overview($clientId),
+            'limits' => $this->account->limits($client), 'policy' => $this->account->policy($client),
+            'may_admin' => $this->access->may(ClientVoter::ADMIN, $client)]);
     }
 
     #[Route('/validation-jobs', name: 'dashboard_client_validation_jobs', methods: ['GET'])]
@@ -208,15 +211,27 @@ final class ClientDashboardController extends AbstractController
     }
 
     #[Route('/usage', name: 'dashboard_client_usage', methods: ['GET'])]
-    public function usage(string $clientId, Request $request): Response
+    public function usage(string $clientId, Request $request, \App\Usage\UsageReporting $reporting): Response
     {
         $client = $this->access->client($clientId);
         $filters = self::filters($request, ['type']);
         $listing = Listing::fromRequest($request, array_keys(ClientReadModel::USAGE_SORTS), 'occurred');
 
+        $custom = null;
+        if ('' !== $request->query->getString('from') || '' !== $request->query->getString('to')) {
+            try {
+                $period = \App\Usage\UsagePeriod::custom($request->query->getString('from'), $request->query->getString('to'));
+                $custom = ['period' => $period, 'totals' => $reporting->clientTotals($clientId, $period), 'daily' => $reporting->daily($clientId, $period)];
+            } catch (\App\Domain\DomainRuleViolation $e) {
+                $this->addFlash('error', $e->getMessage());
+            }
+        }
+
         return $this->page('client/usage.html.twig', $client, 'usage', [
             'usage' => $this->read->usage($clientId, '' === ($filters['type'] ?? '') ? null : $filters['type'], $listing),
-            'filters' => $filters, 'listing' => $listing]);
+            'filters' => $filters, 'listing' => $listing, 'periods' => $this->account->usagePeriods($clientId), 'custom' => $custom,
+            'range' => ['from' => $request->query->getString('from'), 'to' => $request->query->getString('to')],
+            'statements' => $this->account->statements($clientId, false), 'limits' => $this->account->limits($client)]);
     }
 
     /** @param array<string, mixed> $vars */

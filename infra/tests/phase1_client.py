@@ -6,7 +6,7 @@ and exits 0 when the observed behaviour matches the expectation the caller
 asks about (the shell suite decides PASS/FAIL from the JSON).
 
 Commands:
-  submit <subject> <from> <to>          authenticated submission on postfix:587 (STARTTLS);
+  submit <subject> <from> <to> [env]    authenticated submission on postfix:587 (STARTTLS);
                                         reports the final reply incl. the Postfix queue id
   inbound <rcpt> <tag>                  plain SMTP to postfix:25 with a synthetic DSN body
   mailpit-find <subject>                look the message up through the Mailpit API
@@ -36,7 +36,7 @@ def out(**kw: object) -> None:
     print(json.dumps(kw), flush=True)
 
 
-def submit(subject: str, sender: str, rcpt: str) -> None:
+def submit(subject: str, sender: str, rcpt: str, envelope: str = "") -> None:
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = sender, rcpt, subject
     msg["Message-ID"] = f"<{subject}@phase1.test>"
@@ -51,7 +51,9 @@ def submit(subject: str, sender: str, rcpt: str) -> None:
             stage = "auth"
             s.login(os.environ["SMARTHOST_SUBMISSION_USERNAME"], os.environ["SMARTHOST_SUBMISSION_PASSWORD"])
             stage = "mail"
-            code, reply = s.mail(sender)
+            # The delivery account may only use its VERP return paths as envelope
+            # sender (smtpd_sender_login_maps, specification 2.9); From stays `sender`.
+            code, reply = s.mail(envelope or sender)
             if code >= 400:
                 return out(result="rejected", stage=stage, code=code, reply=reply.decode(errors="replace"))
             stage = "rcpt"

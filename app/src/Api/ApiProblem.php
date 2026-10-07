@@ -14,6 +14,7 @@ final class ApiProblem extends \RuntimeException
     /**
      * @param list<array{pointer: string, message: string}> $errors
      * @param array<string, string>                         $headers
+     * @param array<string, mixed>                          $extensions additional problem members (OpenAPI Problem), e.g. `quota`
      */
     public function __construct(
         public readonly int $status,
@@ -22,6 +23,7 @@ final class ApiProblem extends \RuntimeException
         public readonly ?string $detail = null,
         public readonly array $errors = [],
         public readonly array $headers = [],
+        public readonly array $extensions = [],
     ) {
         parent::__construct($detail ?? $title);
     }
@@ -84,6 +86,22 @@ final class ApiProblem extends \RuntimeException
     {
         return new self(429, 'rate-limited', 'Too many requests', 'Rate limit exceeded.',
             headers: ['Retry-After' => (string) max(0, $retryAfterSeconds)]);
+    }
+
+    /**
+     * Phase 9: the client's quota for a period is used up (App\Client\QuotaEnforcer). The
+     * work was not admitted; Retry-After is the time until the period resets. Only the
+     * client's own limit and usage are disclosed, never installation-wide figures.
+     *
+     * @param array{metric: string, period: string, limit: int, used: int, requested: int, resets_at: string} $quota
+     */
+    public static function quotaExceeded(array $quota, int $retryAfterSeconds): self
+    {
+        return new self(429, 'quota-exceeded', 'Quota exceeded', \sprintf(
+            'This request would exceed the client\'s %s %s quota of %d (%d used, %d requested); it resets at %s.',
+            $quota['period'] === 'day' ? 'daily' : 'monthly', str_replace('_', ' ', $quota['metric']), $quota['limit'],
+            $quota['used'], $quota['requested'], $quota['resets_at']),
+            headers: ['Retry-After' => (string) max(1, $retryAfterSeconds)], extensions: ['quota' => $quota]);
     }
 
     public static function notImplemented(string $detail): self

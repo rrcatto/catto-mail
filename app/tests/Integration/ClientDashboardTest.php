@@ -82,7 +82,8 @@ final class ClientDashboardTest extends DashboardTestCase
         self::assertStringContainsString('Verified', $domains->filter('tbody')->text());
         $usage = $this->crawler("$base/usage");
         self::assertStringContainsString('Validation addresses', $usage->text());
-        self::assertSame(2, $usage->filter('table')->eq(1)->filter('tbody tr')->count());
+        self::assertSame(2, $usage->filter('table#usage-records tbody tr')->count());
+        self::assertSame(1, $usage->filter('table#usage-months tbody tr')->count(), 'both records are in the current month');
         self::assertSame(200, $this->page("$base/suppressions")->getStatusCode());
     }
 

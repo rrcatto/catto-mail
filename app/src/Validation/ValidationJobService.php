@@ -7,8 +7,10 @@ namespace App\Validation;
 use App\Api\ApiProblem;
 use App\Api\IdempotencyKey;
 use App\Api\WorkPermission;
+use App\Client\QuotaEnforcer;
 use App\Entity\Client;
 use App\Entity\ValidationJob;
+use App\Enum\QuotaMetric;
 use App\Idempotency\IdempotencyLock;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -20,6 +22,8 @@ use Symfony\Component\Uid\Uuid;
  * address, in submission order (ids are monotonic UUIDv7), and wakes the Python
  * validator with NOTIFY (delivered at commit; the validator also polls). Nothing
  * here validates an address or meters usage (D-33: the validator meters on completion).
+ * Phase 9: the job and its addresses are admitted against the client's quotas in the
+ * same transaction (App\Client\QuotaEnforcer); an idempotent replay admits nothing.
  */
 final class ValidationJobService
 {
@@ -31,6 +35,7 @@ final class ValidationJobService
         private readonly EntityManagerInterface $em,
         private readonly Connection $connection,
         private readonly IdempotencyLock $lock,
+        private readonly QuotaEnforcer $quotas,
     ) {
     }
 
@@ -53,6 +58,8 @@ final class ValidationJobService
                 return hash_equals($existing->getRequestHash(), $requestHash) ? [$existing, true] : throw ApiProblem::idempotencyKeyReused();
             }
 
+            $this->quotas->admit($client, QuotaMetric::ValidationJobs, 1);
+            $this->quotas->admit($client, QuotaMetric::ValidationAddresses, \count($data['addresses']));
             $job = new ValidationJob($client, $key->value, $requestHash, \count($data['addresses']), $data['external_reference'] ?? null);
             $this->em->persist($job);
             $this->em->flush();

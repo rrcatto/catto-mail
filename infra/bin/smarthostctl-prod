@@ -1,0 +1,440 @@
+#!/usr/bin/env bash
+# smarthostctl prod — catto-mail PRODUCTION operations (Phase 8, specification 2.9).
+#
+# Invoked as `infra/bin/smarthostctl prod <command>`. Every command requires
+# SMARTHOST_ENV=production in the configuration; the development commands of
+# smarthostctl refuse it, so the two cannot be mixed up. The topology is the
+# rendered infra/.generated/podman/smarthost-production.sh (persistent containers on
+# internal, ingress and egress networks; docs/production/README.md). nginx runs under
+# the socket-activated <instance>-ingress.socket/.service, which keeps client
+# addresses. Runbook: docs/production/runbook.md.
+#
+# Tool locations (not service configuration, so not in the .env): SMARTHOST_DOTENV
+# (default infra/.env) and SMARTHOST_GENERATED (default infra/.generated) select
+# another configuration, e.g. for the local production rehearsal.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export SMARTHOST_DOTENV="${SMARTHOST_DOTENV:-$REPO/infra/.env}"
+export SMARTHOST_GENERATED="${SMARTHOST_GENERATED:-$REPO/infra/.generated}"
+DOTENV="$SMARTHOST_DOTENV"
+GEN="$SMARTHOST_GENERATED"
+RENDER=(python3 "$REPO/infra/lib/smarthost_render.py")
+PREFLIGHT=(python3 "$REPO/infra/lib/smarthost_preflight.py")
+SEEDTEST=(python3 "$REPO/infra/lib/smarthost_seedtest.py")
+TOPO="$GEN/podman/smarthost-production.sh"
+HELPER="$REPO/infra/bin/smarthost-machine-helper.sh"
+# image name | build context | Containerfile | target (no Mailpit/fake SMTP in production)
+IMAGES=(
+  "postfix|postfix||"
+  "opendkim|opendkim||"
+  "app|.|app/Containerfile|runtime"
+  "nginx|infra/nginx||"
+  "validator|.|validator/Containerfile|runtime"
+  "delivery|.|delivery/Containerfile|runtime"
+)
+SERVICES=(postgres opendkim postfix symfony-app webhook-worker nginx validator delivery)
+
+die() { echo "smarthostctl prod: $*" >&2; exit 1; }
+say() { echo "smarthostctl prod: $*"; }
+envval() { [[ -f "$DOTENV" ]] || die "$DOTENV missing (smarthostctl prod init-env)"; grep -E "^$1=" "$DOTENV" | head -n1 | cut -d= -f2-; }
+I() { envval SMARTHOST_INSTANCE; }
+require_production() {
+  [[ "$(envval SMARTHOST_ENV)" == production ]] || die "$DOTENV is not a production configuration (SMARTHOST_ENV=$(envval SMARTHOST_ENV)); use the development commands of smarthostctl"
+}
+render() { "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" >/dev/null; }
+topo() { [[ -x "$TOPO" ]] || render; "$TOPO" "$@"; }
+default_instance() { [[ "$(I)" == smarthost && "$GEN" == "$REPO/infra/.generated" ]]; }
+local_engine() { [[ "$(podman info --format '{{.Host.ServiceIsRemote}}')" != true ]]; }
+units_installed() { default_instance && local_engine && [[ -e "$HOME/.local/share/systemd/user/smarthost.service" ]]; }
+
+# Run the machine helper in the Podman engine host's systemd namespace: directly on
+# the production host, or inside the WSL Podman machine (the local rehearsal), as
+# smarthostctl does for the development pod.
+machine() {
+  if local_engine; then "$HELPER" "$@"; return; fi
+  local wsl=/mnt/c/Windows/System32/wsl.exe uri name user
+  [[ -x "$wsl" ]] || die "remote Podman engine is not a WSL Podman machine; run smarthostctl prod on the engine host"
+  uri="$(podman system connection list --format '{{if .Default}}{{.URI}}{{end}}' | grep -v '^$' | head -n1)"
+  name="$(sed -E 's#.*/podman-sockets/([^/]+)/.*#\1#' <<<"$uri")"
+  user="$(podman info --format '{{.Store.GraphRoot}}' | sed -E 's#^/home/([^/]+)/.*#\1#')"
+  "$wsl" -d "$name" -u "$user" --cd / -- /usr/local/bin/enterns "$HELPER" "$@"
+}
+# The topology script starts nginx through systemd (the ingress units); on a remote
+# engine it reaches the engine host's systemd through this command (tool location).
+if [[ "${1:-}" != machine ]] && ! local_engine 2>/dev/null; then export SMARTHOST_HOSTCTL="$REPO/infra/bin/smarthostctl-prod"; fi
+
+# Host bootstrap prerequisites (runbook §1), checked before containers are created
+# or started: rootless binding of the ingress ports, lingering, Podman.
+host_gate() {
+  "${PREFLIGHT[@]}" --section host --quiet \
+    || die "the host prerequisites above are not met (runbook §1); nothing was created or started"
+}
+console() { podman exec -i -u www-data "$(I)-symfony-app" php bin/console "$@"; }
+psql_admin() { podman exec -i "$(I)-postgres" psql -X -v ON_ERROR_STOP=1 -U "$(envval POSTGRES_USER)" -d "$(envval SMARTHOST_DB_NAME)" "$@"; }
+
+# Set KEY=VALUE in the .env in place (keeps its mode and every other line).
+set_env() {
+  local key="$1" value="$2"
+  grep -qE "^$key=" "$DOTENV" || die "$key is not in $DOTENV"
+  python3 - "$DOTENV" "$key" "$value" <<'PY'
+import re, sys
+path, key, value = sys.argv[1:]
+text = open(path, encoding="utf-8").read()
+text = re.sub(rf"^{re.escape(key)}=.*$", lambda m: f"{key}={value}", text, count=1, flags=re.M)
+open(path, "w", encoding="utf-8").write(text)
+PY
+}
+
+# The operator (--operator EMAIL --note TEXT) is audited before any installation-wide control.
+parse_operator() {
+  OPERATOR=""; NOTE=""
+  while (($#)); do
+    case "$1" in
+      --operator) OPERATOR="${2:-}"; shift 2 ;;
+      --note) NOTE="${2:-}"; shift 2 ;;
+      *) die "unexpected argument $1 (expected --operator EMAIL --note TEXT)" ;;
+    esac
+  done
+  [[ -n "$OPERATOR" && -n "$NOTE" ]] || die "--operator <login email with SYSTEM.DELIVERY.CONTROL> and --note <why> are required"
+}
+audit() { console smarthost:ops:record "$1" --operator "$OPERATOR" --note "$NOTE" || die "not audited; nothing was changed"; }
+
+# ------------------------------------------------------------------- lifecycle
+cmd_build() {
+  local tag name ctx file target args
+  tag="$(envval SMARTHOST_IMAGE_TAG)"
+  [[ -n "$tag" ]] || die "SMARTHOST_IMAGE_TAG is empty"
+  for entry in "${IMAGES[@]}"; do
+    IFS='|' read -r name ctx file target <<<"$entry"
+    args=(-q -t "localhost/smarthost-$name:$tag" --label "org.catto-mail.version=$tag")
+    [[ -n "$file" ]] && args+=(-f "$REPO/$file")
+    [[ -n "$target" ]] && args+=(--target "$target")
+    podman build "${args[@]}" "$REPO/$ctx" >/dev/null && echo "built localhost/smarthost-$name:$tag"
+  done
+}
+
+# Live delivery may only be (re)created after the activation preflight passes.
+activation_gate() {
+  if [[ "$(envval SMARTHOST_LIVE_DELIVERY_ENABLED)" == true ]]; then
+    "${PREFLIGHT[@]}" --activation --quiet || die "the activation preflight failed: live delivery is not (re)created (fix the FAIL items, or set SMARTHOST_LIVE_DELIVERY_ENABLED=false)"
+  fi
+}
+
+cmd_install() {
+  require_production
+  "${RENDER[@]}" check --env "$DOTENV"
+  render
+  host_gate
+  if default_instance; then
+    local_engine || die "production units are installed on the Linux production host (this Podman engine is remote)"
+    "$HELPER" install
+    loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes' \
+      || echo "smarthostctl prod: WARNING: lingering is off; run 'sudo loginctl enable-linger $(id -un)' so the services start at boot"
+  else
+    machine instance-install "$GEN" "$(I)"
+    say "instance $(I): only its own units (ingress, reputation timer) are installed (smarthost.service and the Postfix timers belong to the default instance 'smarthost')"
+  fi
+  if topo exists; then say "production containers exist (kept; use 'recreate' to replace them)"; else activation_gate; topo create; fi
+}
+
+cmd_start() {
+  host_gate
+  if units_installed && [[ "$(systemctl --user is-active smarthost.service 2>/dev/null || true)" != active ]]; then
+    systemctl --user start smarthost.service || { journalctl --user -u smarthost.service -n 40 --no-pager >&2; die "start failed"; }
+    journalctl --user -u smarthost.service -n 6 -o cat --no-pager | grep 'smarthost-production:' | tail -n 3 || true
+  else
+    topo start
+  fi
+}
+
+cmd_stop() {
+  if units_installed; then systemctl --user stop smarthost.service smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer 2>/dev/null || true; fi
+  topo stop
+}
+
+cmd_status() {
+  local i; i="$(I)"
+  if units_installed; then echo "smarthost.service: $(systemctl --user is-active smarthost.service 2>/dev/null || true)"; fi
+  echo "instance $i, images :$(envval SMARTHOST_IMAGE_TAG), live delivery $(envval SMARTHOST_LIVE_DELIVERY_ENABLED)"
+  echo "ingress: $i-ingress.socket $(machine systemctl is-active "$i-ingress.socket" 2>/dev/null || true)" \
+       "($(machine systemctl show -p Listen --value "$i-ingress.socket" 2>/dev/null | tr '\n' ' ')), nginx under $i-ingress.service $(machine systemctl is-active "$i-ingress.service" 2>/dev/null || true)"
+  podman ps -a --filter "label=smarthost.instance=$i" --filter label=smarthost.topology=production \
+    --format '{{.Names}}\t{{.ID}}\t{{.Status}}\t{{.Ports}}' | sort
+  if [[ "$(podman container inspect --format '{{.State.Running}}' "$i-postfix" 2>/dev/null)" == true ]]; then
+    podman exec "$i-postfix" smarthost-postfix-control status | head -n 1
+  fi
+}
+
+cmd_recreate() {
+  require_production
+  "${RENDER[@]}" check --env "$DOTENV"
+  render
+  host_gate
+  activation_gate
+  cmd_stop
+  topo remove
+  topo create
+  cmd_start
+  cmd_status
+}
+
+# -------------------------------------------------------------------------- TLS
+# Production certificates come from the operator (any CA or ACME client); they
+# become Podman secrets mounted only into nginx and Postfix.
+cmd_tls() {
+  local i; i="$(I)"
+  case "${1:-}" in
+    set)
+      (($# == 5)) || die "usage: tls set <proxy-cert.pem> <proxy-key.pem> <postfix-cert.pem> <postfix-key.pem>"
+      local pc="$2" pk="$3" fc="$4" fk="$5" f
+      for f in "$pc" "$pk" "$fc" "$fk"; do [[ -r "$f" ]] || die "cannot read $f"; done
+      [[ "$(openssl x509 -in "$pc" -noout -pubkey)" == "$(openssl pkey -in "$pk" -pubout)" ]] || die "$pc does not match $pk"
+      [[ "$(openssl x509 -in "$fc" -noout -pubkey)" == "$(openssl pkey -in "$fk" -pubout)" ]] || die "$fc does not match $fk"
+      for s in "proxy-tls-cert:$pc" "proxy-tls-key:$pk" "postfix-tls-cert:$fc" "postfix-tls-key:$fk"; do
+        podman secret rm "$i-${s%%:*}" >/dev/null 2>&1 || true
+        podman secret create --label project=smarthost "$i-${s%%:*}" "${s#*:}" >/dev/null && echo "secret $i-${s%%:*}"
+      done
+      if topo exists; then topo replace nginx postfix; fi ;;
+    self-signed)
+      [[ "$(envval SMARTHOST_EGRESS_ENABLED)" == false ]] || die "self-signed certificates are only for a rehearsal (SMARTHOST_EGRESS_ENABLED=false)"
+      local dir="$GEN/tls"; mkdir -p "$dir"; chmod 700 "$dir"
+      local pf proxy; pf="$(envval POSTFIX_MYHOSTNAME)"; proxy="$(envval PROXY_SERVER_NAME)"
+      openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=$pf" -addext "subjectAltName=DNS:$pf" \
+        -keyout "$dir/postfix.key" -out "$dir/postfix.crt" 2>/dev/null
+      openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=$proxy" -addext "subjectAltName=DNS:$proxy" \
+        -keyout "$dir/proxy.key" -out "$dir/proxy.crt" 2>/dev/null
+      cmd_tls set "$dir/proxy.crt" "$dir/proxy.key" "$dir/postfix.crt" "$dir/postfix.key" ;;
+    *) die "usage: tls set <proxy-cert> <proxy-key> <postfix-cert> <postfix-key> | tls self-signed (rehearsal only)" ;;
+  esac
+}
+
+# ------------------------------------------------------------------------- DKIM
+cmd_dkim() {
+  local i; i="$(I)"
+  (($#)) || die "usage: dkim generate|activate|retire|dns|pubkey|list ..."
+  podman exec "$i-opendkim" smarthost-dkim-key "$@"
+  case "$1" in
+    activate|retire)
+      podman restart --time 10 "$i-opendkim" >/dev/null && say "OpenDKIM restarted with the new tables"
+      [[ "$1" == activate ]] && say "record it for the sending domain: smarthostctl prod console smarthost:domain:dkim <client-id> $2 active --selector $3"
+      ;;
+  esac
+}
+
+# --------------------------------------------------------- live delivery and pause
+cmd_live() {
+  local want="$1"; shift
+  parse_operator "$@"
+  require_production
+  [[ "$(envval SMARTHOST_LIVE_DELIVERY_ENABLED)" != "$want" ]] || die "SMARTHOST_LIVE_DELIVERY_ENABLED is already $want"
+  if [[ "$want" == true ]]; then
+    "${PREFLIGHT[@]}" --activation || die "the activation preflight failed: live delivery stays disabled (fix every FAIL above)"
+    audit delivery.live_enabled
+  else
+    audit delivery.live_disabled
+  fi
+  set_env SMARTHOST_LIVE_DELIVERY_ENABLED "$want"
+  "${RENDER[@]}" check --env "$DOTENV" >/dev/null || { set_env SMARTHOST_LIVE_DELIVERY_ENABLED "$([[ $want == true ]] && echo false || echo true)"; die "configuration check failed; reverted"; }
+  render
+  topo replace postfix delivery
+  say "SMARTHOST_LIVE_DELIVERY_ENABLED=$want: Postfix and the delivery daemon were recreated"
+}
+
+cmd_pause() {
+  local action="$1"; shift
+  parse_operator "$@"
+  require_production
+  if [[ "$action" == pause ]]; then
+    audit delivery.outbound_paused
+    podman exec "$(I)-postfix" smarthost-postfix-control pause "$NOTE ($OPERATOR)"
+  else
+    audit delivery.outbound_resumed
+    podman exec "$(I)-postfix" smarthost-postfix-control resume
+  fi
+}
+
+# --------------------------------------------------------------- backup/restore
+cmd_backup() {
+  require_production
+  local i dir with_queue=false; i="$(I)"
+  dir="$GEN/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+  while (($#)); do
+    case "$1" in --with-queue) with_queue=true; shift ;; *) dir="$1"; shift ;; esac
+  done
+  [[ ! -e "$dir" ]] || die "$dir exists"
+  mkdir -p "$dir"; chmod 700 "$dir"
+  local db; db="$(envval SMARTHOST_DB_NAME)"
+  podman exec "$i-postgres" pg_dump -U "$(envval POSTGRES_USER)" -d "$db" -Fc > "$dir/db.dump"
+  podman volume export "$i-opendkim-keys" -o "$dir/opendkim-keys.tar"
+  podman volume export "$i-opendkim-tables" -o "$dir/opendkim-tables.tar"
+  install -m 600 "$DOTENV" "$dir/env"
+  local s tls_note="included"
+  for s in proxy-tls-cert proxy-tls-key postfix-tls-cert postfix-tls-key; do
+    if ! podman secret inspect --showsecret --format '{{.SecretData}}' "$i-$s" > "$dir/$s.pem" 2>/dev/null; then
+      rm -f "$dir/$s.pem"; tls_note="not exported by this Podman version: keep the certificate source files (CA/ACME) safe"
+    fi
+  done
+  if [[ "$with_queue" == true ]]; then
+    podman volume export "$i-postfix-queue" -o "$dir/postfix-queue.tar"
+    podman volume export "$i-dsn-spool" -o "$dir/dsn-spool.tar"
+  fi
+  chmod 600 "$dir"/*
+  {
+    echo "catto-mail production backup"
+    echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "instance: $i"
+    echo "image tag: $(envval SMARTHOST_IMAGE_TAG)"
+    echo "live delivery: $(envval SMARTHOST_LIVE_DELIVERY_ENABLED)"
+    echo "tls secrets: $tls_note"
+    echo "postfix queue and dsn spool: $([[ $with_queue == true ]] && echo included || echo 'not included (transient; see the runbook)')"
+    echo "migrations:"; psql_admin -At -c "SELECT version FROM doctrine_migration_versions ORDER BY version" | sed 's/^/  /'
+    echo "sha256:"; (cd "$dir" && sha256sum ./* | grep -v ' ./MANIFEST' | sed 's/^/  /')
+  } > "$dir/MANIFEST"
+  chmod 600 "$dir/MANIFEST"
+  say "backup written to $dir (contains secrets: encrypt it and copy it off the host)"
+}
+
+cmd_restore() {
+  require_production
+  local dir="${1:-}" yes="${2:-}" i; i="$(I)"
+  [[ -n "$dir" && -f "$dir/db.dump" && -f "$dir/MANIFEST" ]] || die "usage: restore <backup-dir> --yes (a directory written by 'backup')"
+  [[ "$yes" == --yes ]] || die "restore replaces the database and the DKIM keys: add --yes"
+  topo exists || die "create the topology first (prod install), then restore into it"
+  (cd "$dir" && sed -n 's/^  \([0-9a-f]\{64\}\)  /\1  /p' MANIFEST | sha256sum -c --quiet) || die "checksum mismatch in $dir"
+  cmd_stop
+  podman start "$i-postgres" >/dev/null
+  local user db; user="$(envval POSTGRES_USER)"; db="$(envval SMARTHOST_DB_NAME)"
+  for _ in $(seq 1 60); do podman exec "$i-postgres" pg_isready -q -U "$user" -d postgres && break; sleep 1; done
+  podman exec "$i-postgres" dropdb -U "$user" --if-exists --force "$db"
+  podman exec "$i-postgres" createdb -U "$user" "$db"
+  podman exec -i "$i-postgres" pg_restore -U "$user" -d "$db" --exit-on-error < "$dir/db.dump"
+  podman volume import "$i-opendkim-keys" "$dir/opendkim-keys.tar"
+  podman volume import "$i-opendkim-tables" "$dir/opendkim-tables.tar"
+  if [[ -f "$dir/postfix-queue.tar" ]]; then podman volume import "$i-postfix-queue" "$dir/postfix-queue.tar"; fi
+  if [[ -f "$dir/dsn-spool.tar" ]]; then podman volume import "$i-dsn-spool" "$dir/dsn-spool.tar"; fi
+  cmp -s "$dir/env" "$DOTENV" || echo "smarthostctl prod: NOTE: $DOTENV differs from the backup's env (secrets, keyring): restore it deliberately if this is a new host"
+  cmd_start
+  say "restored from $dir"
+}
+
+# --------------------------------------------------------------- upgrade/rollback
+cmd_upgrade() {
+  require_production
+  local tag="${1:-}" backup=true old; old="$(envval SMARTHOST_IMAGE_TAG)"
+  [[ -n "$tag" ]] || die "usage: upgrade <new-image-tag> [--no-backup] (check out the new release first)"
+  [[ "${2:-}" == --no-backup ]] && backup=false
+  [[ "$tag" != "$old" ]] || die "already on $tag"
+  "${PREFLIGHT[@]}" --section runtime --quiet || die "the runtime preflight failed; fix it before upgrading"
+  [[ "$backup" == true ]] && cmd_backup
+  set_env SMARTHOST_IMAGE_TAG "$tag"
+  cmd_build
+  cmd_recreate   # start runs the new migrations, then the grants
+  "${PREFLIGHT[@]}" --section runtime || die "upgraded to $tag but the runtime preflight fails; see the runbook (rollback)"
+  say "upgraded $old -> $tag"
+}
+
+cmd_rollback() {
+  require_production
+  local tag="${1:-}" dir="${2:-}" i; i="$(I)"
+  [[ -n "$tag" && -n "$dir" ]] || die "usage: rollback <previous-image-tag> <backup-dir taken before the upgrade> (released migrations are not reversed in place)"
+  for s in opendkim postfix app nginx validator delivery; do podman image exists "localhost/smarthost-$s:$tag" || die "image localhost/smarthost-$s:$tag is gone; check out that release and run 'prod build' with SMARTHOST_IMAGE_TAG=$tag"; done
+  set_env SMARTHOST_IMAGE_TAG "$tag"
+  render
+  cmd_stop
+  topo remove
+  topo create
+  cmd_restore "$dir" --yes
+  say "rolled back to $tag with the database of $dir"
+}
+
+usage() {
+  cat <<USAGE
+usage: smarthostctl prod <command>     (catto-mail production; runbook: docs/production/runbook.md)
+ configuration
+  init-env              create infra/.env from infra/production.env.example with secrets generated here
+  check                 validate infra/.env against the contract and the production safety rules
+  render                check, then render env files, the production topology and the systemd units
+ install and lifecycle
+  build                 build the production images, tagged SMARTHOST_IMAGE_TAG
+  tls set <proxy-crt> <proxy-key> <postfix-crt> <postfix-key>   install/renew the TLS certificates
+  tls self-signed       disposable certificates for a rehearsal (SMARTHOST_EGRESS_ENABLED=false only)
+  install               render, install the systemd units (start at boot), create the containers
+  start | stop | restart | status
+  recreate              replace the containers from the current images/configuration (volumes kept)
+  replace <svc...>      replace single containers (${SERVICES[*]})
+  migrate               run the Doctrine migrations and the grants
+  logs <svc> [n]        container log
+  console <args...>     Symfony console in the application container
+ checks
+  preflight [--activation] [--section S] [--json] [--smtp-egress-probe DOMAIN]
+                        PASS/WARN/FAIL for host, runtime, exposure, ingress, TLS, DNS identity, DKIM,
+                        Postfix, delivery
+  ingress-check         prove on this host that nginx and Postfix see each client's own address
+                        (two loopback source addresses through 443 and 25; = preflight --section ingress)
+  dns-checklist         the DNS records to create (A, PTR, MX, SPF, DKIM, DMARC) for this configuration
+  firewall              an nftables ruleset for the host (review, then apply with sudo)
+ mail identity
+  dkim generate <domain> <selector> [bits] | activate <domain> <selector> | retire <domain> <selector>
+       | dns <domain> [selector] | list      production DKIM keys (OpenDKIM only)
+ delivery controls (audited: --operator EMAIL --note TEXT, permission SYSTEM.DELIVERY.CONTROL)
+  live-enable           activation preflight, then live delivery (Postfix and the delivery daemon recreated)
+  live-disable          back to held mode
+  pause | resume        emergency stop / resume of ALL outbound mail (Postfix queue held; daemon stops submitting)
+  pause-status          pause flag, transports and Postfix queue depth
+  client-status <client-id> <status> --operator <email> --note <reason>
+                        audited client lifecycle change (approve, throttle, suspend, reactivate, close)
+  ops-status [--json]   backlogs, delivery state, queue, rates, suppressions, DSNs, webhooks
+  queue                 the Postfix queue (postqueue -p)
+ backup and upgrade
+  backup [dir] [--with-queue]    database, DKIM keys and tables, configuration and TLS secrets
+  restore <dir> --yes            restore a backup into the existing topology
+  upgrade <tag> [--no-backup]    backup, build <tag>, recreate (migrations, grants), verify
+  rollback <tag> <backup-dir>    previous images plus the database taken before the upgrade
+ seed testing (operator-chosen addresses only)
+  seed-test send|status ...      see: smarthostctl prod seed-test --help
+USAGE
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  init-env) "${RENDER[@]}" init-env --production ;;
+  check) "${RENDER[@]}" check --env "$DOTENV" ;;
+  render) require_production; "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" ;;
+  build) require_production; cmd_build ;;
+  tls) require_production; cmd_tls "$@" ;;
+  install) cmd_install ;;
+  create) require_production; render; host_gate; activation_gate; topo create ;;
+  start) require_production; cmd_start ;;
+  stop) require_production; cmd_stop ;;
+  restart) require_production; cmd_stop; cmd_start ;;
+  status) require_production; cmd_status ;;
+  recreate) cmd_recreate ;;
+  replace) require_production; render; host_gate; topo replace "$@" ;;
+  remove) require_production; cmd_stop; topo remove ;;
+  migrate) require_production; topo tasks db-migrate db-grants ;;
+  logs) require_production; podman logs --tail "${2:-100}" "$(I)-${1:?service}" ;;
+  console) require_production; console "$@" ;;
+  preflight) require_production; exec "${PREFLIGHT[@]}" "$@" ;;
+  ingress-check) require_production; exec "${PREFLIGHT[@]}" --section ingress "$@" ;;
+  dns-checklist) require_production; exec "${PREFLIGHT[@]}" --checklist ;;
+  firewall) require_production; exec "${PREFLIGHT[@]}" --firewall ;;
+  dkim) require_production; cmd_dkim "$@" ;;
+  live-enable) cmd_live true "$@" ;;
+  live-disable) cmd_live false "$@" ;;
+  pause) cmd_pause pause "$@" ;;
+  resume) cmd_pause resume "$@" ;;
+  pause-status) require_production; podman exec "$(I)-postfix" smarthost-postfix-control status ;;
+  client-status) require_production; console smarthost:client:set-status "${1:?client-id}" "${2:?status}" "${@:3}" ;;
+  ops-status) require_production; console smarthost:ops:status "$@" ;;
+  queue) require_production; podman exec "$(I)-postfix" postqueue -p | tail -n "${1:-60}" ;;
+  backup) cmd_backup "$@" ;;
+  restore) cmd_restore "$@" ;;
+  upgrade) cmd_upgrade "$@" ;;
+  rollback) cmd_rollback "$@" ;;
+  seed-test) require_production; exec "${SEEDTEST[@]}" "$@" ;;
+  uninstall) require_production; if default_instance; then "$HELPER" uninstall; else machine instance-uninstall "$(I)"; fi ;;
+  machine) machine "$@" ;;   # internal: systemd commands in the engine host (SMARTHOST_HOSTCTL)
+  ""|help|-h|--help) usage ;;
+  *) usage; exit 64 ;;
+esac

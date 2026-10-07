@@ -1,0 +1,16 @@
+# catto-mail production SMTP ingress (specification 2.9, Phase 8 networking).
+# Production only (NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-production).
+#
+# nginx inherits the socket that <instance>-ingress.socket binds for POSTFIX_SMTP_BIND
+# on the host (it listens on exactly that address, so the inherited socket matches).
+# Each connection is passed byte for byte to Postfix's PROXY-protocol listener on
+# the ingress network; the PROXY header carries the client's real address, which
+# Postfix logs and applies its SMTP policy to. STARTTLS is Postfix's own. The name
+# postfix-ingress is an /etc/hosts entry of the production topology.
+server {
+    listen ${POSTFIX_SMTP_BIND};
+    proxy_pass postfix-ingress:25;
+    proxy_protocol on;
+    proxy_connect_timeout 10s;
+    proxy_timeout 10m;
+}

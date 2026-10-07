@@ -5,10 +5,25 @@
 # (docs/contracts/environment.md) and starts Postfix in the foreground.
 #
 # Safety (spec: podman_environment, SMARTHOST_LIVE_DELIVERY_ENABLED):
-#   * capture mode (default): every non-local message is relayed to
-#     POSTFIX_RELAYHOST (Mailpit). Startup fails if no relayhost is set.
+#   * capture mode (development/test, the default): every non-local message is
+#     relayed to POSTFIX_RELAYHOST (Mailpit). Startup fails if no relayhost is set.
+#   * held mode (production before live activation, specification 2.9): no
+#     relayhost; the default transport is retry(8), so smtpd refuses outbound
+#     recipients temporarily (450 "live delivery is not activated") and anything
+#     queued stays deferred, except the web application's own sign-in mail (APP_MAIL_FROM),
+#     so operators can sign in to the dashboard before activation. The Go
+#     daemon claims no send jobs in this state.
 #   * live mode: only when SMARTHOST_LIVE_DELIVERY_ENABLED=true AND
 #     SMARTHOST_ENV=production. Any other combination refuses to start.
+#   * Production never has a relayhost (no Mailpit, no capture relay).
+#   * Emergency pause (any mode): the flag $SMARTHOST_POSTFIX_OBSERVABILITY_DIR/
+#     control/outbound-paused adds defer_transports=smtp, so nothing leaves the
+#     queue; smarthost-postfix-control sets and clears it at runtime.
+#   * Production inbound SMTP (Phase 8 networking): port 25 listens only on
+#     postfix-ingress (the ingress network, shared with nginx alone) and requires
+#     the PROXY protocol: nginx inherits the public socket from systemd and sends
+#     each client's real address in the PROXY header. A container-local
+#     127.0.0.1:25 serves the health check. Development keeps the plain port 25.
 # In development the container additionally sits on an Internal=true Podman
 # network with no route to the Internet (defence in depth).
 set -eu
@@ -32,14 +47,24 @@ require SMARTHOST_ENV SMARTHOST_LIVE_DELIVERY_ENABLED SMARTHOST_BOUNCE_DOMAIN SM
         APP_MAIL_SUBMISSION_USERNAME APP_MAIL_SUBMISSION_PASSWORD \
         SMARTHOST_POSTFIX_OBSERVABILITY_DIR SMARTHOST_DSN_SPOOL_DIR SMARTHOST_SPOOL_GID SMARTHOST_DELIVERY_UID \
         SMARTHOST_OPENDKIM_MILTER_ADDRESS POSTFIX_MYHOSTNAME POSTFIX_TLS_CERT_FILE POSTFIX_TLS_KEY_FILE \
-        POSTFIX_MESSAGE_SIZE_LIMIT
+        POSTFIX_MESSAGE_SIZE_LIMIT APP_MAIL_FROM
 
 # ---------------------------------------------------------------- safety switch
+default_transport=smtp
+held_senders=
 case "$SMARTHOST_LIVE_DELIVERY_ENABLED" in
     false)
-        [ -n "${POSTFIX_RELAYHOST:-}" ] || die "capture mode requires POSTFIX_RELAYHOST (Mailpit); refusing to start"
-        relayhost="$POSTFIX_RELAYHOST"
-        log "CAPTURE MODE: all outbound mail is relayed to $relayhost; no Internet delivery"
+        if [ "$SMARTHOST_ENV" = "production" ]; then
+            [ -z "${POSTFIX_RELAYHOST:-}" ] || die "production must not set POSTFIX_RELAYHOST (no capture relay in production)"
+            relayhost=""
+            default_transport="retry:live delivery is not activated"
+            held_senders="$APP_MAIL_FROM"
+            log "HELD MODE (production, live delivery not activated): outbound recipients are refused temporarily (450); only $APP_MAIL_FROM (dashboard sign-in) is delivered"
+        else
+            [ -n "${POSTFIX_RELAYHOST:-}" ] || die "capture mode requires POSTFIX_RELAYHOST (Mailpit); refusing to start"
+            relayhost="$POSTFIX_RELAYHOST"
+            log "CAPTURE MODE: all outbound mail is relayed to $relayhost; no Internet delivery"
+        fi
         ;;
     true)
         [ "$SMARTHOST_ENV" = "production" ] || die "live delivery is only permitted with SMARTHOST_ENV=production (got '$SMARTHOST_ENV')"
@@ -57,9 +82,17 @@ duid="$SMARTHOST_DELIVERY_UID"
 
 # ------------------------------------------------- shared volume layout (V-2/V-4/V-5)
 umask 027
-mkdir -p "$obs/log" "$obs/queue"
-chgrp "$gid" "$obs" "$obs/log" "$obs/queue"
-chmod 2750 "$obs" "$obs/log" "$obs/queue"        # setgid: new files inherit the spool group
+mkdir -p "$obs/log" "$obs/queue" "$obs/control"
+chgrp "$gid" "$obs" "$obs/log" "$obs/queue" "$obs/control"
+chmod 2750 "$obs" "$obs/log" "$obs/queue" "$obs/control"   # setgid: new files inherit the spool group
+held_map=
+if [ -n "$held_senders" ]; then held_map="inline:{ $held_senders=smtp: }"; fi
+pause_flag="$obs/control/outbound-paused"
+defer_transports=
+if [ -e "$pause_flag" ]; then
+    defer_transports=smtp
+    log "EMERGENCY PAUSE in force ($pause_flag): outbound mail stays in the queue (smarthost-postfix-control resume)"
+fi
 
 mkdir -p "$spool/processing" "$spool/done" "$spool/failed"
 chown "$duid:$gid" "$spool" "$spool/processing" "$spool/done" "$spool/failed"
@@ -84,6 +117,11 @@ mynetworks = 127.0.0.0/8
 relayhost = $relayhost
 smtp_fallback_relay =
 transport_maps =
+default_transport = $default_transport
+# Held mode: the dashboard sign-in sender keeps the normal smtp transport.
+sender_dependent_default_transport_maps = $held_map
+# Emergency pause (control/outbound-paused): nothing leaves the queue.
+defer_transports = $defer_transports
 enable_long_queue_ids = yes
 message_size_limit = $POSTFIX_MESSAGE_SIZE_LIMIT
 recipient_delimiter = $SMARTHOST_VERP_DELIMITER
@@ -105,10 +143,18 @@ virtual_mailbox_maps = regexp:/etc/postfix/smarthost_bounce_recipients
 virtual_uid_maps = static:$duid
 virtual_gid_maps = static:$gid
 virtual_minimum_uid = 100
-# Port 25 never relays, whatever the client address: in the Smarthost pod every
-# container reaches Postfix from 127.0.0.1, which is in mynetworks.
+# Port 25 never relays, whatever the client address: in the development pod every
+# container reaches Postfix from 127.0.0.1, which is in mynetworks. It accepts only
+# bounce-domain recipients (DSNs, ARF reports, postmaster). In production the
+# client address is the real one (PROXY protocol from nginx, see master.cf below).
 smtpd_relay_restrictions = reject_unauth_destination
 smtpd_recipient_restrictions = reject_unauth_destination
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+smtpd_banner = \$myhostname ESMTP
+# Each submission account may only use its own envelope senders (specification 2.9):
+# the delivery daemon its VERP return paths, the web application APP_MAIL_FROM.
+smtpd_sender_login_maps = regexp:/etc/postfix/smarthost_sender_logins
 
 # TLS
 smtpd_tls_cert_file = $POSTFIX_TLS_CERT_FILE
@@ -140,9 +186,26 @@ cat > /etc/postfix/smarthost_bounce_recipients <<EOF
 /^${lp}(${dl}[^@]+)?@${bd}\$/   inbound/
 /^postmaster@${bd}\$/           inbound/
 EOF
+# Envelope-sender owners on submission (SASL login names carry the realm).
+af=$(escape "$APP_MAIL_FROM")
+cat > /etc/postfix/smarthost_sender_logins <<EOF
+/^${lp}(${dl}[^@]+)?@${bd}\$/   ${SMARTHOST_SUBMISSION_USERNAME}@${POSTFIX_MYHOSTNAME}
+/^${af}\$/                      ${APP_MAIL_SUBMISSION_USERNAME}@${POSTFIX_MYHOSTNAME}
+EOF
 
 # -------------------------------------------------------------------- master.cf
 postconf -F '*/*/chroot = n'
+if [ "$SMARTHOST_ENV" = "production" ]; then
+    # Inbound SMTP arrives only from nginx (ingress socket -> PROXY protocol), on the
+    # ingress-network address the production topology names postfix-ingress.
+    getent hosts postfix-ingress >/dev/null \
+        || die "production needs the ingress network address postfix-ingress (smarthost-production.sh creates it)"
+    postconf -MX smtp/inet
+    postconf -M "127.0.0.1:smtp/inet=127.0.0.1:smtp inet n - n - - smtpd" \
+                "postfix-ingress:smtp/inet=postfix-ingress:smtp inet n - n - - smtpd"
+    postconf -P "postfix-ingress:smtp/inet/smtpd_upstream_proxy_protocol=haproxy"
+    log "inbound SMTP: postfix-ingress:25 (PROXY protocol from nginx: real client addresses) and 127.0.0.1:25 (health check)"
+fi
 postconf -M "submission/inet=submission inet n - n - - smtpd"
 postconf -P \
     "submission/inet/syslog_name=postfix/submission" \
@@ -152,6 +215,7 @@ postconf -P \
     "submission/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject" \
     "submission/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject" \
     "submission/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject" \
+    "submission/inet/smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject" \
     "submission/inet/smtpd_milters=$SMARTHOST_OPENDKIM_MILTER_ADDRESS" \
     "submission/inet/milter_default_action=tempfail" \
     "submission/inet/milter_macro_daemon_name=ORIGINATING"

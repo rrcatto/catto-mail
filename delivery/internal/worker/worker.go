@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,6 +70,8 @@ type Worker struct {
 	SettleDelay, AmbiguityDeadline time.Duration
 	// Now is the clock (tests).
 	Now func() time.Time
+	// paused mirrors the operator's emergency-pause flag (Phase 8).
+	paused atomic.Bool
 }
 
 // New builds a worker from the configuration.
@@ -76,9 +79,13 @@ func New(cfg *config.Config, st *store.Store, log *logx.Logger) *Worker {
 	inst := make([]byte, 4)
 	_, _ = rand.Read(inst)
 	host, _, _ := strings.Cut(cfg.SubmissionAddr(), ":")
+	lim := pacing.New(cfg.GlobalConcurrency, cfg.DomainConcurrency, cfg.DomainRatePerMin)
+	lim.SetGlobalRate(cfg.GlobalRatePerMin)
+	lim.SetThrottledClientRate(cfg.ThrottledClientRate)
+	lim.SetHeld(cfg.HoldSendWork())
 	return &Worker{
 		Cfg: cfg, Store: st, Log: log,
-		Lim: pacing.New(cfg.GlobalConcurrency, cfg.DomainConcurrency, cfg.DomainRatePerMin),
+		Lim: lim,
 		SMTP: smtpsub.Config{
 			Addr: cfg.SubmissionAddr(), HeloName: "smarthost-delivery." + cfg.BounceDomain,
 			Username: cfg.SubmissionUser, Password: cfg.SubmissionPassword,
@@ -99,17 +106,59 @@ func New(cfg *config.Config, st *store.Store, log *logx.Logger) *Worker {
 
 func (w *Worker) logDir() string { return w.Cfg.ObservabilityDir + "/log" }
 
+// Paused reports the operator's emergency pause (flag in the observability volume).
+func (w *Worker) Paused() bool { return w.paused.Load() }
+
+// Holding reports whether send work is held: production before live
+// activation, or the operator's emergency pause. Nothing is claimed and no new
+// submission starts while holding; in-flight submissions finish and claimed
+// jobs keep their leases, so they resume where they stopped.
+func (w *Worker) Holding() bool { return w.Cfg.HoldSendWork() || w.paused.Load() }
+
+// checkPause reads the pause flag once and applies it.
+func (w *Worker) checkPause() {
+	path := w.Cfg.PauseFlagPath()
+	_, err := os.Stat(path)
+	paused := err == nil
+	if w.paused.Swap(paused) != paused {
+		if paused {
+			w.Log.Warning("outbound paused by the operator: no new submissions", "flag", path)
+		} else {
+			w.Log.Info("outbound pause lifted: submissions resume", "flag", path)
+		}
+	}
+	w.Lim.SetHeld(w.Holding())
+}
+
+// watchPause follows the pause flag every DELIVERY_FILE_POLL_INTERVAL_SECONDS.
+func (w *Worker) watchPause(ctx context.Context) {
+	for {
+		w.checkPause()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(w.Cfg.FilePollInterval):
+		}
+	}
+}
+
 // Run claims and processes jobs until ctx ends. It wakes on NOTIFY
 // smarthost_send_work and polls every DELIVERY_POLL_INTERVAL_SECONDS.
 func (w *Worker) Run(ctx context.Context) {
 	wake := make(chan struct{}, 1)
 	go w.listen(ctx, wake)
 	go w.deferralFeedback(ctx)
+	w.checkPause() // before the first claim: a pause in force at start-up holds from the start
+	go w.watchPause(ctx)
+	if w.Cfg.HoldSendWork() {
+		w.Log.Warning("live delivery is not enabled in production: send jobs are held (not claimed) until " +
+			"SMARTHOST_LIVE_DELIVERY_ENABLED=true is activated; DSN processing and reconciliation continue")
+	}
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, maxJobs)
 	for ctx.Err() == nil {
 		claimedAny := false
-		for len(slots) < cap(slots) {
+		for len(slots) < cap(slots) && !w.Holding() {
 			job, err := w.Store.Claim(ctx, w.Me, w.Cfg.Lease)
 			if err != nil {
 				if ctx.Err() == nil {
@@ -270,7 +319,10 @@ func (w *Worker) renew(ctx context.Context, cancel context.CancelFunc, job *stor
 			return
 		case <-t.C:
 		}
-		until, ok, err := w.Store.Renew(ctx, job.ID, w.Me, w.Cfg.Lease)
+		until, clientStatus, ok, err := w.Store.RenewStatus(ctx, job.ID, w.Me, w.Cfg.Lease)
+		if ok && job.Throttled.Swap(clientStatus == "throttled") != (clientStatus == "throttled") {
+			log.Info("client status changed; throttled-client rate applies", "throttled", clientStatus == "throttled")
+		}
 		switch {
 		case err != nil:
 			if w.Now().After(time.Unix(0, ls.until.Load())) { // could not renew in time
@@ -469,7 +521,7 @@ func (w *Worker) dispatch(ctx context.Context, job *store.Job, ls *lease, log *l
 		wait := time.Second
 		for i := 0; i < len(pending); {
 			it := pending[i]
-			release, ok, d := w.Lim.TryAcquire(it.p.Domain)
+			release, ok, d := w.Lim.TryAcquireFor(it.p.Domain, job.ClientID, job.Throttled.Load())
 			if !ok {
 				if d > 0 && d < wait {
 					wait = d

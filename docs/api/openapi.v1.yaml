@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.7
-  summary: Email validation and tracked delivery API (specification 2.8 contract).
+  version: 1.0.0-draft.8
+  summary: Email validation and tracked delivery API (specification 2.10 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.8), which wins on
-    any conflict. Status and event values are defined in
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.10), which wins on
+    any conflict. A client-facing integration guide is `docs/api/integration-guide.md`
+    (served by an installation at `/docs/api`). Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
 
     ## Conventions
@@ -22,6 +23,18 @@ info:
       `application/problem+json`.
     * Request bodies are limited to 10 MiB (`413` above it). Collections use
       cursor (keyset) pagination: `limit` and an opaque `cursor`.
+    * API keys may expire; an expired key fails exactly like a revoked one (`401`).
+    * Rate limits and quotas (specification 2.10). Requests are limited per API key
+      and per client (all of its keys together); a `throttled` client has a lower
+      request rate. Over a rate limit: `429` with problem type `rate-limited` and
+      `Retry-After`. Work is also admitted against the client's quotas per UTC day or
+      month (validation jobs, validation addresses, send jobs, recipients): a request
+      that would exceed one is refused before any work is created, with `429`,
+      problem type `quota-exceeded`, `Retry-After` until the period resets, and a
+      `quota` member naming the metric, period, limit, amount used, amount requested
+      and reset time. Idempotent replays never count again. A per-client limit on
+      recipients per send job may be lower than the contract ceiling of 10000; above
+      it a batch is refused with `422` `recipient-limit-exceeded`.
 
     ## Send-job lifecycle (staged recipient upload)
     1. `POST /send-jobs` creates the job in `collecting` state with job-level
@@ -627,7 +640,11 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
     TooManyRequests:
-      description: Rate limit exceeded.
+      description: >-
+        Rate limit exceeded (problem type `rate-limited`), or the request would exceed
+        one of the client's quotas for the current UTC day or month (problem type
+        `quota-exceeded`, with the `quota` member). `Retry-After` gives the seconds
+        until a retry can succeed.
       headers:
         Retry-After: {$ref: '#/components/headers/RetryAfter'}
       content:
@@ -680,6 +697,19 @@ components:
         status: {type: integer}
         detail: {type: string}
         instance: {type: string, format: uri-reference}
+        quota:
+          description: >-
+            Present on `quota-exceeded` (429): the quota the request would have exceeded.
+            Only the client's own quota and usage are disclosed.
+          type: object
+          required: [metric, period, limit, used, requested, resets_at]
+          properties:
+            metric: {type: string, enum: [validation_jobs, validation_addresses, send_jobs, send_recipients]}
+            period: {type: string, enum: [day, month]}
+            limit: {type: integer}
+            used: {type: integer, description: Admitted in the current period before this request.}
+            requested: {type: integer}
+            resets_at: {type: string, format: date-time}
         errors:
           type: array
           description: Field-level errors for 422 responses.

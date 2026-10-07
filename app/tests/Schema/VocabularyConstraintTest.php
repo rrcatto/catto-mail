@@ -30,12 +30,17 @@ final class VocabularyConstraintTest extends TestCase
         'message_event_type' => ['message_events.event_type'], 'event_source' => ['message_events.event_source'],
         'failure_scope' => ['message_events.failure_scope'], 'dsn_classification' => ['unmatched_dsns.classification'],
         'unmatched_dsn_status' => ['unmatched_dsns.status'], 'suppression_scope_type' => ['suppressions.scope_type'],
-        'suppression_reason' => ['suppressions.reason'], 'usage_type' => ['usage_records.usage_type'],
+        'suppression_reason' => ['suppressions.reason'], 'usage_type' => ['usage_records.usage_type', 'billing_statement_lines.usage_type'],
         'usage_reference_type' => ['usage_records.reference_type'], 'webhook_endpoint_status' => ['webhook_endpoints.status'],
         'webhook_event_type' => ['webhook_events.event_type', 'webhook_deliveries.event_type'],
         'webhook_subject_type' => ['webhook_events.subject_type'], 'webhook_delivery_status' => ['webhook_deliveries.status'],
         'audit_actor_type' => ['audit_log.actor_type'],
         'global_suppression_request_operation' => ['global_suppression_requests.operation'],
+        'client_origin' => ['clients.origin'], 'quota_metric' => ['client_quota_usage.metric'],
+        'quota_period' => ['client_quota_usage.period'], 'policy_acceptance_source' => ['client_policy_acceptances.source'],
+        'billing_statement_status' => ['billing_statements.status'],
+        'billing_reconciliation_status' => ['billing_statements.reconciliation_status'],
+        'client_alert_metric' => ['client_alerts.metric'], 'client_alert_severity' => ['client_alerts.severity'],
     ];
 
     /** @return array<string, list<string>> */

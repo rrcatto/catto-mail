@@ -7,6 +7,8 @@ namespace App\Sending;
 use App\Api\ApiProblem;
 use App\Api\IdempotencyKey;
 use App\Api\WorkPermission;
+use App\Client\ClientLimitPolicy;
+use App\Client\QuotaEnforcer;
 use App\Config\Limits;
 use App\Entity\Client;
 use App\Entity\SendingDomain;
@@ -14,6 +16,7 @@ use App\Entity\SendJob;
 use App\Entity\SendJobRecipientBatch;
 use App\Enum\DkimStatus;
 use App\Enum\MessageClass;
+use App\Enum\QuotaMetric;
 use App\Enum\SendJobStatus;
 use App\Idempotency\IdempotencyLock;
 use App\Util\Clock;
@@ -33,6 +36,11 @@ use Symfony\Component\Uid\Uuid;
  * submit can never interleave with a batch: once sealed, no recipient can be
  * added. Nothing here creates `messages` or talks to Postfix; the Go delivery
  * daemon (Phase 4) claims `queued` jobs.
+ *
+ * Phase 9: job creation and every accepted batch are admitted against the client's
+ * quotas in their transaction (App\Client\QuotaEnforcer), and the recipient ceiling per
+ * job is the client's effective limit (App\Client\ClientLimitPolicy), never above
+ * APP_SEND_JOB_MAX_RECIPIENTS.
  */
 final class SendJobService
 {
@@ -49,6 +57,8 @@ final class SendJobService
         private readonly Limits $limits,
         private readonly string $smarthostEnv,
         private readonly bool $allowUnverifiedSendingDomains,
+        private readonly QuotaEnforcer $quotas,
+        private readonly ClientLimitPolicy $clientLimits,
     ) {
     }
 
@@ -100,6 +110,7 @@ final class SendJobService
                 throw ApiProblem::unprocessable('validation-error', 'Validation failed', 'The send job cannot be created.', $errors);
             }
 
+            $this->quotas->admit($client, QuotaMetric::SendJobs, 1);
             $job = new SendJob($client, $data['external_reference'], $key->value, $requestHash,
                 MessageClass::from($data['message_class']), $domain, $sender);
             $job->configure($data['list_id'] ?? null, $data['sender_identity']['name'] ?? null, $replyTo,
@@ -145,10 +156,11 @@ final class SendJobService
                     \sprintf('At most %d recipients are accepted per request.', $this->limits->maxRecipientsPerBatch),
                     [['pointer' => '/recipients', 'message' => \sprintf('Contains %d recipients.', $count)]]);
             }
-            if ($job->getTotalRecipients() + $count > $this->limits->maxRecipientsPerJob) {
+            $maxPerJob = $this->clientLimits->maxRecipientsPerSendJob($job->getClient());
+            if ($job->getTotalRecipients() + $count > $maxPerJob) {
                 throw ApiProblem::unprocessable('recipient-limit-exceeded', 'Recipient limit exceeded',
                     \sprintf('A send job may hold at most %d recipients; it holds %d and this batch adds %d.',
-                        $this->limits->maxRecipientsPerJob, $job->getTotalRecipients(), $count));
+                        $maxPerJob, $job->getTotalRecipients(), $count));
             }
 
             [$rows, $errors] = $this->prepareRecipients($job, $recipients);
@@ -156,6 +168,7 @@ final class SendJobService
                 throw ApiProblem::unprocessable('validation-error', 'Validation failed', 'The batch was rejected as a whole.', $errors);
             }
 
+            $this->quotas->admit($job->getClient(), QuotaMetric::SendRecipients, $count);
             $batch = new SendJobRecipientBatch($job, $key->value, $requestHash, $count);
             $this->em->persist($batch);
             $job->addRecipients($count);
@@ -186,8 +199,9 @@ final class SendJobService
             if (0 === $total) {
                 throw ApiProblem::unprocessable('empty-job', 'Empty job', 'A send job needs at least one recipient before it can be submitted.');
             }
-            if ($total > $this->limits->maxRecipientsPerJob) {
-                $errors[] = ['pointer' => '/', 'message' => \sprintf('The job holds %d recipients; the limit is %d.', $total, $this->limits->maxRecipientsPerJob)];
+            $maxPerJob = $this->clientLimits->maxRecipientsPerSendJob($job->getClient());
+            if ($total > $maxPerJob) {
+                $errors[] = ['pointer' => '/', 'message' => \sprintf('The job holds %d recipients; the limit is %d.', $total, $maxPerJob)];
             }
             $stats = $this->connection->fetchAssociative(
                 'SELECT count(*) AS n, count(unsubscribe_url) AS with_unsubscribe FROM send_job_recipients WHERE send_job_id = :job',

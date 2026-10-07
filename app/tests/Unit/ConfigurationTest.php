@@ -41,6 +41,32 @@ final class ConfigurationTest extends TestCase
         SafetyGuard::assertSafe();
     }
 
+    /** Phase 8: the production process rules (debug kernel, https links, SSRF allowlist). */
+    public function testProductionProcessRules(): void
+    {
+        $this->setEnv('SMARTHOST_ENV', 'production');
+        $this->setEnv('SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS', 'false');
+        $this->setEnv('SMARTHOST_PUBLIC_BASE_URL', 'https://mail.operator.example');
+        $this->setEnv('APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS', null);
+        foreach ([
+            ['APP_ENV', 'dev', 'never runs the debug kernel'],
+            ['SMARTHOST_PUBLIC_BASE_URL', 'http://mail.operator.example', 'must be https'],
+            ['APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS', 'webhook-receiver', 'must be empty in production'],
+        ] as [$name, $bad, $message]) {
+            $this->setEnv('APP_ENV', 'prod');
+            $this->setEnv($name, $bad);
+            try {
+                SafetyGuard::assertSafe();
+                self::fail("$name=$bad accepted in production");
+            } catch (\RuntimeException $e) {
+                self::assertStringContainsString($message, $e->getMessage());
+            }
+            $this->setEnv($name, 'APP_ENV' === $name ? 'prod' : ('SMARTHOST_PUBLIC_BASE_URL' === $name ? 'https://mail.operator.example' : null));
+        }
+        SafetyGuard::assertSafe();
+        self::addToAssertionCount(1);
+    }
+
     public function testUnknownEnvironmentIsRejected(): void
     {
         $this->setEnv('SMARTHOST_ENV', 'staging');

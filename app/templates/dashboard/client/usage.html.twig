@@ -3,9 +3,42 @@
 {% block title %}Usage{% endblock %}
 {% block body %}
 <h1>Usage</h1>
+<p class="muted">Units are counted separately: a validation address is metered when it reaches a final result; a message when Postfix accepts it. Periods are UTC.</p>
+<table>
+    <thead><tr><th scope="col">Period</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
+    <tbody>{% for name, t in periods %}<tr><td>{{ name|replace({'_': ' '})|capitalize }}</td><td class="num">{{ t.validation_address.quantity|number_format }}</td><td class="num">{{ t.message_submitted.quantity|number_format }}</td></tr>{% endfor %}</tbody>
+</table>
+<form method="get" class="filters" aria-label="Custom period">
+    <label>From <input type="date" name="from" value="{{ range.from }}"></label><label>to (exclusive) <input type="date" name="to" value="{{ range.to }}"></label>
+    <button type="submit">Show period</button>
+</form>
+{% if custom %}
+<h2>{{ custom.period.label }}</h2>
+<p>Validation addresses processed: <strong>{{ custom.totals.validation_address.quantity|number_format }}</strong> · Messages submitted: <strong>{{ custom.totals.message_submitted.quantity|number_format }}</strong></p>
+{% if custom.daily is not empty %}<table><thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="num">Validation addresses</th><th scope="col" class="num">Messages submitted</th></tr></thead>
+<tbody>{% for d in custom.daily %}<tr><td>{{ d.day }}</td><td class="num">{{ d.validation_address|number_format }}</td><td class="num">{{ d.message_submitted|number_format }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+{% endif %}
+
+<h2>Limits and quotas</h2>
+<table>
+    <thead><tr><th scope="col">Limit</th><th scope="col" class="num">Effective</th></tr></thead>
+    <tbody>{% for l in limits.limits %}<tr><td>{{ l.column|label('limit') }}</td><td class="num">{{ l.effective ?? 'not limited' }}</td></tr>{% endfor %}</tbody>
+</table>
+<table>
+    <thead><tr><th scope="col">Admitted work</th><th scope="col">Period</th><th scope="col" class="num">Used</th><th scope="col" class="num">Quota</th></tr></thead>
+    <tbody>{% for q in limits.quotas %}<tr><td>{{ q.metric|label('quota_metric') }}</td><td>{{ q.period|label('quota_period') }}</td><td class="num">{{ q.used|number_format }}</td><td class="num">{{ q.limit is null ? '—' : q.limit|number_format }}</td></tr>{% endfor %}</tbody>
+</table>
+<p class="muted">Quotas count work as it is admitted (jobs created, addresses submitted, recipients accepted); usage counts work done. A request over a quota is refused with HTTP 429 and the problem type quota-exceeded, which names the quota, its limit, the amount used and when it resets.</p>
+
+{% if statements is not empty %}
+<h2>Billing statements</h2>
+<table><thead><tr><th scope="col">Period</th><th scope="col">Status</th><th scope="col">Totals</th></tr></thead>
+<tbody>{% for s in statements %}<tr><td>{{ s.period_start }} – {{ s.period_end }} (exclusive)</td><td>{{ s.status|label('statement_status') }}</td><td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+
 <h2>By month (last 12 months)</h2>
 {% if usage.months is empty %}<p class="empty">No usage recorded yet.</p>{% else %}
-<table>
+<table id="usage-months">
     <thead><tr><th scope="col">Month</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
     <tbody>{% for m in usage.months %}<tr><td>{{ m.month }}</td><td class="num">{{ (m.validation_addresses ?? 0)|number_format }}</td><td class="num">{{ (m.messages_submitted ?? 0)|number_format }}</td></tr>{% endfor %}</tbody>
 </table>
@@ -16,7 +49,7 @@
     <button type="submit">Apply</button>
 </form>
 {% if usage.records.rows is empty %}<p class="empty">No usage records match.</p>{% else %}
-<table>
+<table id="usage-records">
     <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Type</th><th scope="col" class="num">Quantity</th><th scope="col">For</th></tr></thead>
     <tbody>{% for u in usage.records.rows %}
         <tr><td>{{ u.occurred_at|ts }}</td><td>{{ u.usage_type|label('usage_type') }}</td><td class="num">{{ u.quantity|number_format }}</td>
@@ -25,5 +58,5 @@
 </table>
 {% endif %}
 {{ ui.pager(usage.records, 'records') }}
-<p class="muted">Usage is recorded for later billing; no billing or payment happens here.</p>
+<p class="muted">Usage is recorded for billing; pricing and payment happen outside Smarthost.</p>
 {% endblock %}

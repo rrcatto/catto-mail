@@ -5,7 +5,11 @@
 
 Contents (see `docs/PROJECT.md` for every file):
 - **nginx** (the only public HTTP entry), which hands every request to the Symfony front
-  controller via FastCGI. The topology is the same in development and production.
+  controller via FastCGI.
+  - Development uses `nginx/templates/`.
+  - Production uses `/etc/nginx/templates-production/`: the same HTTPS server, listening on the
+    socket systemd hands it, plus `nginx/production/`, the SMTP stream to Postfix with the PROXY
+    protocol.
 - `podman/smarthost-pod.sh.in`: the single definition of the internal network, the volumes, the
   persistent `smarthost` pod and its ten service containers (including the separate Symfony
   webhook worker and OpenDKIM), and the ordered one-off DB tasks. Rendered into
@@ -25,4 +29,19 @@ Contents (see `docs/PROJECT.md` for every file):
   against the running pod (`tests/phase4-e2e.sh`, `tests/phase4_e2e.py`, `tests/phase5-e2e.sh`,
   `tests/phase5_e2e.py`).
 
-Rootless Podman with a persistent pod and systemd user units only. No Docker and no Kubernetes.
+**Production (Phase 8):**
+- `podman/smarthost-production.sh.in` defines the production topology: standalone persistent
+  containers on internal, ingress and egress networks, with no published ports
+  (`docs/production/README.md`).
+- `systemd/production/`: the production ingress socket (443 and 25 bound by the service user's
+  systemd) and the service that starts nginx with it, so client addresses are preserved.
+- `bin/smarthostctl-prod` (`smarthostctl prod <command>`) operates it.
+- `lib/smarthost_preflight.py` is the production preflight, the DNS checklist and the firewall
+  ruleset; `lib/smarthost_seedtest.py` is the operator's seed test.
+- `production.env.example` is the production template.
+- Tests: `tests/phase8-test.sh` and `tests/phase8/` (no network), and `tests/phase8-rehearsal.sh`
+  (the production topology locally, no Internet egress).
+- Runbook: `docs/production/runbook.md`.
+
+Rootless Podman with persistent containers (a pod in development) and systemd user units only.
+No Docker and no Kubernetes.

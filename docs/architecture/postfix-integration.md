@@ -1,8 +1,8 @@
 # Postfix Integration Contract
 
-**Status:** normative contract for specification 2.7 (spec `go_delivery.initial_integration_strategy`,
-`service_topology.opendkim`, `transport_reconciliation`). This document describes the
-mechanics. It does not change the architecture.
+**Status:** normative contract for specification 2.10 (spec `go_delivery.initial_integration_strategy`,
+`service_topology.opendkim`, `transport_reconciliation`; production operation in §11). This
+document describes the mechanics. It does not change the architecture.
 
 Go never runs an inbound SMTP listener, never reads the host systemd journal, never holds DKIM
 keys, and never implements a milter.
@@ -400,3 +400,69 @@ These clarify §5 as implemented and observed against Postfix 3.10 in the develo
   time (the epoch in the file name); implausible times are replaced by the receipt time.
 * **Phase 1 verification.** T16 stops the daemon while it observes raw Maildir delivery, since the
   running daemon now claims spool files itself.
+
+## 11. Production operation (Phase 8, specification 2.9)
+
+The interfaces of §1–§7 are unchanged in production. The production topology
+(`docs/production/README.md`) places Postfix on the internal network (alias `postfix`, submission
+587, milter to `opendkim`), on the egress network (outbound SMTP 25 to MX hosts) and on the
+ingress network, shared only with nginx. It publishes no port.
+
+**Inbound port 25 (client addresses preserved).**
+- The systemd socket `<instance>-ingress.socket` binds `POSTFIX_SMTP_BIND` on the host, and nginx
+  inherits it. An nginx `stream` server passes each connection byte for byte to
+  `postfix-ingress:25`, with a PROXY-protocol header carrying the client's address.
+- In production that is Postfix's only port-25 listener:
+  `postfix-ingress:smtp inet … smtpd -o smtpd_upstream_proxy_protocol=haproxy`. A connection
+  without the header gets no SMTP session.
+- Postfix logs `connect from name[client address]` and applies its SMTP policy to the real
+  client. STARTTLS stays Postfix's own.
+- A container-local `127.0.0.1:25` listener serves only the health check.
+- Development keeps the plain port-25 listener.
+- The entrypoint refuses to start in production without the `postfix-ingress` address.
+
+**Delivery modes** (`postfix/entrypoint.sh`):
+
+| Mode | When | `relayhost` | `default_transport` | Effect |
+|---|---|---|---|---|
+| capture | development/test, `SMARTHOST_LIVE_DELIVERY_ENABLED=false` | `POSTFIX_RELAYHOST` (Mailpit), required | `smtp` | everything relayed to Mailpit |
+| held | production, `false` | empty (a relayhost is a startup error) | `retry:live delivery is not activated` | outbound recipients refused temporarily at submission (450); `sender_dependent_default_transport_maps` routes `APP_MAIL_FROM` (dashboard sign-in) to `smtp`; the Go daemon claims no send jobs |
+| live | production, `true` | empty | `smtp` | direct MX delivery |
+
+**Emergency pause.** The flag `$SMARTHOST_POSTFIX_OBSERVABILITY_DIR/control/outbound-paused` is
+written by `smarthost-postfix-control pause` and read at every start. While it exists:
+- `defer_transports = smtp` keeps accepted mail queued;
+- the Go daemon, which watches the flag read-only, claims no jobs and starts no submissions.
+
+`resume` removes the flag, clears `defer_transports` and flushes the queue. Inbound port 25 keeps
+working while paused.
+
+**Submission sender ownership.**
+- `smtpd_sender_login_maps` (`/etc/postfix/smarthost_sender_logins`) assigns the VERP return paths
+  of the bounce domain to the delivery daemon's SASL login, and `APP_MAIL_FROM` to the web
+  application's.
+- The submission service rejects any other envelope sender, or another account's sender
+  (`reject_sender_login_mismatch`, 553).
+- Postfix records SASL logins as `user@POSTFIX_MYHOSTNAME`.
+
+**Port 25 hardening.** Port 25:
+- relays for nobody (`reject_unauth_destination`, whatever the client address);
+- accepts only bounce-domain recipients (VERP addresses, `bounce@`, `postmaster@`);
+- disables VRFY, requires HELO and announces `$myhostname ESMTP`.
+
+**Production checks.** `smarthostctl prod preflight --section postfix` compares these settings
+with the configuration. It also tests port 25 live: RCPT to an outside domain is refused, and RCPT
+to the bounce domain is accepted. Nothing is sent.
+
+**Inbound bounce path in production.** DSNs and ARF reports travel:
+
+```text
+Internet --SMTP 25--> [ingress socket] nginx --PROXY protocol--> postfix (bounce domain)
+         --virtual(8)--> <instance>-dsn-spool (Maildir)
+         --> delivery daemon (claim by rename) --> message event / suppression policy (§5)
+```
+
+The bounce domain's MX must name `POSTFIX_MYHOSTNAME`; its A record and the PTR of the sending
+IP must agree (the preflight's DNS section). The operator proves the path with
+`smarthostctl prod seed-test send --expect bounce` to a non-existent mailbox at a domain they own
+(runbook §9).

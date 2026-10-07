@@ -21,6 +21,7 @@ parameters:
     # Webhook worker (Phase 7, contract APP_WEBHOOK_*).
     app.webhook.max_attempts: '%env(int:APP_WEBHOOK_MAX_ATTEMPTS)%'
     app.webhook.timeout_seconds: '%env(int:APP_WEBHOOK_TIMEOUT_SECONDS)%'
+    app.webhook.connect_timeout_seconds: '%env(int:APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS)%'
     app.webhook.lease_seconds: '%env(int:APP_WEBHOOK_LEASE_SECONDS)%'
     app.webhook.retry_base_seconds: '%env(int:APP_WEBHOOK_RETRY_BASE_SECONDS)%'
     app.webhook.retry_max_seconds: '%env(int:APP_WEBHOOK_RETRY_MAX_SECONDS)%'
@@ -30,6 +31,16 @@ parameters:
     # Empty means no expiry (contract APP_RETENTION_TRACKING_DAYS).
     app.tracking.retention_days: '%env(default:app.no_retention:APP_RETENTION_TRACKING_DAYS)%'
     app.no_retention: ''
+    # Phase 9 (specification 2.10): public SaaS hardening.
+    app.api.rate_limit_per_minute: '%env(int:APP_API_RATE_LIMIT_PER_MINUTE)%'
+    app.public_onboarding_enabled: '%env(bool:default:app.false:APP_PUBLIC_ONBOARDING_ENABLED)%'
+    app.false: false
+    app.policy_version: '%env(default:app.no_policy:APP_ACCEPTABLE_USE_POLICY_VERSION)%'
+    app.no_policy: ''
+    app.throttled_api_rate_per_minute: '%env(int:APP_THROTTLED_CLIENT_API_RATE_PER_MINUTE)%'
+    app.client.api_key_limit: '%env(int:APP_CLIENT_API_KEY_LIMIT)%'
+    app.client.webhook_endpoint_limit: '%env(int:APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT)%'
+    app.client.sending_domain_limit: '%env(int:APP_CLIENT_SENDING_DOMAIN_LIMIT)%'
 
 services:
     _defaults:
@@ -46,6 +57,8 @@ services:
             int $secretOverlapHours: '%app.webhook.secret_overlap_hours%'
             string $openApiContractPath: '%app.openapi_contract%'
             string $trackingRetentionDays: '%app.tracking.retention_days%'
+            bool $publicOnboardingEnabled: '%app.public_onboarding_enabled%'
+            string $policyVersion: '%app.policy_version%'
 
     App\:
         resource: '../src/'
@@ -57,6 +70,27 @@ services:
     App\Controller\:
         resource: '../src/Controller/'
         tags: ['controller.service_arguments']
+
+    App\Client\ClientLimitPolicy:
+        arguments:
+            $apiRateLimitPerMinute: '%app.api.rate_limit_per_minute%'
+            $throttledApiRatePerMinute: '%app.throttled_api_rate_per_minute%'
+            $apiKeyLimit: '%app.client.api_key_limit%'
+            $webhookEndpointLimit: '%app.client.webhook_endpoint_limit%'
+            $sendingDomainLimit: '%app.client.sending_domain_limit%'
+
+    App\Reputation\ReputationThresholds:
+        factory: ['App\Reputation\ReputationThresholds', 'fromConfiguration']
+        arguments:
+            - minMessages: '%env(int:APP_REPUTATION_MIN_MESSAGES)%'
+              hardBounceWarning: '%env(float:APP_REPUTATION_HARD_BOUNCE_WARNING_PERCENT)%'
+              hardBounceCritical: '%env(float:APP_REPUTATION_HARD_BOUNCE_CRITICAL_PERCENT)%'
+              complaintWarning: '%env(float:APP_REPUTATION_COMPLAINT_WARNING_PERCENT)%'
+              complaintCritical: '%env(float:APP_REPUTATION_COMPLAINT_CRITICAL_PERCENT)%'
+              deferralWarning: '%env(float:APP_REPUTATION_DEFERRAL_WARNING_PERCENT)%'
+              deferralCritical: '%env(float:APP_REPUTATION_DEFERRAL_CRITICAL_PERCENT)%'
+              volumeWarning: '%env(float:APP_REPUTATION_VOLUME_INCREASE_WARNING_FACTOR)%'
+              volumeCritical: '%env(float:APP_REPUTATION_VOLUME_INCREASE_CRITICAL_FACTOR)%'
 
     App\Logging\ContractFormatter:
         arguments:

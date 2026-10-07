@@ -1,6 +1,19 @@
 # Smarthost nginx reverse proxy (spec service_topology.reverse_proxy).
 # The only public HTTP entry; talks to Symfony PHP-FPM over FastCGI on the
-# internal Podman network. Same configuration in development and production.
+# internal Podman network. Development uses /etc/nginx/templates as before.
 FROM docker.io/library/nginx:1.28-alpine
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY templates/ /etc/nginx/templates/
+# Production (specification 2.9, Phase 8 networking) selects
+# NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-production. It holds the same HTTPS
+# server, derived here from the development template with only its listen
+# address changed to PROXY_HTTPS_BIND: the address of the socket nginx inherits from
+# systemd. It also holds the SMTP stream server for POSTFIX_SMTP_BIND, which passes
+# connections to Postfix with the PROXY protocol. The build fails if the
+# derivation no longer applies.
+COPY production/ /etc/nginx/templates-production/
+RUN sed 's/^    listen 443 ssl;$/    listen ${PROXY_HTTPS_BIND} ssl;/' /etc/nginx/templates/smarthost.conf.template \
+        > /etc/nginx/templates-production/smarthost.conf.template \
+    && test "$(grep -c '^    listen ${PROXY_HTTPS_BIND} ssl;$' /etc/nginx/templates-production/smarthost.conf.template)" = 1 \
+    && sed 's/^    listen ${PROXY_HTTPS_BIND} ssl;$/    listen 443 ssl;/' /etc/nginx/templates-production/smarthost.conf.template \
+        | cmp -s - /etc/nginx/templates/smarthost.conf.template

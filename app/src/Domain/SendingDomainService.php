@@ -6,6 +6,7 @@ namespace App\Domain;
 
 use App\Audit\AuditActor;
 use App\Audit\AuditLogger;
+use App\Client\ClientLimitPolicy;
 use App\Domain\Dns\DnsLookupFailed;
 use App\Domain\Dns\TxtResolver;
 use App\Entity\Client;
@@ -14,6 +15,7 @@ use App\Enum\DkimStatus;
 use App\Enum\SendingDomainStatus;
 use App\Sending\AddressNormalizer;
 use App\Util\Clock;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -28,7 +30,9 @@ use Doctrine\ORM\EntityManagerInterface;
  *   setDkim   -> records the DKIM selector/status. Symfony never generates DKIM
  *                keys: OpenDKIM owns the signing keys.
  *
- * Every state change is audited.
+ * Every state change is audited. Phase 9: a client registers at most its effective
+ * number of sending domains (App\Client\ClientLimitPolicy::maxSendingDomains); creations
+ * serialise on the client row.
  */
 final class SendingDomainService
 {
@@ -40,6 +44,7 @@ final class SendingDomainService
         private readonly TxtResolver $resolver,
         private readonly AuditLogger $audit,
         private readonly int $recheckHours,
+        private readonly ClientLimitPolicy $limits,
     ) {
     }
 
@@ -66,7 +71,10 @@ final class SendingDomainService
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
         $domain = new SendingDomain($client, $normalized, $token);
 
-        $this->em->wrapInTransaction(function () use ($domain, $actor): void {
+        $this->assertBelowLimit($client);
+        $this->em->wrapInTransaction(function () use ($domain, $client, $actor): void {
+            $this->em->lock($client, LockMode::PESSIMISTIC_WRITE);
+            $this->assertBelowLimit($client);
             $this->em->persist($domain);
             $this->em->flush();
             $this->audit->record($actor, 'sending_domain.created', 'sending_domain', $domain->getId()->toRfc4122(), [
@@ -74,6 +82,14 @@ final class SendingDomainService
         });
 
         return $domain;
+    }
+
+    private function assertBelowLimit(Client $client): void
+    {
+        $count = (int) $this->em->getConnection()->fetchOne('SELECT count(*) FROM sending_domains WHERE client_id = ?', [$client->getId()->toRfc4122()]);
+        if ($count >= $this->limits->maxSendingDomains($client)) {
+            throw new DomainRuleViolation(\sprintf('The client already has %d sending domains; its limit is %d.', $count, $this->limits->maxSendingDomains($client)));
+        }
     }
 
     /** @return bool whether the domain is verified after the check */

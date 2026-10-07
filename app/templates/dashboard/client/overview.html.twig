@@ -5,8 +5,35 @@
 {% set cid = client.id.toRfc4122 %}
 <h1>{{ client.companyName }}</h1>
 <p>Client status: {{ ui.status(client.status.value, 'client_status') }}</p>
+<p class="muted">{{ client.status.value|label('client_status_meaning') }}</p>
+{% if policy.version_in_force and policy.required and not policy.accepted %}
+<section class="card">
+    <h2>Service policy</h2>
+    <p>Before this account can be approved, a client admin must accept the service policy, version <strong>{{ policy.version_in_force }}</strong>, as published by the operator.</p>
+    {% if may_admin %}
+    <form method="post" action="{{ path('dashboard_client_policy_accept', {clientId: cid}) }}" class="stack">
+        {{ ui.csrf() }}<input type="hidden" name="policy_version" value="{{ policy.version_in_force }}">
+        <label><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
+        <button type="submit">Accept policy {{ policy.version_in_force }}</button>
+    </form>
+    {% else %}<p class="muted">Ask a client admin to accept it.</p>{% endif %}
+</section>
+{% endif %}
 
 <div class="cards">
+    <section class="card">
+        <h2>Account</h2>
+        <dl>
+            <dt>Created</dt><dd>{{ client.createdAt|ts }}</dd>
+            <dt>Approved</dt><dd>{{ client.approvedAt ? client.approvedAt|ts : 'not yet' }}</dd>
+            <dt>Status since</dt><dd>{{ client.statusChangedAt|ts }}</dd>
+            <dt>Service policy</dt><dd>{{ policy.version_in_force ? (policy.accepted ? 'Version ' ~ policy.version_in_force ~ ' accepted' : (policy.required ? 'Version ' ~ policy.version_in_force ~ ' not yet accepted' : 'Not required')) : 'No policy version in force' }}</dd>
+        </dl>
+        <h3>Today and this month (UTC)</h3>
+        <ul class="plain">{% for q in limits.quotas %}{% if q.limit is not null or q.used > 0 %}<li>{{ q.metric|label('quota_metric') }}, {{ q.period == 'day' ? 'today' : 'this month' }}: {{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}</li>{% endif %}{% endfor %}</ul>
+        <p class="muted">Work beyond a quota is refused with HTTP 429 (problem type quota-exceeded) until the period resets. <a href="{{ path('dashboard_client_usage', {clientId: cid}) }}">All limits and usage</a></p>
+    </section>
+
     <section class="card">
         <h2>Validation</h2>
         <dl>

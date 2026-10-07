@@ -45,13 +45,17 @@ type Config struct {
 	DomainConcurrency int
 	DomainRatePerMin  int
 	DeferralBackoff   time.Duration
-	DSNNotify         string
-	DSNRet            string
-	FilePollInterval  time.Duration
-	ReconcileInterval time.Duration
-	ReconcileGrace    time.Duration
-	ReconcileMinSnaps int
-	SnapshotInterval  time.Duration
+	// Phase 8 (specification 2.9): an installation-wide submission ceiling for
+	// warm-up (0 = none) and the per-client rate of throttled clients.
+	GlobalRatePerMin    int
+	ThrottledClientRate int
+	DSNNotify           string
+	DSNRet              string
+	FilePollInterval    time.Duration
+	ReconcileInterval   time.Duration
+	ReconcileGrace      time.Duration
+	ReconcileMinSnaps   int
+	SnapshotInterval    time.Duration
 
 	// Phase 5 (D-18, D-30): global suppression policy and DSN spool retention.
 	SoftBounceThreshold int
@@ -156,6 +160,8 @@ func Load(get func(string) string) (*Config, error) {
 		DomainConcurrency:   r.integer("DELIVERY_PER_DOMAIN_CONCURRENCY", 1),
 		DomainRatePerMin:    r.integer("DELIVERY_PER_DOMAIN_RATE_PER_MINUTE", 1),
 		DeferralBackoff:     r.seconds("DELIVERY_DEFERRAL_BACKOFF_SECONDS", 1),
+		GlobalRatePerMin:    r.integer("DELIVERY_GLOBAL_RATE_PER_MINUTE", 0),
+		ThrottledClientRate: r.integer("DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE", 1),
 		DSNNotify:           r.required("DELIVERY_DSN_NOTIFY"),
 		DSNRet:              r.required("DELIVERY_DSN_RET"),
 		FilePollInterval:    r.seconds("DELIVERY_FILE_POLL_INTERVAL_SECONDS", 1),
@@ -200,6 +206,17 @@ func Load(get func(string) string) (*Config, error) {
 	}
 	return c, nil
 }
+
+// HoldSendWork reports the production state before live activation
+// (SMARTHOST_ENV=production, SMARTHOST_LIVE_DELIVERY_ENABLED=false): send jobs
+// are not claimed, so no campaign mail reaches Postfix. DSN, log ingestion and
+// reconciliation still run. In development/test, capture mode submits normally
+// (Postfix relays to Mailpit).
+func (c *Config) HoldSendWork() bool { return c.Env == "production" && !c.LiveDelivery }
+
+// PauseFlagPath is the operator's emergency-pause flag in the shared observability
+// volume, written by Postfix's smarthost-postfix-control (Go reads it only).
+func (c *Config) PauseFlagPath() string { return c.ObservabilityDir + "/control/outbound-paused" }
 
 // SubmissionAddr is host:port of Postfix's authenticated submission service.
 func (c *Config) SubmissionAddr() string {

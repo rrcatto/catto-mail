@@ -5,4 +5,4 @@ Description=Smarthost Postfix log rotation and retention
 
 [Service]
 Type=oneshot
-ExecStart=@GENERATED@/podman/smarthost-pod.sh postfix-exec smarthost-postfix-logrotate
+ExecStart=@GENERATED@/podman/@TOPOLOGY@ postfix-exec smarthost-postfix-logrotate

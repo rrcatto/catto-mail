@@ -23,6 +23,26 @@ func valid() map[string]string {
 		"DELIVERY_RECONCILE_INTERVAL_SECONDS": "300", "DELIVERY_RECONCILE_GRACE_SECONDS": "3600", "DELIVERY_RECONCILE_MIN_SNAPSHOTS": "2",
 		"POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS": "60", "SMARTHOST_LOG_LEVEL": "info", "SMARTHOST_LOG_FORMAT": "json",
 		"DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD": "3", "DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS": "30", "DELIVERY_DSN_RETENTION_DAYS": "7",
+		"DELIVERY_GLOBAL_RATE_PER_MINUTE": "0", "DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE": "10",
+	}
+}
+
+func TestHoldAndRates(t *testing.T) {
+	m := valid()
+	c, _ := Load(func(k string) string { return m[k] })
+	if c.HoldSendWork() || c.GlobalRatePerMin != 0 || c.ThrottledClientRate != 10 || c.PauseFlagPath() != "/obs/control/outbound-paused" {
+		t.Fatalf("development: %+v", c)
+	}
+	m["SMARTHOST_ENV"] = "production"
+	m["DELIVERY_GLOBAL_RATE_PER_MINUTE"] = "30"
+	c, _ = Load(func(k string) string { return m[k] })
+	if !c.HoldSendWork() || c.GlobalRatePerMin != 30 {
+		t.Fatal("production without live delivery holds send work")
+	}
+	m["SMARTHOST_LIVE_DELIVERY_ENABLED"] = "true"
+	c, _ = Load(func(k string) string { return m[k] })
+	if c.HoldSendWork() {
+		t.Fatal("live production does not hold")
 	}
 }
 
@@ -55,6 +75,8 @@ func TestFailsClosed(t *testing.T) {
 		"zero threshold":       func(m map[string]string) { m["DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD"] = "0" },
 		"missing retention":    func(m map[string]string) { delete(m, "DELIVERY_DSN_RETENTION_DAYS") },
 		"bad integer":          func(m map[string]string) { m["DELIVERY_GLOBAL_CONCURRENCY"] = "ten" },
+		"negative global rate": func(m map[string]string) { m["DELIVERY_GLOBAL_RATE_PER_MINUTE"] = "-1" },
+		"zero throttled rate":  func(m map[string]string) { m["DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE"] = "0" },
 		"both value and _FILE": func(m map[string]string) { m["DELIVERY_DB_PASSWORD_FILE"] = "/x" },
 	} {
 		m := valid()

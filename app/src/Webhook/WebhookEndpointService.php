@@ -6,6 +6,7 @@ namespace App\Webhook;
 
 use App\Audit\AuditActor;
 use App\Audit\AuditLogger;
+use App\Client\ClientLimitPolicy;
 use App\Crypto\Keyring;
 use App\Domain\DomainRuleViolation;
 use App\Entity\Client;
@@ -13,6 +14,7 @@ use App\Entity\WebhookEndpoint;
 use App\Enum\WebhookEndpointStatus;
 use App\Enum\WebhookEventType;
 use App\Util\Clock;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
 
@@ -24,6 +26,11 @@ use Symfony\Component\Uid\Uuid;
  * endpoint id). Rotation keeps the previous secret valid for
  * APP_WEBHOOK_SECRET_OVERLAP_HOURS, during which the worker sends both
  * signatures. URLs must be https outside development/test.
+ *
+ * Phase 9: a client has at most its effective number of endpoints
+ * (App\Client\ClientLimitPolicy::maxWebhookEndpoints, enabled or disabled); creations
+ * serialise on the client row. Subscriptions are a non-empty subset of the event
+ * vocabulary (webhook.test excluded), so their number is bounded by it.
  */
 final class WebhookEndpointService
 {
@@ -33,6 +40,7 @@ final class WebhookEndpointService
         private readonly AuditLogger $audit,
         private readonly string $smarthostEnv,
         private readonly int $secretOverlapHours,
+        private readonly ClientLimitPolicy $limits,
     ) {
     }
 
@@ -50,7 +58,10 @@ final class WebhookEndpointService
         $sealed = $this->keyring->encrypt($secret, self::purpose($id));
         $endpoint = new WebhookEndpoint($client, $url, $types, $sealed['ciphertext'], $sealed['key_id'], $id);
 
-        $this->em->wrapInTransaction(function () use ($endpoint, $actor): void {
+        $this->assertBelowLimit($client);
+        $this->em->wrapInTransaction(function () use ($endpoint, $client, $actor): void {
+            $this->em->lock($client, LockMode::PESSIMISTIC_WRITE);
+            $this->assertBelowLimit($client);
             $this->em->persist($endpoint);
             $this->em->flush();
             $this->audit->record($actor, 'webhook_endpoint.created', 'webhook_endpoint', $endpoint->getId()->toRfc4122(), [
@@ -59,6 +70,15 @@ final class WebhookEndpointService
         });
 
         return [$endpoint, $secret];
+    }
+
+    private function assertBelowLimit(Client $client): void
+    {
+        $count = (int) $this->em->getConnection()->fetchOne('SELECT count(*) FROM webhook_endpoints WHERE client_id = ?', [$client->getId()->toRfc4122()]);
+        if ($count >= $this->limits->maxWebhookEndpoints($client)) {
+            throw new DomainRuleViolation(\sprintf('The client already has %d webhook endpoints; its limit is %d. Reuse or edit an existing endpoint.',
+                $count, $this->limits->maxWebhookEndpoints($client)));
+        }
     }
 
     /** @param list<string> $eventTypes */

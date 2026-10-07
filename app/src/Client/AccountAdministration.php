@@ -17,7 +17,8 @@ use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * Administrative changes to clients, dashboard users and client memberships
- * (D-12). Every change is audited. There are no passwords: users sign in with
+ * (D-12). Every change is audited. Client status changes belong to the lifecycle
+ * (App\Client\ClientLifecycle::changeStatus, with a reason and the transition rules). There are no passwords: users sign in with
  * emailed single-use links (App\Security\LoginLinkService); installation-wide
  * roles are managed by App\Access\AccessControl.
  */
@@ -27,39 +28,18 @@ final class AccountAdministration
         private readonly EntityManagerInterface $em,
         private readonly AuditLogger $audit,
         private readonly DashboardUserProvider $users,
+        private readonly ClientLifecycle $lifecycle,
     ) {
     }
 
+    /**
+     * Creates a client record (App\Client\ClientLifecycle::create). A client created active
+     * by an operator is an internal client: it is approved at once and exempt from policy
+     * acceptance. A pending_approval client goes through the approval workflow.
+     */
     public function createClient(string $companyName, string $contactEmail, string $plan, ClientStatus $status, AuditActor $actor): Client
     {
-        if ('' === trim($companyName) || '' === trim($plan) || !filter_var(trim($contactEmail), \FILTER_VALIDATE_EMAIL)) {
-            throw new DomainRuleViolation('A client needs a company name, a plan and a valid contact email.');
-        }
-        $client = new Client(trim($companyName), trim($contactEmail), trim($plan));
-        $client->setStatus($status);
-
-        return $this->em->wrapInTransaction(function () use ($client, $actor): Client {
-            $this->em->persist($client);
-            $this->em->flush();
-            $this->audit->record($actor, 'client.created', 'client', $client->getId()->toRfc4122(),
-                ['company_name' => $client->getCompanyName(), 'status' => $client->getStatus()->value, 'plan' => $client->getPlan()]);
-
-            return $client;
-        });
-    }
-
-    public function setClientStatus(Client $client, ClientStatus $status, AuditActor $actor): void
-    {
-        $from = $client->getStatus();
-        if ($from === $status) {
-            return;
-        }
-        $this->em->wrapInTransaction(function () use ($client, $status, $from, $actor): void {
-            $client->setStatus($status);
-            $this->em->flush();
-            $this->audit->record($actor, 'client.status_changed', 'client', $client->getId()->toRfc4122(),
-                ['from' => $from->value, 'to' => $status->value]);
-        });
+        return $this->lifecycle->create($companyName, $contactEmail, $plan, $status, $actor, ClientStatus::PendingApproval === $status);
     }
 
     /** Login emails are unique case-insensitively (users_email_uq). */

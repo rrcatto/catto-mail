@@ -43,3 +43,25 @@ func TestListLoadFreshness(t *testing.T) {
 		t.Fatal("stale snapshots must give no run")
 	}
 }
+
+func TestDepthCountsTheNewestSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, ok, err := Depth(dir); ok || err != nil {
+		t.Fatal("no snapshot: not ok, no error")
+	}
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	write(t, dir, now.Add(-2*time.Minute), `{"queue_name":"deferred","queue_id":"OLD"}`+"\n")
+	write(t, dir, now, `{"queue_name":"active","queue_id":"A1"}
+{"queue_name":"deferred","queue_id":"D1"}
+{"queue_name":"deferred","queue_id":"D2"}
+{"queue_name":"hold","queue_id":"H1"}
+{"queue_name":"maildrop","queue_id":"M1"}
+`)
+	at, c, ok, err := Depth(dir)
+	if err != nil || !ok || !at.Equal(now) {
+		t.Fatalf("%v %v %v", at, ok, err)
+	}
+	if c["active"] != 1 || c["deferred"] != 2 || c["hold"] != 1 || c["incoming"] != 1 {
+		t.Fatalf("counts %v", c)
+	}
+}

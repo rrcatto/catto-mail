@@ -119,7 +119,7 @@ if ('prepare' === $command) {
     $check(202 === $s, "suspended-client job creation returned $s");
     // The kernel resets its services between requests: reload the client in the current entity manager.
     $fresh = $container->get('doctrine')->getManager()->find(App\Entity\Client::class, $soon->getId());
-    $container->get(AccountAdministration::class)->setClientStatus($fresh, ClientStatus::Suspended, $actor);
+    $container->get(\App\Client\ClientLifecycle::class)->changeStatus($fresh, ClientStatus::Suspended, $actor, 'phase 3 e2e: suspension while leased');
     [$s] = $api('POST', '/v1/validation-jobs', $soonKey, ['addresses' => [['address' => 'c@example.test']]], ['Idempotency-Key' => 'e2e-susp2-'.bin2hex(random_bytes(6))]);
     $check(403 === $s, "D-31: a suspended client's new job must be 403, got $s");
 

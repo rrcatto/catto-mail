@@ -52,6 +52,17 @@ final class ConsoleCommandTest extends ApiTestCase
         $again = self::fields($this->console('smarthost:dev:bootstrap', []));
         self::assertSame($f['client_id'], $again['client_id']);
         self::assertNotSame($f['api_key'], $again['api_key']);
+
+        // Phase 9: repeated runs never hit the key limit; the oldest bootstrap keys are revoked (audited), the newest stay usable.
+        for ($i = 0; $i < 11; ++$i) {
+            static::bootKernel();
+            $last = $this->console('smarthost:dev:bootstrap', []);
+            self::assertSame(0, $last->getStatusCode(), $last->getDisplay());
+        }
+        $usable = 'SELECT count(*) FROM api_keys WHERE client_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())';
+        self::assertSame(10, (int) Db::owner()->fetchOne($usable, [$f['client_id']]), 'APP_CLIENT_API_KEY_LIMIT in the test pod');
+        self::assertNotNull(Db::owner()->fetchOne('SELECT revoked_at FROM api_keys WHERE key_hash = ?', [hash('sha256', $f['api_key'])]), 'the oldest key was revoked');
+        self::assertSame(200, $this->api('GET', '/v1/send-jobs/'.$job['id'], self::fields($last)['api_key'])->getStatusCode());
     }
 
     public function testDevBootstrapIsRefusedInProduction(): void
@@ -73,6 +84,10 @@ final class ConsoleCommandTest extends ApiTestCase
         static::bootKernel();
         self::assertSame(0, $this->console('smarthost:api-key:revoke', ['api-key-id' => $key['api_key_id']])->getStatusCode());
         self::assertSame(401, $this->api('GET', '/v1/send-jobs/01999999-0000-7000-8000-000000000000', $key['api_key'])->getStatusCode());
+        static::bootKernel();
+        $list = preg_replace('/\s+/', ' ', $this->console('smarthost:api-key:list', ['client-id' => $client])->getDisplay());
+        self::assertMatchesRegularExpression('/'.$key['api_key_id'].' \S+ ci .* revoked/', $list);
+        self::assertStringNotContainsString($key['api_key'], $list, 'never the secret');
 
         static::bootKernel();
         $domain = self::fields($this->console('smarthost:domain:add', ['client-id' => $client, 'domain' => 'console.example']));
@@ -92,6 +107,15 @@ final class ConsoleCommandTest extends ApiTestCase
         self::assertSame(0, $this->console('smarthost:user:role', ['email' => $email, 'role' => 'operator', 'action' => 'grant'])->getStatusCode());
         self::assertSame(['OPERATOR'], Db::owner()->fetchFirstColumn('SELECT r.role_key FROM user_roles ur JOIN roles r ON r.id = ur.role_id JOIN users u ON u.id = ur.user_id WHERE lower(u.email) = lower(?)', [$email]));
         self::assertSame(1, $this->console('smarthost:user:role', ['email' => $email, 'role' => 'NOPE', 'action' => 'grant'])->getStatusCode());
+        // Phase 9: a status change names the operator (with the transition's permission) and a reason.
+        self::assertSame(1, $this->console('smarthost:client:set-status', ['client-id' => $client, 'status' => 'suspended'])->getStatusCode(), 'operator required');
+        self::assertSame(1, $this->console('smarthost:client:set-status', ['client-id' => $client, 'status' => 'suspended', '--operator' => $email])->getStatusCode(), 'reason required');
+        self::assertSame(0, $this->console('smarthost:client:set-status', ['client-id' => $client, 'status' => 'suspended', '--operator' => $email,
+            '--note' => 'console test'])->getStatusCode());
+        self::assertSame(1, $this->console('smarthost:client:set-status', ['client-id' => $client, 'status' => 'pending_approval', '--operator' => $email,
+            '--note' => 'console test'])->getStatusCode(), 'nothing returns to pending_approval');
+        $suspended = Db::owner()->fetchAssociative("SELECT actor_type, detail_json->>'note' AS note FROM audit_log WHERE action = 'client.suspended' AND target_id = ?", [$client]);
+        self::assertSame(['actor_type' => 'user', 'note' => 'console test'], $suspended);
         self::assertSame(0, $this->console('smarthost:user:set-status', ['email' => $email, 'status' => 'disabled'])->getStatusCode());
 
         $hook = self::fields($this->console('smarthost:webhook:add', ['client-id' => $client, 'url' => 'https://hooks.example/c', '--event' => ['send.completed']]));
@@ -99,12 +123,11 @@ final class ConsoleCommandTest extends ApiTestCase
         $rot = self::fields($this->console('smarthost:webhook:rotate-secret', ['webhook-endpoint-id' => $hook['webhook_endpoint_id']]));
         self::assertNotSame($hook['signing_secret'], $rot['signing_secret']);
         self::assertSame(0, $this->console('smarthost:webhook:set-status', ['webhook-endpoint-id' => $hook['webhook_endpoint_id'], 'status' => 'disabled'])->getStatusCode());
-        self::assertSame(0, $this->console('smarthost:client:set-status', ['client-id' => $client, 'status' => 'suspended'])->getStatusCode());
 
         $actions = Db::owner()->fetchFirstColumn("SELECT DISTINCT action FROM audit_log WHERE actor_type = 'system' AND actor_id LIKE 'console:%'");
         foreach (['client.created', 'api_key.created', 'api_key.revoked', 'sending_domain.created', 'sending_domain.verified', 'sending_domain.dkim_changed',
             'user.created', 'client_membership.created', 'user.role_granted', 'user.disabled', 'webhook_endpoint.created',
-            'webhook_endpoint.secret_rotated', 'webhook_endpoint.disabled', 'client.status_changed'] as $action) {
+            'webhook_endpoint.secret_rotated', 'webhook_endpoint.disabled'] as $action) {
             self::assertContains($action, $actions);
         }
     }

@@ -20,7 +20,7 @@ final class ReferenceSchemaEquivalenceTest extends TestCase
         $reference = Catalog::describe(Db::owner(Db::databaseName().'_reference'));
         $migrated = Catalog::describe(Db::owner());
 
-        self::assertCount(30, $reference['tables']);
+        self::assertCount(39, $reference['tables']);
         self::assertSame([], Catalog::diff($reference, $migrated));
         // Sanity: the comparison really covers the objects.
         self::assertGreaterThan(250, \count($migrated['columns']));
@@ -47,7 +47,7 @@ final class ReferenceSchemaEquivalenceTest extends TestCase
     public function testMigrationsAreRecordedAndOwnedByTheSchemaOwner(): void
     {
         $c = Db::owner();
-        self::assertSame(11, (int) $c->fetchOne('SELECT count(*) FROM doctrine_migration_versions'));
+        self::assertSame(13, (int) $c->fetchOne('SELECT count(*) FROM doctrine_migration_versions'));
         $owners = $c->fetchFirstColumn("SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'");
         self::assertSame([Db::env('SMARTHOST_DB_OWNER_USER')], $owners);
     }

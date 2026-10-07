@@ -117,11 +117,11 @@ if [[ " $SCEN " == *" B "* ]]; then
   CLIENT_T="$(console smarthost:client:create --company "Phase5 E2E trusted $T" --contact-email t@smarthost-dev.test --status active | field client_id)"
   console smarthost:client:global-suppressions "$CLIENT_T" enable --operator "$OPERATOR" --note "e2e trusted client" >/dev/null
   KEY_T="$(console smarthost:api-key:create "$CLIENT_T" --name e2e | field api_key)"
-  console smarthost:client:set-status "$CLIENT_T" suspended >/dev/null
+  console smarthost:client:set-status "$CLIENT_T" suspended --operator "$OPERATOR" --note "e2e suspension" >/dev/null
   ot="$(drv optout "$KEY_T" "suspended.$T@example.net")"; tid="$(jget "d['body'].get('id', '')" <<<"$ot")"
   [[ "$(jget "d['code']" <<<"$ot")" == 201 ]] && pass "a suspended trusted client creates an opt-out (do-not-contact)" || fail "suspended create: $ot"
   [[ "$(drv lift "$KEY_T" "$tid" | jget "d['code']")" == 403 ]] && pass "a suspended trusted client cannot lift it" || fail "suspended lift"
-  console smarthost:client:set-status "$CLIENT_T" active >/dev/null
+  console smarthost:client:set-status "$CLIENT_T" active --operator "$OPERATOR" --note "e2e reactivation" >/dev/null
   [[ "$(drv lift "$KEY_T" "$tid" | jget "d['code']")" == 200 ]] && pass "once active again it can lift its own opt-out" || fail "active lift"
 fi
 

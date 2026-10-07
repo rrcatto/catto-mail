@@ -12,7 +12,15 @@ is its only client.
   signed.
 - If OpenDKIM fails, Postfix tempfails and Go retries. Mail is never sent unsigned.
 
-Files: `Containerfile`, `entrypoint.sh` (configuration from the environment contract) and
-`dev-key.sh` (generates a disposable development key, refused outside `development`/`test`; run by
-`smarthostctl dkim-dev-key`). Production keys arrive in Phase 8.
+Files:
+- `Containerfile`;
+- `entrypoint.sh`: configuration from the environment contract;
+- `dev-key.sh`: generates a disposable development key; refused outside `development`/`test`; run
+  by `smarthostctl dkim-dev-key`;
+- `dkim-key.sh` (`smarthost-dkim-key`): production keys (Phase 8), run by `smarthostctl prod dkim`.
+  - Commands: `generate`, `activate`, `retire`, `dns`, `pubkey`, `list`.
+  - Several domains and selectors at once.
+  - A new key signs only after `activate`. Generation never overwrites a key, and the active
+    selector cannot be retired.
+  - Planned rotation: generate, publish, activate, wait, retire (runbook §6).
 Contract: `docs/architecture/postfix-integration.md` §2.

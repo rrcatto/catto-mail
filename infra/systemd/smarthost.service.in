@@ -1,7 +1,10 @@
-# Starts and stops the persistent `smarthost` pod (D-35) with the engine host's
-# user manager, i.e. when the Podman machine boots and shuts down. It never
-# creates or removes the pod or its containers: ExecStop is `podman pod stop`,
-# and there is deliberately no ExecStopPost. The pod may equally be stopped and
+# Starts and stops the persistent Smarthost topology (D-35) with the engine
+# host's user manager, i.e. when the Podman machine (development) or the
+# production host (Phase 8, lingering user) boots and shuts down. It drives the
+# rendered topology script: smarthost-pod.sh (the development pod) or
+# smarthost-production.sh (the production containers and networks). It never
+# creates or removes containers: ExecStop only stops them, and there is
+# deliberately no ExecStopPost. In development the pod may equally be stopped and
 # started from Podman Desktop or with `podman pod stop|start smarthost`; this
 # unit then keeps its last state and does not interfere.
 #
@@ -10,7 +13,7 @@
 # Desktop starts the pod, not to this unit's cgroup; KillMode=process keeps a
 # failed or stopped unit from killing anything but its own script.
 [Unit]
-Description=Smarthost development pod (start/stop of the persistent pod; never removes it)
+Description=Smarthost persistent topology (@TOPOLOGY@ start/stop; never removes containers)
 Wants=podman.socket smarthost-postfix-queue-snapshot.timer smarthost-postfix-logrotate.timer
 After=podman.socket
 
@@ -19,8 +22,8 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
 KillMode=process
-ExecStart=@GENERATED@/podman/smarthost-pod.sh start
-ExecStop=@GENERATED@/podman/smarthost-pod.sh stop
+ExecStart=@GENERATED@/podman/@TOPOLOGY@ start
+ExecStop=@GENERATED@/podman/@TOPOLOGY@ stop
 TimeoutStartSec=900
 TimeoutStopSec=120
 

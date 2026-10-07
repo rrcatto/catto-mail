@@ -3,6 +3,9 @@
 {% block title %}Clients{% endblock %}
 {% block body %}
 <h1>Clients</h1>
+<p><a href="{{ path('dashboard_operator_clients', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}) }}">Approval queue</a> (pending approval, oldest first)
+   · <a href="{{ path('dashboard_operator_clients', {status: 'throttled'}) }}">Throttled</a>
+   · <a href="{{ path('dashboard_operator_clients', {status: 'suspended'}) }}">Suspended</a></p>
 <form method="get" class="filters" role="search" aria-label="Filter clients">
     {{ ui.select('status', 'Status', label_options('client_status'), filters.status) }}
     <label>Name or contact contains <input type="text" name="q" value="{{ filters.q }}"></label>
@@ -12,13 +15,35 @@
 </form>
 {% if page.rows is empty %}<p class="empty">No clients match.</p>{% else %}
 <table>
-    <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Company') }}</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">Plan</th><th scope="col">Global opt-outs</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
+    <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Organisation') }}</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">{{ ui.sort(listing, 'status_changed', 'Status since') }}</th><th scope="col">Approved</th><th scope="col">Plan</th><th scope="col">Open alerts</th><th scope="col">Global opt-outs</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
     <tbody>{% for c in page.rows %}
-        <tr><td><a href="{{ path('dashboard_operator_client', {id: c.id}) }}">{{ c.company_name }}</a></td><td>{{ c.contact_email }}</td>
-            <td>{{ ui.status(c.status, 'client_status') }}</td><td>{{ c.plan }}</td><td>{{ c.can_submit_global_suppressions ? 'Permitted' : 'No' }}</td>
+        <tr><td><a href="{{ path('dashboard_operator_client', {id: c.id}) }}">{{ c.company_name }}</a>{% if c.origin == 'public_application' %} <span class="tag">application</span>{% endif %}</td><td>{{ c.contact_email }}</td>
+            <td>{{ ui.status(c.status, 'client_status') }}</td><td>{{ c.status_changed_at|ts }}</td><td>{{ c.approved_at|ts }}</td><td>{{ c.plan }}</td>
+            <td>{% if c.open_alerts > 0 %}<strong>{{ c.open_alerts }}</strong> ({{ c.worst_alert|label('alert_severity') }}){% else %}—{% endif %}</td>
+            <td>{{ c.can_submit_global_suppressions ? 'Permitted' : 'No' }}</td>
             <td class="num">{{ c.verified_domains }}</td><td>{{ c.created_at|ts }}</td></tr>
     {% endfor %}</tbody>
 </table>
 {% endif %}
 {{ ui.pager(page, 'clients') }}
+
+{% if is_granted('PLATFORM.CLIENT.APPROVE') %}
+<section class="card">
+    <h2>Create a client record</h2>
+    <p class="muted">The record starts <em>pending approval</em>: it cannot create work until you approve it on its page, after reviewing it, setting its limits and recording its policy acceptance where required. Users, memberships and API keys come after approval.</p>
+    <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="stack">
+        {{ ui.csrf() }}
+        <label>Organisation name <input type="text" name="company_name" required maxlength="200"></label>
+        <label>Primary operational contact (email) <input type="email" name="contact_email" required maxlength="320"></label>
+        <label>Billing contact (email, if different) <input type="email" name="billing_contact_email" maxlength="320"></label>
+        <label>Abuse/security contact (email) <input type="email" name="abuse_contact_email" maxlength="320"></label>
+        <label>Plan <input type="text" name="plan" value="standard" required maxlength="100"></label>
+        <label>Service policy acceptance
+            <select name="policy_acceptance"><option value="required">Required before approval (external client)</option><option value="exempt">Exempt (internal client)</option></select>
+        </label>
+        <label>Private note (optional, operators only) <textarea name="note" maxlength="4000" rows="2"></textarea></label>
+        <button type="submit">Create pending client</button>
+    </form>
+</section>
+{% endif %}
 {% endblock %}

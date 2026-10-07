@@ -68,6 +68,32 @@ final class Labels
         'dkim_status' => ['not_configured' => 'Not configured', 'pending_dns' => 'Pending DNS', 'active' => 'Active', 'disabled' => 'Disabled'],
         'dsn_status' => ['open' => 'Open', 'match_requested' => 'Match requested (awaiting delivery daemon)', 'matched' => 'Matched', 'dismissed' => 'Dismissed'],
         'usage_type' => ['validation_address' => 'Validation addresses', 'message_submitted' => 'Messages submitted'],
+        // Phase 9
+        'client_origin' => ['operator' => 'Created by an operator', 'public_application' => 'Public application'],
+        'quota_metric' => ['validation_jobs' => 'Validation jobs', 'validation_addresses' => 'Validation addresses submitted',
+            'send_jobs' => 'Send jobs', 'send_recipients' => 'Send recipients accepted'],
+        'quota_period' => ['day' => 'Today (UTC)', 'month' => 'This month (UTC)'],
+        'alert_metric' => ['hard_bounce_rate' => 'Hard-bounce rate', 'complaint_rate' => 'Complaint rate',
+            'deferral_rate' => 'Deferral / soft-bounce rate', 'volume_increase' => 'Volume increase'],
+        'alert_severity' => ['warning' => 'Warning', 'critical' => 'Critical'],
+        'statement_status' => ['draft' => 'Draft', 'finalized' => 'Finalized', 'exported' => 'Exported', 'void' => 'Void'],
+        'reconciliation_status' => ['consistent' => 'Consistent', 'inconsistent' => 'Inconsistent'],
+        'policy_source' => ['client_dashboard' => 'Accepted in the dashboard', 'operator_recorded' => 'Recorded by an operator'],
+        'limit' => [
+            'api_requests_per_minute' => 'API requests per minute (all keys)', 'validation_jobs_per_day' => 'Validation jobs per day',
+            'validation_addresses_per_day' => 'Validation addresses per day', 'validation_addresses_per_month' => 'Validation addresses per month',
+            'send_jobs_per_day' => 'Send jobs per day', 'send_recipients_per_day' => 'Send recipients per day',
+            'send_recipients_per_month' => 'Send recipients per month', 'max_recipients_per_send_job' => 'Recipients per send job',
+            'max_api_keys' => 'Usable API keys', 'max_webhook_endpoints' => 'Webhook endpoints', 'max_sending_domains' => 'Sending domains',
+        ],
+        // What each client status means for the client (shown on the client's own overview).
+        'client_status_meaning' => [
+            'pending_approval' => 'Your account awaits approval. You can sign in and read, but you cannot create validation or send jobs yet.',
+            'active' => 'Your account is approved. Work is accepted within the limits shown below.',
+            'throttled' => 'Your account is throttled by the operator: sending is paced more slowly and the API accepts fewer requests per minute. You can still create work.',
+            'suspended' => 'Your account is suspended by the operator: new validation and send work is refused and work in progress is paused. You can still read your data. Contact the operator.',
+            'closed' => 'Your account is closed.',
+        ],
     ];
 
     #[AsTwigFilter('label')]

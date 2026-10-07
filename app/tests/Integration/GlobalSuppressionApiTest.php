@@ -58,8 +58,7 @@ final class GlobalSuppressionApiTest extends ApiTestCase
     public function testPendingOrSuspendedTrustedClientsMayCreateButNotLift(): void
     {
         // Fetched per call: the HTTP kernel reboots between requests (a held service would use a stale entity manager).
-        $setStatus = fn ($client, ClientStatus $status) => $this->service(\App\Client\AccountAdministration::class)
-            ->setClientStatus($this->reload($client), $status, self::actor());
+        $setStatus = fn ($client, ClientStatus $status) => $this->setClientStatus($client, $status);
         foreach ([ClientStatus::Suspended, ClientStatus::PendingApproval] as $status) {
             [$client, $key] = $this->trustedClient();
             $before = $this->assertContract($this->optOut($key, ['email_address' => self::address()]), 201, '/global-suppressions', 'post');

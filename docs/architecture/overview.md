@@ -1,6 +1,6 @@
 # Smarthost Architecture Overview
 
-**Status:** summary of specification 2.7. The authoritative sources are
+**Status:** summary of specification 2.10. The authoritative sources are
 `docs/20260908-1644-smarthost-llm-spec.yaml` and its human-readable companion
 `docs/20260908-1644-smarthost-human-specification.md`. If this page disagrees with them, they win.
 It adds no architecture of its own. It maps the specification onto the contract files and shows
@@ -16,6 +16,7 @@ the main flows on one page.
 | Configuration | `instruction_for_llm.normative_contracts` | `docs/contracts/environment.md`, `infra/.env.example` |
 | Postfix, OpenDKIM, logs, snapshots, DSN spool, reconciliation | `go_delivery.initial_integration_strategy`, `opendkim`, `transport_reconciliation`, `inbound_bounce_handling` | `docs/architecture/postfix-integration.md` |
 | Global suppression policy, recipient global opt-out (D-30) | `suppression_and_reputation.global_suppression_policy`, `api.authentication.capabilities` | `docs/contracts/status-vocabulary.yaml`, `docs/api/openapi.v1.yaml`, `docs/schema/schema.md` |
+| Client lifecycle, limits and quotas, usage and billing statements, reputation alerts (Phase 9) | `saas_operations` | `docs/contracts/status-vocabulary.yaml`, `docs/schema/schema.md`, `docs/contracts/environment.md`, `docs/production/onboarding.md` |
 | Cross-language conventions | `instruction_for_llm.implementation_style` | `docs/architecture/conventions.md` |
 | Decision history (log only, not authority) | `revision_history` | `docs/architecture/open-decisions.md` |
 
@@ -138,11 +139,35 @@ stateDiagram-v2
     }
 ```
 
+```mermaid
+stateDiagram-v2
+    state "clients.status (Phase 9)" as C {
+        [*] --> pending_approval
+        pending_approval --> active: approve (APPROVE)
+        pending_approval --> closed: reject (APPROVE)
+        active --> throttled: RESTRICT
+        active --> suspended: RESTRICT
+        throttled --> active: RESTRICT
+        throttled --> suspended: RESTRICT
+        suspended --> active: reactivate (APPROVE)
+        suspended --> throttled: APPROVE
+        active --> closed: APPROVE
+        throttled --> closed: APPROVE
+        suspended --> closed: APPROVE
+        closed --> [*]
+    }
+```
+
+Every client transition needs a reason and is audited. Quotas are admitted in the transaction
+that creates the work; reputation alerts inform operators and never change a client.
+
 ## 8. Network exposure
 
-| Service | Production public | Development published |
+| Service | Production public (specification 2.9) | Development published |
 |---|---|---|
-| nginx (published by the `smarthost` pod) | 443 | `127.0.0.1:8443` |
-| Postfix | 25 (bounce domain only), 587 (authenticated) | none, or loopback for tests |
+| nginx (development: published by the `smarthost` pod; production: its own container, given 443 and 25 by the systemd ingress socket so client addresses are preserved) | 443 | `127.0.0.1:8443` |
+| Postfix | 25 (bounce domain only; in production reached through nginx with the PROXY protocol); 587 is internal only (the delivery daemon and the application authenticate on the internal network; clients use the API, never Postfix) | none, or loopback for tests |
 | PHP-FPM, webhook worker, OpenDKIM, Python, Go, PostgreSQL | **none** | **none** |
 | Mailpit | n/a | `127.0.0.1:8026` |
+
+Production network matrix and egress: `docs/production/README.md`.

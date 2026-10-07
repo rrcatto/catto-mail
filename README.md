@@ -4,7 +4,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 **bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
 start, so it can later serve third-party clients as a SaaS.
 
-**Version:** 0.1.7 · **Status:** Phases 0–6 complete; Phase 7 Smarthost side complete (webhook delivery, specification 2.8); real first-client integration outstanding
+**Version:** 0.1.8 · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phase 8 repository-side production readiness and Phase 9 repository-side public SaaS hardening implemented (v0.1.8, specification 2.10; public onboarding disabled); live production steps and real first-client integration outstanding
 
 ---
 
@@ -73,10 +73,14 @@ The full file-by-file description and workflow diagrams are in
 
 | Start here | Purpose |
 |---|---|
-| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.8) |
+| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.10) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
 | [docs/development-environment.md](docs/development-environment.md) | Running the Podman environment, the application and the test suites |
+| [docs/production/README.md](docs/production/README.md) | Production topology: network matrix, the socket-activated ingress (client addresses), launch decisions, delivery states, where state lives |
+| [docs/production/runbook.md](docs/production/runbook.md) | Production runbook: VPS, installation, TLS, DNS/PTR/SPF/DKIM/DMARC, activation, seed tests, warm-up, emergencies, backups, upgrades |
+| [docs/production/onboarding.md](docs/production/onboarding.md) | Client onboarding checklist, lifecycle, limits, keys, reputation alerts, usage and billing statements; the public-onboarding decision |
+| [docs/api/integration-guide.md](docs/api/integration-guide.md) | For client developers (served at `/docs/api`): authentication, jobs, limits, webhooks, and what the statuses mean |
 | [docs/README.md](docs/README.md) | Index of all contracts and architecture documents |
 
 ## Quick start (development)
@@ -102,6 +106,10 @@ Desktop's Stop/Start buttons). After `build` or a container-definition change, `
 the pod and containers while keeping every volume. Only `destroy-volumes --yes` deletes data. See
 [docs/development-environment.md](docs/development-environment.md) §2.
 
+Production is a separate command family, `infra/bin/smarthostctl prod help`. It deploys a
+different topology on a dedicated Ubuntu 24.04 host; follow
+[docs/production/runbook.md](docs/production/runbook.md).
+
 The API is then at `https://127.0.0.1:8443/v1` (disposable self-signed certificate). Submitted send
 jobs are delivered by the Go daemon through Postfix and OpenDKIM to Mailpit
 (`http://127.0.0.1:8026`); their messages' events come from the Postfix log.
@@ -120,16 +128,17 @@ python3 scripts/check-contracts.py
 
 | Phase | Status |
 |---|---|
-| 0: Architecture and contracts | **Complete** (current specification 2.8) |
+| 0: Architecture and contracts | **Complete** (current specification 2.10) |
 | 1: Rootless Podman development environment | **Complete.** `smarthostctl verify` passes all 176 checks (including the persistent pod lifecycle and the DSN spool with the Phase 5 daemon); `verify --clean` additionally proves a start from destroyed volumes. |
-| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 244/244 tests pass (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests). |
+| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 248/248 tests pass (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests, and the Phase 8 operations and production-guard tests). |
 | 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 295 pytest tests and the 10,000-address end-to-end run pass. |
 | 4: Go/Postfix delivery pipeline | **Complete.** Leased send-job claiming, exactly-once message creation, suppression lookup, VERP, tracking, MIME and RFC 8058 headers, authenticated submission through OpenDKIM, queue-id capture with content purge and `message_submitted` metering, Postfix log ingestion with persistent cursors, D-27 reconciliation, pacing. `smarthostctl test phase4` (Go unit + PostgreSQL integration) and `test phase4-e2e` (real Postfix/OpenDKIM/Mailpit, crash/restart, 10,000 recipients) pass. |
 | 5: Inbound DSN, complaint and global suppression processing | **Complete** (v0.1.5; the spec 2.5 corrections D-36–D-38 in v0.1.6). D-30: global suppressions with provenance, the trusted-client opt-out API with durable request idempotency and operator capability, RFC 3464/6533 DSN and ARF parsing, correlation only by Smarthost identifiers (VERP, ENVID, Message-ID, queue id; never by recipient), conservative classification, the unmatched-DSN operator workflow, spool claim/reclaim/retention. `smarthostctl test phase5` and `test phase5-e2e` (real Postfix :25 and spool) pass. |
 | 6: Tracking and dashboards | **Complete** (v0.1.6; tracking and dashboard behaviour from specification 2.6, sign-in and ACL from 2.7). Public `/t/o/{token}.gif` and `/t/c/{token}/{n}` with eligibility checks, identical answers for unknown tokens, a bounded recording rule and token-free logs; redirects only to stored targets (open-redirect attempts tested). Client and operator dashboards with passwordless emailed single-use sign-in links (specification 2.7), tenant isolation (foreign ids are 404), keyset pagination, whitelisted sorting/filtering, CSRF-protected POST actions through the existing audited services, CSP. `smarthostctl test phase2` (tracking, dashboards, two-client isolation, operator authorisation, 10,000-row load test with query plans) and `test phase6-e2e` (through nginx against the running pod, sign-in links taken from Mailpit) passes 75/75. |
 | 6.1: Passwordless sign-in, roles and ACL | **Complete** (v0.1.6; specification 2.7). Emailed single-use links through Postfix, `APP_ADMIN_EMAIL` administrator, permission-keyed operator pages, built-in ADMIN/OPERATOR and custom roles, Users and Roles pages; no passwords. |
 | 7: First client API integration | **Smarthost side complete** (v0.1.7; specification 2.8). The real Symfony webhook worker: transactional outbox fan-out; HMAC-SHA256 signatures with rotation overlap; retries with backoff; at-least-once delivery with leases and fencing; SSRF protection with address pinning and no redirects; health and heartbeats. Also `POST /v1/webhooks/test`, dashboard webhook management and delivery visibility. `smarthostctl test phase7-e2e` proves the client workflow without database access using a deterministic external client (an API-only driver and an independent signature-verifying receiver): validation, a 501-recipient batched send, tracking, bounce and complaint webhooks, receiver outage, worker crash with de-duplication, permanent failure with polling fallback, and SSRF refusals. **Outstanding:** integrating the real first client application in its own repository. |
-| 8–9 | Not started |
+| 8: Controlled production launch | **Repository side implemented** (v0.1.8; specification 2.9). A production topology of standalone containers on internal, ingress and egress networks (no published ports: a systemd socket-activated ingress hands 443/25 to nginx, so nginx/Symfony and Postfix see real client addresses), `smarthostctl prod` (install, build, TLS, DKIM keys, preflight, live activation, pause, backup/restore, upgrade/rollback, seed test), the production configuration profile and safety rules, held mode until an audited, preflight-gated activation, the production preflight (host, runtime, exposure, ingress, TLS, DNS/PTR/SPF/DKIM/DMARC, bounce domain, Postfix, delivery), an installation-wide warm-up ceiling and per-client throttling, Postfix queue depth on the dashboard, and the runbook. Proven by `smarthostctl test phase8` and a local production rehearsal without Internet egress (`test phase8-rehearsal`). **Outstanding (operator):** VPS, DNS/PTR, certificates, live seed and bounce tests, traffic rollout. |
+| 9: Public SaaS hardening | **Repository side implemented** (v0.1.8; specification 2.10). Client lifecycle with approval, throttling, suspension and closure (reasons, permissions, audit); public onboarding gated off (no public route); service-policy acceptance; per-client limits with concurrency-safe quotas (`429 quota-exceeded`); API-key names and expiry; usage summaries, reconciliation, provider-neutral billing statements and export; reputation metrics and alerts (no automatic action; production timer); webhook endpoint health; public API docs at `/docs/api`; a two-client isolation review and query plans at scale. Plans, prices, policy text, threshold calibration and opening public onboarding are owner decisions ([onboarding.md](docs/production/onboarding.md)). |
 
 See [CHANGELOG.md](CHANGELOG.md).
 

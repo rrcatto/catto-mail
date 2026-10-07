@@ -34,6 +34,7 @@ COPY app/composer.json app/composer.lock app/symfony.lock /srv/app/
 RUN composer install --no-scripts --no-autoloader --prefer-dist && composer check-platform-reqs
 COPY app/ /srv/app/
 COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
+COPY docs/api/integration-guide.md /srv/app/config/contracts/integration-guide.md
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
 # Test-only copies of the schema contracts (structural-equivalence and grant tests).
 COPY docs/schema/reference-schema.sql docs/schema/schema.md docs/contracts/address-normalization-vectors.json /srv/app/tests/contracts/
@@ -49,6 +50,7 @@ RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 FROM base AS runtime
 COPY --from=vendor /srv/app /srv/app
 COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
+COPY docs/api/integration-guide.md /srv/app/config/contracts/integration-guide.md
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
 # Phase 1 infrastructure probes still used by the verification suite.
 COPY app/phase1-probe/ /srv/probe/

@@ -60,7 +60,8 @@ final class WebhookWorkerTest extends ApiTestCase
                 $headers[strtolower($k)] = $v;
             }
             $this->requests[] = ['url' => $url, 'headers' => $headers, 'body' => (string) $options['body'],
-                'resolve' => $options['resolve'] ?? [], 'max_redirects' => $options['max_redirects'] ?? null];
+                'resolve' => $options['resolve'] ?? [], 'max_redirects' => $options['max_redirects'] ?? null,
+                'max_connect_duration' => $options['max_connect_duration'] ?? null];
             $next = array_shift($this->script) ?? new MockResponse('ok', ['http_code' => 200]);
 
             return \is_callable($next) ? $next() : $next;
@@ -410,6 +411,18 @@ final class WebhookWorkerTest extends ApiTestCase
         $row = self::delivery($sent['event']);
         self::assertSame('delivered', $row['status']);
         self::assertLessThanOrEqual(1024, mb_strlen((string) $row['last_response_excerpt']));
+        self::assertSame(2.0, $this->requests[0]['max_connect_duration'], 'a distinct connect timeout (min(5 s, request timeout))');
+
+        // Phase 8: a response-header block over the bound fails the attempt (retried), whatever the status.
+        $client3 = $this->newClient();
+        $this->endpoint($client3);
+        $sent3 = $this->sendCompleted($client3);
+        $this->script = [new MockResponse('ok', ['http_code' => 200, 'response_headers' => ['X-Padding: '.str_repeat('h', WebhookDispatcher::MAX_RESPONSE_HEADER_BYTES)]])];
+        $this->work($this->dispatcher());
+        $row3 = self::delivery($sent3['event']);
+        self::assertSame('pending', $row3['status']);
+        self::assertStringContainsString('Response headers exceed', (string) $row3['last_error']);
+        $this->requests = [];
 
         $sent2 = $this->sendCompleted($client);
         $d = $this->dispatcher();
@@ -417,7 +430,7 @@ final class WebhookWorkerTest extends ApiTestCase
         $this->container()->get(WebhookEndpointService::class)->setStatus($this->reload($endpoint), WebhookEndpointStatus::Disabled, self::actor());
         $d->attempt('w', $d->claim('w', 10));
         self::assertSame('failed', self::delivery($sent2['event'])['status'], 'disabled after fan-out: not sent');
-        self::assertSame(1, \count($this->requests));
+        self::assertSame([], $this->requests);
         self::assertSame('disabled', Db::owner()->fetchOne('SELECT status FROM webhook_endpoints WHERE id = ?', [$endpoint->getId()->toRfc4122()]));
     }
 

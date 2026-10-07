@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -71,6 +72,10 @@ type Job struct {
 	StartedAt                  time.Time
 	DomainName, DomainStatus   string
 	DomainDKIM                 string
+	// Throttled is the client's `throttled` status (Phase 8): its submissions are
+	// paced by DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE. Refreshed at every
+	// lease renewal, so an operator's change applies to running jobs.
+	Throttled atomic.Bool
 }
 
 // Claim leases the oldest claimable job: queued, or processing with an expired
@@ -103,16 +108,18 @@ RETURNING j.id::text`, me, lease.Seconds()).Scan(&id)
 func (s *Store) LoadJob(ctx context.Context, id string) (*Job, error) {
 	j := &Job{ID: id}
 	var listID, senderName, replyEmail, replyName, dkim *string
+	var clientStatus string
 	err := s.Pool.QueryRow(ctx, `
 SELECT j.client_id::text, j.message_class, j.list_id, j.sender_email, j.sender_name, j.reply_to_email,
        j.reply_to_name, j.track_opens, j.track_clicks, j.attempt_count, COALESCE(j.started_at, now()),
-       d.domain, d.status, d.dkim_status
-  FROM send_jobs j JOIN sending_domains d ON d.id = j.sending_domain_id
+       d.domain, d.status, d.dkim_status, c.status
+  FROM send_jobs j JOIN sending_domains d ON d.id = j.sending_domain_id JOIN clients c ON c.id = j.client_id
  WHERE j.id = $1`, id).Scan(&j.ClientID, &j.MessageClass, &listID, &j.SenderEmail, &senderName, &replyEmail,
-		&replyName, &j.TrackOpens, &j.TrackClicks, &j.AttemptCount, &j.StartedAt, &j.DomainName, &j.DomainStatus, &dkim)
+		&replyName, &j.TrackOpens, &j.TrackClicks, &j.AttemptCount, &j.StartedAt, &j.DomainName, &j.DomainStatus, &dkim, &clientStatus)
 	if err != nil {
 		return nil, err
 	}
+	j.Throttled.Store(clientStatus == "throttled")
 	j.ListID, j.SenderName, j.ReplyToEmail, j.ReplyToName, j.DomainDKIM = deref(listID), deref(senderName), deref(replyEmail), deref(replyName), deref(dkim)
 	return j, nil
 }
@@ -126,17 +133,25 @@ func deref(p *string) string {
 
 // Renew extends the lease; false when it was lost.
 func (s *Store) Renew(ctx context.Context, jobID, me string, lease time.Duration) (time.Time, bool, error) {
+	until, _, ok, err := s.RenewStatus(ctx, jobID, me, lease)
+	return until, ok, err
+}
+
+// RenewStatus extends the lease and returns the client's current status
+// (`active` or `throttled`; a suspended or closed client loses the lease).
+func (s *Store) RenewStatus(ctx context.Context, jobID, me string, lease time.Duration) (time.Time, string, bool, error) {
 	var until time.Time
+	var clientStatus string
 	err := s.Pool.QueryRow(ctx, `
 UPDATE send_jobs j SET lease_expires_at = now() + make_interval(secs => $3)
   FROM clients c
  WHERE j.id = $1 AND j.claimed_by = $2 AND j.lease_expires_at > now() AND j.status = 'processing'
    AND c.id = j.client_id AND c.status IN ('active', 'throttled')
-RETURNING j.lease_expires_at`, jobID, me, lease.Seconds()).Scan(&until)
+RETURNING j.lease_expires_at, c.status`, jobID, me, lease.Seconds()).Scan(&until, &clientStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, false, nil
+		return time.Time{}, "", false, nil
 	}
-	return until, err == nil, err
+	return until, clientStatus, err == nil, err
 }
 
 // ---------------------------------------------------------------------------

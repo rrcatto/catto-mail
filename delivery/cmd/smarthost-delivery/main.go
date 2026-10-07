@@ -2,6 +2,7 @@
 //
 //	run [--stats-file PATH]   the daemon: send jobs, Postfix log ingestion, reconciliation,
 //	                          inbound DSN/complaint spool, unmatched-DSN resolutions
+//	version                   print the software version
 //	health                    container health check (heartbeat age)
 //	normalize ADDRESS         print the D-32 normalised form
 //	identity                  uid/gid/groups (Phase 1 verification)
@@ -32,12 +33,16 @@ import (
 	"smarthost.local/delivery/internal/ingest"
 	"smarthost.local/delivery/internal/logx"
 	"smarthost.local/delivery/internal/reconcile"
+	"smarthost.local/delivery/internal/snapshot"
 	"smarthost.local/delivery/internal/store"
 	"smarthost.local/delivery/internal/worker"
 )
 
 // HeartbeatFile is touched while the daemon can reach PostgreSQL.
 const HeartbeatFile = "/tmp/smarthost-delivery-heartbeat"
+
+// Version is the catto-mail software version (app/src/Version.php).
+const Version = "0.1.8"
 
 func main() {
 	cmd := "run"
@@ -47,6 +52,8 @@ func main() {
 	switch cmd {
 	case "run":
 		os.Exit(run(os.Args[2:]))
+	case "version":
+		fmt.Println(Version)
 	case "health":
 		st, err := os.Stat(HeartbeatFile)
 		if err != nil || time.Since(st.ModTime()) > 90*time.Second {
@@ -111,8 +118,10 @@ func run(args []string) int {
 	defer st.Close()
 	st.Policy = store.PolicyConfig{SoftBounceThreshold: cfg.SoftBounceThreshold, SoftBounceWindow: cfg.SoftBounceWindow}
 	w := worker.New(cfg, st, log)
-	log.Info("delivery daemon started", "worker_id", w.Me, "global_concurrency", cfg.GlobalConcurrency,
+	log.Info("delivery daemon started", "worker_id", w.Me, "version", Version, "global_concurrency", cfg.GlobalConcurrency,
 		"per_domain_concurrency", cfg.DomainConcurrency, "per_domain_rate_per_minute", cfg.DomainRatePerMin,
+		"global_rate_per_minute", cfg.GlobalRatePerMin, "throttled_client_rate_per_minute", cfg.ThrottledClientRate,
+		"live_delivery", cfg.LiveDelivery, "send_work_held", cfg.HoldSendWork(),
 		"lease_seconds", int(cfg.Lease.Seconds()), "identity", identity())
 	ing := &ingest.Ingester{Store: st, Log: log, Dir: cfg.ObservabilityDir + "/log", BounceDomain: cfg.BounceDomain, Interval: cfg.FilePollInterval}
 	rec := &reconcile.Reconciler{Store: st, Log: log, ObservabilityDir: cfg.ObservabilityDir, BounceDomain: cfg.BounceDomain,
@@ -132,6 +141,9 @@ func run(args []string) int {
 	for i := 0; i < services; i++ {
 		<-done
 	}
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = st.Stopped(sctx, w.Me)
+	cancel()
 	stats := statsMap(w, spool)
 	log.Info("delivery daemon stopped", "stats", stats)
 	if statsFile != "" {
@@ -145,6 +157,7 @@ func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, spool *ds
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	n := 0
+	started := time.Now()
 	for {
 		pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := st.Pool.Ping(pctx); err == nil {
@@ -152,6 +165,9 @@ func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, spool *ds
 			if f, err := os.Create(HeartbeatFile); err == nil {
 				f.Close()
 				_ = os.Chtimes(HeartbeatFile, now, now)
+			}
+			if err := st.Beat(pctx, beat(w, spool, started)); err != nil && ctx.Err() == nil {
+				log.Warning("delivery heartbeat not recorded", "error", err)
 			}
 		}
 		cancel()
@@ -164,6 +180,21 @@ func heartbeat(ctx context.Context, st *store.Store, w *worker.Worker, spool *ds
 		case <-t.C:
 		}
 	}
+}
+
+// beat is the durable status row: delivery state, warm-up ceiling and the
+// Postfix queue depth of the newest snapshot (read from the observability volume).
+func beat(w *worker.Worker, spool *dsnspool.Processor, started time.Time) store.Heartbeat {
+	h := store.Heartbeat{
+		WorkerID: w.Me, Version: Version, StartedAt: started, LiveDelivery: w.Cfg.LiveDelivery,
+		SendWorkHeld: w.Cfg.HoldSendWork(), OutboundPaused: w.Paused(), GlobalRatePerMin: w.Cfg.GlobalRatePerMin,
+		Submitted: w.Stats.Submitted.Load(), TemporaryFailures: w.Stats.TempFailures.Load(), DSNsProcessed: spool.Stats.Claimed.Load(),
+	}
+	if at, c, ok, err := snapshot.Depth(w.Cfg.ObservabilityDir + "/queue"); err == nil && ok {
+		active, deferred, hold, incoming := c["active"], c["deferred"], c["hold"], c["incoming"]
+		h.QueueSnapshotAt, h.QueueActive, h.QueueDeferred, h.QueueHold, h.QueueIncoming = &at, &active, &deferred, &hold, &incoming
+	}
+	return h
 }
 
 func statsMap(w *worker.Worker, spool *dsnspool.Processor) map[string]any {

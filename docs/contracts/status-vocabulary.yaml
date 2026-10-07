@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.7). Every enum value used in the database, the /v1 API,
+# (specification 2.10). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.4.0"
-specification_version: "2.7"
+vocabulary_version: "2.5.0"
+specification_version: "2.10"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -407,12 +407,46 @@ unmatched_dsn_status:
 # ---------------------------------------------------------------------------
 
 client_status:
+  description: >-
+    clients.status (D-31; lifecycle since specification 2.10). Changes only through the audited
+    client lifecycle service, with an operator note; the transitions below are the only ones.
   values:
-    pending_approval: {origin: contract, meaning: Registered; may not submit meaningful production volume.}
-    active: {origin: contract}
-    throttled: {origin: contract, meaning: Operator-imposed reduced limits.}
-    suspended: {origin: contract, meaning: Job creation refused; workers do not claim or continue its work.}
-    closed: {origin: contract}
+    pending_approval: {origin: contract, terminal: false, meaning: "Registered (operator record or application); awaiting operator approval. Authenticates and reads; creates no work."}
+    active: {origin: contract, terminal: false, meaning: Approved for operation within its limits.}
+    throttled: {origin: contract, terminal: false, meaning: "Operator-imposed reduced pace: delivery paced at DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE and API requests at APP_THROTTLED_CLIENT_API_RATE_PER_MINUTE; may still create work."}
+    suspended: {origin: contract, terminal: false, meaning: Job creation refused; workers do not claim or continue its work.}
+    closed: {origin: contract, terminal: true, meaning: "Final: API keys fail authentication, no work runs; data is retained."}
+  transitions:
+    pending_approval: [active, closed]
+    active: [throttled, suspended, closed]
+    throttled: [active, suspended, closed]
+    suspended: [active, throttled, closed]
+
+client_origin:
+  description: clients.origin (specification 2.10).
+  values:
+    operator: {origin: contract, meaning: Created by an operator (dashboard or console).}
+    public_application: {origin: contract, meaning: "Created through a public application channel; only while APP_PUBLIC_ONBOARDING_ENABLED is true, always pending_approval."}
+
+quota_metric:
+  description: client_quota_usage.metric - admitted work counted against client_limits (specification 2.10).
+  values:
+    validation_jobs: {origin: contract, meaning: Validation jobs created.}
+    validation_addresses: {origin: contract, meaning: Addresses submitted in created validation jobs.}
+    send_jobs: {origin: contract, meaning: Send jobs created.}
+    send_recipients: {origin: contract, meaning: Recipients accepted in recipient batches.}
+
+quota_period:
+  description: client_quota_usage.period - UTC calendar periods (specification 2.10).
+  values:
+    day: {origin: contract}
+    month: {origin: contract}
+
+policy_acceptance_source:
+  description: client_policy_acceptances.source (specification 2.10).
+  values:
+    client_dashboard: {origin: contract, meaning: A client admin accepted the policy version in the dashboard.}
+    operator_recorded: {origin: contract, meaning: "An operator recorded an acceptance made elsewhere (e.g. a signed agreement), with a reference."}
 
 sending_domain_status:
   description: sending_domains.status (D-13).
@@ -521,6 +555,37 @@ webhook_delivery_status:
     pending: {origin: contract, meaning: Awaiting first attempt or a retry at next_attempt_at.}
     delivered: {origin: contract, meaning: Endpoint answered 2xx.}
     failed: {origin: contract, meaning: Retry limit exhausted; visible on the operator dashboard.}
+
+billing_statement_status:
+  description: billing_statements.status - the provider-neutral billing boundary (specification 2.10).
+  values:
+    draft: {origin: contract, terminal: false, meaning: Totals prepared from usage_records; may be recomputed.}
+    finalized: {origin: contract, terminal: false, meaning: Totals frozen for the external billing system.}
+    exported: {origin: contract, terminal: true, meaning: "Taken over by the external billing system (external_reference set)."}
+    void: {origin: contract, terminal: true, meaning: Withdrawn; a new statement may be prepared for the period.}
+  transitions:
+    draft: [finalized, void]
+    finalized: [exported, void]
+
+billing_reconciliation_status:
+  description: billing_statements.reconciliation_status (specification 2.10).
+  values:
+    consistent: {origin: contract, meaning: "Usage records agree with the authoritative jobs and messages, and the statement totals with the usage records."}
+    inconsistent: {origin: contract, meaning: Reconciliation found a difference; the findings are in reconciliation_json.}
+
+client_alert_metric:
+  description: client_alerts.metric - reputation signals with operator thresholds (specification 2.10).
+  values:
+    hard_bounce_rate: {origin: contract, meaning: Messages with a hard bounce / messages submitted in the window (percent).}
+    complaint_rate: {origin: contract, meaning: Messages with a complaint / messages submitted in the window (percent).}
+    deferral_rate: {origin: contract, meaning: Messages deferred or soft-bounced / messages submitted in the window (percent).}
+    volume_increase: {origin: contract, meaning: Messages submitted in the last 24 hours / the daily average of the 7 days before (a factor).}
+
+client_alert_severity:
+  description: client_alerts.severity (specification 2.10).
+  values:
+    warning: {origin: contract}
+    critical: {origin: contract}
 
 audit_actor_type:
   values:

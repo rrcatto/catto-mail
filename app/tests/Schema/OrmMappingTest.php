@@ -20,7 +20,7 @@ final class OrmMappingTest extends KernelTestCase
     private const TYPE_MAP = [
         'uuid' => ['uuid'], 'text' => ['text'], 'timestamptz' => ['timestamp with time zone'],
         'integer' => ['integer'], 'smallint' => ['smallint'], 'bigint' => ['bigint'], 'boolean' => ['boolean'],
-        'jsonb' => ['jsonb'], 'jsonb_map' => ['jsonb'],
+        'jsonb' => ['jsonb'], 'jsonb_map' => ['jsonb'], 'date_immutable' => ['date'], 'decimal' => ['numeric'],
     ];
 
     public function testEveryTableAndColumnIsMappedConsistently(): void
@@ -69,6 +69,6 @@ final class OrmMappingTest extends KernelTestCase
         }
         self::assertSame([], array_keys(array_diff_key($db, $mapped)), 'Tables without an entity');
         self::assertSame([], $problems);
-        self::assertCount(30, $mapped);
+        self::assertCount(39, $mapped);
     }
 }

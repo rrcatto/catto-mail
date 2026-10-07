@@ -7,5 +7,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY entrypoint.sh  /usr/local/bin/smarthost-opendkim-entrypoint
 COPY dev-key.sh     /usr/local/bin/smarthost-dkim-dev-key
+COPY dkim-key.sh    /usr/local/bin/smarthost-dkim-key
 RUN chmod 0755 /usr/local/bin/smarthost-*
 ENTRYPOINT ["/usr/local/bin/smarthost-opendkim-entrypoint"]

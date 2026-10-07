@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.8) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.10) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -46,12 +46,52 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
   workflow through the API and signed webhooks only, with the external receiver fixture in
   `tests/webhook-receiver/`. Integrating the real first client application (its own repository) is
   outstanding.
-- Do not start Phase 8 or later work unless the user explicitly asks for it.
+- **Phase 8** (controlled production launch, spec 2.9): repository side implemented (v0.1.8).
+  - Production topology: `infra/podman/smarthost-production.sh.in`, standalone containers on
+    internal and egress networks.
+  - Tooling: `smarthostctl prod` (`infra/bin/smarthostctl-prod`); preflight
+    `infra/lib/smarthost_preflight.py`; seed test `infra/lib/smarthost_seedtest.py`.
+  - Docs: `docs/production/`.
+  - Tests: `smarthostctl test phase8` (no network) and `test phase8-rehearsal` (the production
+    topology locally, instance `smarthost-rehearsal`, no Internet egress).
+  - The live steps (VPS, DNS/PTR, certificates, seed tests, rollout) are the operator's.
+- **Phase 9** (public SaaS hardening, spec 2.10, `saas_operations`): repository side implemented
+  (v0.1.8).
+  - Client lifecycle (`app/src/Client/ClientLifecycle.php`), limits and quotas
+    (`ClientLimitPolicy`, `QuotaEnforcer`), usage and billing (`app/src/Usage/`), reputation
+    alerts (`app/src/Reputation/`, production timer `<instance>-reputation-evaluate.timer`).
+  - Dashboards: Operator › Clients/Alerts/Usage; Client › API keys.
+  - Public docs at `/docs/api`. Operator guide: `docs/production/onboarding.md`.
+  - Tests are in `smarthostctl test phase2`, including `Phase9TenantIsolationTest` and
+    `Phase9QueryPlanTest`; the rehearsal has a Phase 9 section.
+- Do not start Phase 10 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
 
 ## Rules that are easy to get wrong
+- **Production is not the development pod (Phase 8).**
+  - `smarthostctl prod <command>` acts only on a configuration with `SMARTHOST_ENV=production`;
+    the development commands refuse one.
+  - Production containers are `<instance>-<service>` on `<instance>-internal`/`-ingress`/`-egress`.
+    Only Postfix, validator, webhook worker and the app join egress, and only nginx and Postfix
+    join ingress. **No production container publishes a port:** rootless port forwarding hides
+    client addresses. 443/25 belong to the systemd socket `<instance>-ingress.socket`, which
+    `<instance>-ingress.service` hands to nginx. nginx passes SMTP to Postfix with the PROXY
+    protocol.
+  - Start or stop production nginx only through those units (the topology script), never with
+    plain `podman start`/`restart`. `TRUSTED_PROXIES` stays empty in production.
+  - `prod preflight --section exposure` and `--section ingress` (`prod ingress-check`) enforce
+    this.
+  - The host prerequisite `net.ipv4.ip_unprivileged_port_start=25` is checked by
+    `--section host`.
+  - Production never has a relayhost or Mailpit. Live delivery is activated only by
+    `prod live-enable` (activation preflight, audited, `SYSTEM.DELIVERY.CONTROL`).
+  - Production configuration rules live in `production_errors()` of
+    `infra/lib/smarthost_render.py`; production values in the contract's *Production profile*
+    table.
+  - Never run the rehearsal or any test against a real production host. The rehearsal uses its
+    own instance name and never touches `smarthost-*` development objects.
 - **Podman only, rootless, persistent pod (D-35).** The `smarthost` pod and its containers are
   persistent Podman objects: `stop`/`start`/`restart` keep them (as Podman Desktop does), only
   `smarthostctl recreate` replaces them (volumes kept), and only `destroy-volumes --yes` deletes
@@ -112,6 +152,18 @@ This is a public repository. Documentation, comments, examples, tests, configura
     - There is no `/v1` webhook-endpoint CRUD and no suppression-lookup API.
     - `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` empty means no automatic deletion.
     - Production `APP_WEBHOOK_*` values belong to Phase 8.
+- **SaaS operations (Phase 9, spec 2.10).**
+  - Public onboarding stays disabled (`APP_PUBLIC_ONBOARDING_ENABLED=false`) and has no route.
+    Never add a public registration route without an explicit owner decision.
+  - Create clients and change their status only through `ClientLifecycle`, never by setting
+    `clients.status`. Every transition has its permission and a reason, and is audited.
+  - Volume quotas are admitted only through `QuotaEnforcer::admit`, inside the transaction that
+    creates the work. Never sum `usage_records` to enforce a quota.
+  - `usage_records` is the only metering source (at most one unit per message). Billing
+    statements hold quantities, never prices. No billing provider is chosen.
+  - Reputation alerts never act on a client.
+  - `client_notes`, `client_reputation_metrics` and `client_alerts` are operator-only: never
+    show them to clients (the tenant filter denies them).
 - **Suppressions (D-30).** Automatic suppressions and recipient global opt-outs are global
   (`client_id` NULL); the opt-out reporter is `source_client_id`. Only Go creates `hard_bounce`,
   `complaint` and `repeated_soft_bounce`, through the one policy in `delivery/internal/store/policy.go`;

@@ -60,7 +60,39 @@ documented policy (`App\Webhook\WebhookDispatcher`). Client admins manage endpoi
 *Client › Webhooks*, and operators see deliveries and workers under *Operator › Webhooks*.
 Migration `Version20261007000100`.
 
-**Later phases:** retention commands.
+**Phase 8 (repository-side production readiness, v0.1.8, specification 2.9):**
+- `App\Config\SafetyGuard` refuses, with `SMARTHOST_ENV=production`: the debug kernel
+  (`APP_ENV=dev`), a non-https base URL, or a webhook private-host allowlist. `smarthostctl prod
+  check` requires `APP_ENV=prod`.
+- `smarthost:ops:status [--json]` is the production health summary (the operator overview's
+  signals).
+- `smarthost:ops:record` audits installation-wide delivery controls (live activation, emergency
+  pause). It needs the new ADMIN-only permission `SYSTEM.DELIVERY.CONTROL`.
+- The operator overview shows *Delivery state and Postfix queue*, from `delivery_heartbeats`
+  (migration `Version20261008000100`, written by the Go daemon).
+- The webhook worker has a distinct connect timeout (`APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS`) and a
+  16 KiB response-header bound.
+
+**Phase 9 (repository-side public SaaS hardening, v0.1.8, specification 2.10):**
+- `App\Client\ClientLifecycle` is the only way to create a client or change its status. Each
+  transition needs its permission (`PLATFORM.CLIENT.APPROVE` or `PLATFORM.CLIENT.RESTRICT`) and
+  a reason, and is audited. Public onboarding is gated by `APP_PUBLIC_ONBOARDING_ENABLED`
+  (false), and no route uses it. Approval needs the policy version in force
+  (`APP_ACCEPTABLE_USE_POLICY_VERSION`) when the client requires it.
+- Per-client limits (`ClientLimitPolicy`) under installation ceilings. `QuotaEnforcer` admits
+  volume quotas in the creating transaction: `429 quota-exceeded` with `Retry-After` and a
+  `quota` member.
+- API keys have names and optional expiry; client admins manage their own under *Client › API
+  keys*.
+- `App\Usage`: period summaries, reconciliation, provider-neutral billing statements and
+  export.
+- `App\Reputation`: metrics and alerts, never automatic action. `smarthost:reputation
+  evaluate` runs from the production timer every 15 minutes; in development, run it by hand or
+  from *Operator › Alerts*.
+- Public API documentation at `/docs/api`.
+- Migration `Version20261009000100`. Operator procedures: `docs/production/onboarding.md`.
+
+**Later phases:** retention commands; a public registration workflow (owner decision).
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
 `.env` file). Run console commands in the development pod with

@@ -31,13 +31,33 @@
         {% if (s.queued_jobs + s.processing_jobs) > 0 and s.active_workers == 0 %}<p class="warn" role="status"><strong>Attention:</strong> send work is waiting and no delivery worker holds a lease.</p>{% endif %}
     </section>
     <section class="card">
+        <h2>Delivery state and Postfix queue</h2>
+        {% set d = o.delivery|filter(x => x.alive)|first %}
+        {% if d %}
+        <dl>
+            <dt>Delivery state</dt><dd>{% if d.outbound_paused %}<strong>Paused by the operator</strong>{% elseif d.send_work_held %}<strong>Held: live delivery not activated</strong>{% elseif d.live_delivery %}Live{% else %}Capture (development){% endif %}</dd>
+            <dt>Warm-up ceiling</dt><dd>{{ d.global_rate_per_minute > 0 ? d.global_rate_per_minute ~ ' submissions/min' : 'none' }}</dd>
+            {% if d.queue_snapshot_at %}
+            <dt>Postfix queue active / deferred / hold</dt><dd>{{ d.queue_active|number_format }} / {{ d.queue_deferred|number_format }} / {{ d.queue_hold|number_format }}</dd>
+            <dt>Postfix queue incoming</dt><dd>{{ d.queue_incoming|number_format }}</dd>
+            <dt>Queue snapshot taken</dt><dd>{{ d.queue_snapshot_at|ts }}</dd>
+            {% endif %}
+            <dt>Delivery daemon</dt><dd>{{ d.version }}, last seen {{ d.last_seen_at|ts }}</dd>
+        </dl>
+        {% if not d.queue_snapshot_at or not d.snapshot_fresh %}<p class="warn" role="status"><strong>Attention:</strong> no fresh Postfix queue snapshot (the snapshot timer or Postfix may be stopped; reconciliation draws no conclusions meanwhile).</p>{% endif %}
+        {% if d.outbound_paused %}<p class="warn" role="status"><strong>Attention:</strong> outbound mail is paused; accepted mail stays in the Postfix queue.</p>{% endif %}
+        {% else %}
+        <p class="warn" role="status"><strong>Attention:</strong> no delivery daemon has reported in the last two minutes.</p>
+        {% endif %}
+    </section>
+    <section class="card">
         <h2>Messages in flight</h2>
         <table class="kv"><tbody>
             {% for key in ['created', 'queued', 'submitted', 'deferred', 'outcome_unknown'] %}
                 <tr><th scope="row">{{ key|label('message_status') }}</th><td class="num">{{ (o.statuses[key] ?? 0)|number_format }}</td></tr>
             {% endfor %}
         </tbody></table>
-        <p class="muted">“Submitted” and “Deferred” are the messages Smarthost believes are in the Postfix queue. The Postfix queue snapshots themselves are read only by the delivery daemon, so the actual queue depth and snapshot age are not shown here.</p>
+        <p class="muted">“Submitted” and “Deferred” are the messages Smarthost believes are in the Postfix queue; the actual queue depth, as the delivery daemon last read it from the newest queue snapshot, is in “Delivery state and Postfix queue”.</p>
     </section>
     <section class="card">
         <h2>All messages by status</h2>
@@ -70,7 +90,8 @@
     <section class="card">
         <h2>Clients</h2>
         {{ ui.counts(o.clients, 'client_status') }}
-        <p><a href="{{ path('dashboard_operator_clients', {status: 'pending_approval'}) }}">Approval queue</a></p>
+        <p><a href="{{ path('dashboard_operator_clients', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}) }}">Approval queue</a></p>
+        <p>Open reputation alerts: {{ (o.alerts.critical ?? 0) }} critical, {{ (o.alerts.warning ?? 0) }} warning{% if is_granted('PLATFORM.ABUSE.VIEW') %} · <a href="{{ path('dashboard_operator_alerts') }}">Abuse and reputation</a>{% endif %}</p>
     </section>
 </div>
 

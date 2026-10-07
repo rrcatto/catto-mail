@@ -26,7 +26,8 @@ final class WebhookFoundationTest extends ApiTestCase
         $c = $this->container();
 
         return null === $env ? $c->get(WebhookEndpointService::class)
-            : new WebhookEndpointService($c->get('doctrine')->getManager(), $c->get(Keyring::class), $c->get(\App\Audit\AuditLogger::class), $env, 24);
+            : new WebhookEndpointService($c->get('doctrine')->getManager(), $c->get(Keyring::class), $c->get(\App\Audit\AuditLogger::class), $env, 24,
+                $c->get(\App\Client\ClientLimitPolicy::class));
     }
 
     public function testSecretsAreShownOnceAndStoredEncrypted(): void

@@ -63,20 +63,55 @@ abstract class ApiTestCase extends WebTestCase
         return AuditActor::system('test');
     }
 
+    /**
+     * A new client in the given status. Clients start pending_approval or active
+     * (an internal client created by an operator); other statuses are reached through
+     * the lifecycle, as in production.
+     */
     protected function newClient(ClientStatus $status = ClientStatus::Active, string $name = 'Test client'): Client
     {
         /** @var AccountAdministration $accounts */
         $accounts = $this->service(AccountAdministration::class);
+        $initial = ClientStatus::PendingApproval === $status ? ClientStatus::PendingApproval : ClientStatus::Active;
+        $client = $accounts->createClient($name.' '.bin2hex(random_bytes(4)), 'ops@example.test', 'test', $initial, self::actor());
+        if ($status !== $initial) {
+            $this->setClientStatus($client, $status);
+        }
 
-        return $accounts->createClient($name.' '.bin2hex(random_bytes(4)), 'ops@example.test', 'test', $status, self::actor());
+        return $this->reload($client);
+    }
+
+    /**
+     * Moves a client to a status. Allowed transitions go through the audited lifecycle
+     * (ClientLifecycle). A state the lifecycle never produces - an operating client
+     * back in pending_approval - is set directly in the database to simulate it: the
+     * D-31 tests need such a client with existing work.
+     */
+    protected function setClientStatus(Client $client, ClientStatus $status): void
+    {
+        $client = $this->reload($client);
+        if ($client->getStatus() === $status) {
+            return;
+        }
+        if (\App\Client\ClientStatusTransitions::allowed($client->getStatus(), $status)) {
+            $this->service(\App\Client\ClientLifecycle::class)->changeStatus($client, $status, self::actor(), 'test setup');
+
+            return;
+        }
+        Db::owner()->executeStatement('UPDATE clients SET status = ?, status_changed_at = now(), closed_at = CASE WHEN ? = \'closed\' THEN now() END WHERE id = ?',
+            [$status->value, $status->value, $client->getId()->toRfc4122()]);
+        $this->container()->get('doctrine')->getManager()->clear();
     }
 
     /** @return array{0: Client, 1: string} a client with a fresh API key */
     protected function newApiClient(ClientStatus $status = ClientStatus::Active): array
     {
-        $client = $this->newClient($status);
+        // The key is issued while the client can still get one, then the status is applied.
+        $client = $this->newClient(ClientStatus::PendingApproval === $status ? $status : ClientStatus::Active);
+        $key = $this->newKey($client);
+        $this->setClientStatus($client, $status);
 
-        return [$client, $this->newKey($client)];
+        return [$this->reload($client), $key];
     }
 
     protected function newKey(Client $client): string

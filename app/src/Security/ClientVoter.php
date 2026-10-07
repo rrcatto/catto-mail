@@ -21,7 +21,10 @@ use Symfony\Component\Security\Core\Authorization\Voter\Voter;
  *
  *   CLIENT_VIEW    viewer, member, admin   or PLATFORM.CLIENT.VIEW / PLATFORM.CLIENT.MANAGE
  *   CLIENT_OPERATE member, admin           or PLATFORM.CLIENT.MANAGE (e.g. sending-domain checks)
- *   CLIENT_ADMIN   admin                   or PLATFORM.CLIENT.MANAGE (e.g. lifting the client's opt-outs)
+ *   CLIENT_ADMIN   admin                   or PLATFORM.CLIENT.MANAGE (e.g. lifting the client's opt-outs,
+ *                                                                        accepting the service policy)
+ *   CLIENT_KEYS    admin                   or PLATFORM.CLIENT_KEY.MANAGE (create/revoke the client's API
+ *                                                                        keys; Phase 9)
  *
  * @extends Voter<string, Client>
  */
@@ -30,11 +33,13 @@ final class ClientVoter extends Voter
     public const VIEW = 'CLIENT_VIEW';
     public const OPERATE = 'CLIENT_OPERATE';
     public const ADMIN = 'CLIENT_ADMIN';
+    public const KEYS = 'CLIENT_KEYS';
 
     private const ALLOWED = [
         self::VIEW => [ClientMembershipRole::Viewer, ClientMembershipRole::Member, ClientMembershipRole::Admin],
         self::OPERATE => [ClientMembershipRole::Member, ClientMembershipRole::Admin],
         self::ADMIN => [ClientMembershipRole::Admin],
+        self::KEYS => [ClientMembershipRole::Admin],
     ];
 
     public function __construct(private readonly EntityManagerInterface $em)
@@ -52,8 +57,10 @@ final class ClientVoter extends Voter
         if (!$user instanceof User || $user->isDisabled()) {
             return false;
         }
-        if ($user->hasPermission('PLATFORM.CLIENT.MANAGE')
-            || (self::VIEW === $attribute && $user->hasPermission('PLATFORM.CLIENT.VIEW'))) {
+        $platform = self::KEYS === $attribute
+            ? $user->hasPermission('PLATFORM.CLIENT_KEY.MANAGE')
+            : ($user->hasPermission('PLATFORM.CLIENT.MANAGE') || (self::VIEW === $attribute && $user->hasPermission('PLATFORM.CLIENT.VIEW')));
+        if ($platform) {
             return true;
         }
         $membership = $this->em->getRepository(ClientMembership::class)->findOneBy(['user' => $user, 'client' => $subject]);

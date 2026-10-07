@@ -30,7 +30,7 @@ final class ClientStatusTest extends ApiTestCase
 
     private function changeStatus(\App\Entity\Client $client, ClientStatus $status): void
     {
-        $this->service(AccountAdministration::class)->setClientStatus($this->reload($client), $status, self::actor());
+        $this->setClientStatus($client, $status);
     }
 
     public function testPendingAndSuspendedClientsCannotCreateOrAddWork(): void

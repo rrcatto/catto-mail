@@ -4,28 +4,88 @@
 {% block body %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_clients') }}">Clients</a> › {{ c.company_name }}</p>
 <h1>{{ c.company_name }}</h1>
-<p><a href="{{ path('dashboard_client_overview', {clientId: c.id}) }}">Open this client's dashboard</a></p>
+<p>{{ ui.status(c.status, 'client_status') }} since {{ c.status_changed_at|ts }} · <a href="{{ path('dashboard_client_overview', {clientId: c.id}) }}">Open this client's dashboard</a></p>
+
 <div class="cards">
     <section class="card">
         <h2>Account</h2>
         <dl>
             <dt>Client id</dt><dd><code>{{ c.id }}</code></dd>
-            <dt>Contact</dt><dd>{{ c.contact_email }}</dd>
+            <dt>Organisation</dt><dd>{{ c.company_name }}</dd>
+            <dt>Operational contact</dt><dd>{{ c.contact_email }}</dd>
+            <dt>Billing contact</dt><dd>{{ c.billing_contact_email ?? 'same as operational' }}</dd>
+            <dt>Abuse/security contact</dt><dd>{{ c.abuse_contact_email ?? '—' }}</dd>
             <dt>Plan</dt><dd>{{ c.plan }}</dd>
+            <dt>Origin</dt><dd>{{ c.origin|label('client_origin') }}</dd>
             <dt>Created</dt><dd>{{ c.created_at|ts }}</dd>
-            <dt>Status</dt><dd>{{ ui.status(c.status, 'client_status') }}</dd>
+            <dt>Approved</dt><dd>{{ c.approved_at|ts }}</dd>
+            {% if c.closed_at %}<dt>Closed</dt><dd>{{ c.closed_at|ts }}</dd>{% endif %}
         </dl>
         {% if is_granted('PLATFORM.CLIENT.MANAGE') %}
-        <form method="post" action="{{ path('dashboard_operator_client_status', {id: c.id}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Change the status of {{ c.company_name }}?">
-            {{ ui.csrf() }}
-            <label>New status
-                <select name="status">{% for s in statuses %}<option value="{{ s.value }}"{% if s.value == c.status %} selected{% endif %}>{{ s.value|label('client_status') }}</option>{% endfor %}</select>
-            </label>
-            <button type="submit">Change status</button>
+        <details><summary>Edit account details</summary>
+            <form method="post" action="{{ path('dashboard_operator_client_account', {id: c.id}) }}" class="stack">
+                {{ ui.csrf() }}
+                <label>Organisation name <input type="text" name="company_name" value="{{ c.company_name }}" required maxlength="200"></label>
+                <label>Operational contact <input type="email" name="contact_email" value="{{ c.contact_email }}" required></label>
+                <label>Billing contact <input type="email" name="billing_contact_email" value="{{ c.billing_contact_email }}"></label>
+                <label>Abuse/security contact <input type="email" name="abuse_contact_email" value="{{ c.abuse_contact_email }}"></label>
+                <label>Plan <input type="text" name="plan" value="{{ c.plan }}" required maxlength="100"></label>
+                <button type="submit">Save account details</button>
+            </form>
+        </details>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Lifecycle</h2>
+        <p>Current status: {{ ui.status(c.status, 'client_status') }}</p>
+        <p class="muted">{{ c.status|label('client_status_meaning') }}</p>
+        {% if transitions is empty %}<p>No further status change: a closed client is final.</p>{% endif %}
+        {% for t in transitions %}
+            {% if t.allowed %}
+            <form method="post" action="{{ path('dashboard_operator_client_status', {id: c.id}) }}" class="stack" data-controller="confirm" data-confirm-message-value="{{ t.verb }} {{ c.company_name }}?">
+                {{ ui.csrf() }}<input type="hidden" name="status" value="{{ t.to }}">
+                <label>Reason for “{{ t.verb|lower }}” (required, audited) <input type="text" name="note" required minlength="3" maxlength="1000"></label>
+                <button type="submit">{{ t.verb }}</button>
+            </form>
+            {% else %}
+            <p class="muted">{{ t.verb }}: needs {{ t.permission }}.</p>
+            {% endif %}
+        {% endfor %}
+        {% if c.status == 'pending_approval' and policy.blocks_approval %}
+            <p class="caveat">Approval needs an acceptance of policy version {{ policy.version_in_force }} (see Service policy).</p>
+        {% endif %}
+        <p class="muted">Throttling paces this client's delivery and API requests; suspension refuses new work and stops its work in progress. The installation-wide pause and live-delivery controls are separate (smarthostctl prod pause).</p>
+    </section>
+
+    <section class="card">
+        <h2>Service policy</h2>
+        <dl>
+            <dt>Version in force</dt><dd>{{ policy.version_in_force ?? 'none configured' }}</dd>
+            <dt>Acceptance before approval</dt><dd>{{ policy.required ? 'Required' : 'Exempt (internal client)' }}</dd>
+            <dt>Accepted (version in force)</dt><dd>{{ policy.accepted ? 'Yes, ' ~ policy.accepted_at|ts : 'No' }}</dd>
+        </dl>
+        {% if policy.acceptances is not empty %}
+        <table><thead><tr><th scope="col">Version</th><th scope="col">Accepted</th><th scope="col">How</th><th scope="col">By / reference</th></tr></thead>
+        <tbody>{% for a in policy.acceptances %}<tr><td>{{ a.policy_version }}</td><td>{{ a.accepted_at|ts }}</td><td>{{ a.source|label('policy_source') }}</td><td>{{ a.accepted_by ?? a.reference ?? '—' }}</td></tr>{% endfor %}</tbody></table>
+        {% endif %}
+        {% if is_granted('PLATFORM.CLIENT.MANAGE') %}
+        <details><summary>Record an acceptance made elsewhere</summary>
+            <form method="post" action="{{ path('dashboard_operator_client_policy', {id: c.id}) }}" class="stack">
+                {{ ui.csrf() }}<input type="hidden" name="action" value="record">
+                <label>Policy version <input type="text" name="policy_version" value="{{ policy.version_in_force }}" required maxlength="64"></label>
+                <label>Reference (e.g. signed agreement) <input type="text" name="reference" required maxlength="255"></label>
+                <button type="submit">Record acceptance</button>
+            </form>
+        </details>
+        <form method="post" action="{{ path('dashboard_operator_client_policy', {id: c.id}) }}" class="stack">
+            {{ ui.csrf() }}<input type="hidden" name="action" value="{{ policy.required ? 'exempt' : 'require' }}">
+            <label>Reason <input type="text" name="note" required minlength="3"></label>
+            <button type="submit">{{ policy.required ? 'Exempt from policy acceptance' : 'Require policy acceptance' }}</button>
         </form>
         {% endif %}
-        <p class="muted">Approve (active), throttle, suspend or close. Every change is audited.</p>
     </section>
+
     <section class="card">
         <h2>Recipient global opt-outs</h2>
         <p>Capability: <strong>{{ c.can_submit_global_suppressions ? 'Permitted' : 'Not permitted' }}</strong></p>
@@ -40,17 +100,85 @@
     </section>
 </div>
 
+<h2>Limits and quotas</h2>
+<p class="muted">A client limit can only lower an installation ceiling. Volume quotas have no ceiling and apply only where set. Periods are UTC calendar days and months.</p>
+<table>
+    <thead><tr><th scope="col">Limit</th><th scope="col" class="num">Client limit</th><th scope="col" class="num">Installation ceiling</th><th scope="col" class="num">Effective</th></tr></thead>
+    <tbody>{% for l in limits.limits %}<tr><td>{{ l.column|label('limit') }}</td><td class="num">{{ l.own ?? '—' }}</td><td class="num">{{ l.ceiling ?? 'none' }}</td><td class="num">{{ l.effective ?? 'unlimited' }}</td></tr>{% endfor %}</tbody>
+</table>
+<table>
+    <thead><tr><th scope="col">Admitted work</th><th scope="col">Period</th><th scope="col" class="num">Used</th><th scope="col" class="num">Quota</th></tr></thead>
+    <tbody>{% for q in limits.quotas %}<tr><td>{{ q.metric|label('quota_metric') }}</td><td>{{ q.period|label('quota_period') }}</td><td class="num">{{ q.used|number_format }}</td><td class="num">{{ q.limit is null ? '—' : q.limit|number_format }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if is_granted('PLATFORM.CLIENT_LIMIT.MANAGE') %}
+<details><summary>Change limits</summary>
+    <form method="post" action="{{ path('dashboard_operator_client_limits', {id: c.id}) }}" class="stack">
+        {{ ui.csrf() }}
+        {% for l in limits.limits %}
+            <label>{{ l.column|label('limit') }}{% if l.ceiling is not null %} (at most {{ l.ceiling }}){% endif %} <input type="number" min="0" name="{{ l.column }}" value="{{ l.own }}"></label>
+        {% endfor %}
+        <label>Reason (required, audited) <input type="text" name="note" required minlength="3"></label>
+        <button type="submit">Save limits</button>
+    </form>
+</details>
+{% endif %}
+
+<h2>Usage</h2>
+<table>
+    <thead><tr><th scope="col">Period</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
+    <tbody>{% for name, t in usage %}<tr><td>{{ name|replace({'_': ' '})|capitalize }}</td><td class="num">{{ t.validation_address.quantity|number_format }}</td><td class="num">{{ t.message_submitted.quantity|number_format }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if statements is not empty %}
+<table><thead><tr><th scope="col">Billing period</th><th scope="col">Statement</th><th scope="col">Reconciliation</th><th scope="col">Totals</th><th scope="col">External reference</th></tr></thead>
+<tbody>{% for s in statements %}<tr><td>{{ s.period_start }} – {{ s.period_end }}</td><td>{{ s.status|label('statement_status') }}</td><td>{{ s.reconciliation_status|label('reconciliation_status') }}</td><td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ s.external_reference ?? '—' }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if is_granted('PLATFORM.USAGE.VIEW') %}<p><a href="{{ path('dashboard_operator_usage') }}">Usage, reconciliation and billing statements</a></p>{% endif %}
+
+<h2>Reputation</h2>
+<p class="muted">Transport facts of the last evaluation, counted by event time in the window. Rates are of the messages submitted in the window. Alerts are inferred risk and never act on the client.</p>
+{% if reputation.metrics is empty %}<p class="empty">Not evaluated yet.</p>{% else %}
+<table>
+    <thead><tr><th scope="col">Window</th><th scope="col" class="num">Submitted</th><th scope="col" class="num">Validation</th><th scope="col" class="num">Hard bounces</th><th scope="col" class="num">Complaints</th><th scope="col" class="num">Deferred</th><th scope="col" class="num">Soft bounces</th><th scope="col" class="num">Provider policy</th><th scope="col" class="num">Suppressed</th><th scope="col" class="num">Outcome unknown</th><th scope="col" class="num">Webhook failures</th><th scope="col">Computed</th></tr></thead>
+    <tbody>{% for m in reputation.metrics %}<tr>
+        <td>{{ m.window_hours == 24 ? '24 hours' : '7 days' }}</td><td class="num">{{ m.messages_submitted|number_format }}</td><td class="num">{{ m.validation_addresses|number_format }}</td>
+        <td class="num">{{ m.hard_bounces }}{% if m.hard_bounce_rate is not null %} ({{ m.hard_bounce_rate }} %){% endif %}</td>
+        <td class="num">{{ m.complaints }}{% if m.complaint_rate is not null %} ({{ m.complaint_rate }} %){% endif %}</td>
+        <td class="num">{{ m.deferrals }}{% if m.deferral_rate is not null %} ({{ m.deferral_rate }} %){% endif %}</td>
+        <td class="num">{{ m.soft_bounces }}</td><td class="num">{{ m.provider_policy_failures }}</td>
+        <td class="num">{{ m.suppressed }}{% if m.suppression_rate is not null %} ({{ m.suppression_rate }} %){% endif %}</td>
+        <td class="num">{{ m.outcome_unknown }}</td><td class="num">{{ m.webhook_failures }}</td><td>{{ m.computed_at|ts }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if reputation.metrics|length > 0 and reputation.metrics[0].previous_daily_average is not null %}<p>Previous daily average (7 days before the last 24 hours): {{ reputation.metrics[0].previous_daily_average }} messages.</p>{% endif %}
+{% endif %}
+{% if reputation.alerts is not empty %}
+<table><thead><tr><th scope="col">Alert</th><th scope="col">Window</th><th scope="col">Severity</th><th scope="col" class="num">Numerator / denominator</th><th scope="col" class="num">Value / threshold</th><th scope="col">First / last observed</th><th scope="col">State</th></tr></thead>
+<tbody>{% for a in reputation.alerts %}<tr><td>{{ a.metric|label('alert_metric') }}</td><td>{{ a.window_hours == 24 ? '24 h' : '7 d' }}</td><td>{{ a.severity|label('alert_severity') }}</td><td class="num">{{ a.numerator }} / {{ a.denominator }}</td><td class="num">{{ a.value }} / {{ a.threshold }}</td><td>{{ a.first_observed_at|ts }}<br>{{ a.last_observed_at|ts }}</td><td>{{ a.resolved_at ? 'Resolved ' ~ a.resolved_at|ts : (a.acknowledged_at ? 'Acknowledged: ' ~ a.acknowledgement_note : 'Open') }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if is_granted('PLATFORM.ABUSE.VIEW') %}<p><a href="{{ path('dashboard_operator_alerts', {client: c.id, state: 'all'}) }}">All alerts of this client</a></p>{% endif %}
+
+<h2>API keys</h2>
+<p class="muted">Metadata only: keys are stored as hashes and can never be shown again. Revoked and expired keys fail authentication.</p>
+{% if api_keys is empty %}<p class="empty">None.</p>{% else %}
+<table><thead><tr><th scope="col">Prefix</th><th scope="col">Name</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">State</th><th scope="col"></th></tr></thead>
+<tbody>{% for k in api_keys %}<tr><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.name ?? '—' }}</td><td>{{ k.created_at|ts }}</td><td>{{ k.last_used_at|ts }}</td><td>{{ k.expires_at|ts }}</td>
+    <td>{{ k.revoked_at ? 'Revoked ' ~ k.revoked_at|ts : (k.usable ? 'Usable' : 'Expired') }}</td>
+    <td>{% if k.usable and is_granted('PLATFORM.CLIENT_KEY.MANAGE') %}<form method="post" action="{{ path('dashboard_operator_client_key_revoke', {id: c.id, keyId: k.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Revoke {{ k.key_prefix }}…? Requests with it fail at once.">{{ ui.csrf() }}<button type="submit">Revoke</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if is_granted('PLATFORM.CLIENT_KEY.MANAGE') and c.status != 'closed' %}
+<details><summary>Create an API key</summary>
+    <form method="post" action="{{ path('dashboard_operator_client_key_create', {id: c.id}) }}" class="stack">
+        {{ ui.csrf() }}
+        <label>Descriptive name <input type="text" name="name" maxlength="100" placeholder="e.g. production server"></label>
+        <label>Expires after (optional, UTC date) <input type="date" name="expires_on"></label>
+        <button type="submit">Create key (shown once)</button>
+    </form>
+</details>
+{% endif %}
+
 <h2>Sending domains</h2>
 {% if c.domains is empty %}<p class="empty">None.</p>{% else %}
 <table><thead><tr><th scope="col">Domain</th><th scope="col">Status</th><th scope="col">Verified</th><th scope="col">Last check</th><th scope="col">DKIM</th></tr></thead>
 <tbody>{% for d in c.domains %}<tr><td>{{ d.domain }}</td><td>{{ ui.status(d.status, 'domain_status') }}</td><td>{{ d.verified_at|ts }}</td><td>{{ d.last_checked_at|ts }}{% if d.last_check_error %}<br><small>{{ d.last_check_error }}</small>{% endif %}</td><td>{{ d.dkim_status|label('dkim_status') }}{% if d.dkim_selector %} ({{ d.dkim_selector }}){% endif %}</td></tr>{% endfor %}</tbody></table>
-{% endif %}
-
-<h2>API keys</h2>
-<p class="muted">Metadata only. Keys are stored as hashes and can never be shown again.</p>
-{% if c.api_keys is empty %}<p class="empty">None.</p>{% else %}
-<table><thead><tr><th scope="col">Prefix</th><th scope="col">Name</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Revoked</th></tr></thead>
-<tbody>{% for k in c.api_keys %}<tr><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.name ?? '—' }}</td><td>{{ k.created_at|ts }}</td><td>{{ k.last_used_at|ts }}</td><td>{{ k.revoked_at ? k.revoked_at|ts : 'Active' }}</td></tr>{% endfor %}</tbody></table>
 {% endif %}
 
 <h2>Members</h2>
@@ -58,11 +186,32 @@
 <table><thead><tr><th scope="col">User</th><th scope="col">Role</th><th scope="col">Account</th><th scope="col">Last sign-in</th></tr></thead>
 <tbody>{% for m in c.members %}<tr><td>{{ m.display_name ? m.display_name ~ ' – ' : '' }}{{ m.email }}</td><td>{{ m.role|capitalize }}</td><td>{{ m.status|capitalize }}</td><td>{{ m.last_login_at|ts }}</td></tr>{% endfor %}</tbody></table>
 {% endif %}
+<p class="muted">Members are managed on the <a href="{{ path('dashboard_operator_users') }}">Users</a> page.</p>
 
 <h2>Webhook endpoints</h2>
-{% if c.webhook_endpoints is empty %}<p class="empty">None.</p>{% else %}
-<table><thead><tr><th scope="col">URL</th><th scope="col">Status</th><th scope="col">Events</th><th scope="col">Secret rotation overlap</th><th scope="col">Updated</th></tr></thead>
-<tbody>{% for w in c.webhook_endpoints %}<tr><td class="url">{{ w.url }}</td><td>{{ w.status|capitalize }}</td><td>{{ w.subscribed_event_types|json_counts|join(', ') }}</td><td>{{ w.rotation_overlap ? 'Previous secret still valid' : 'No' }}</td><td>{{ w.updated_at|ts }}</td></tr>{% endfor %}</tbody></table>
+{% if endpoints is empty %}<p class="empty">None.</p>{% else %}
+<table><thead><tr><th scope="col">URL</th><th scope="col">Status</th><th scope="col">Events</th><th scope="col" class="num">Delivered (7 d)</th><th scope="col" class="num">Failed (7 d)</th><th scope="col" class="num">Pending</th><th scope="col" class="num">Failures since last success</th><th scope="col">Last success / failure</th></tr></thead>
+<tbody>{% for w in endpoints %}<tr><td class="url">{{ w.url }}</td><td>{{ w.status|capitalize }}{% if w.rotation_overlap %}<br><small>secret rotation overlap</small>{% endif %}</td><td>{{ w.subscribed_event_types|json_counts|join(', ') }}</td>
+    <td class="num">{{ w.delivered_7d }}</td><td class="num">{{ w.failed_7d }}</td><td class="num">{{ w.pending }}</td><td class="num">{% if w.failures_since_success > 0 %}<strong>{{ w.failures_since_success }}</strong>{% else %}0{% endif %}</td>
+    <td>{{ w.last_delivered_at|ts }}<br>{{ w.last_failed_at|ts }}</td></tr>{% endfor %}</tbody></table>
 {% endif %}
-<p class="muted">Members are managed on the <a href="{{ path('dashboard_operator_users') }}">Users</a> page. API keys, sending domains and webhook endpoints are managed with the audited <code>smarthost:*</code> console commands.</p>
+<p class="muted">Endpoints are never disabled automatically. A client admin (or an operator acting in the client's dashboard) enables, disables, edits, rotates and tests them.</p>
+
+<h2>Private notes</h2>
+<p class="muted">Operators only; never shown to the client.</p>
+{% if is_granted('PLATFORM.CLIENT.MANAGE') %}
+<form method="post" action="{{ path('dashboard_operator_client_note', {id: c.id}) }}" class="stack">
+    {{ ui.csrf() }}<label>Add a note <textarea name="note" required maxlength="4000" rows="2"></textarea></label><button type="submit">Add note</button>
+</form>
+{% endif %}
+{% if notes is empty %}<p class="empty">No notes.</p>{% else %}
+<ul class="plain">{% for n in notes %}<li><strong>{{ n.created_at|ts }}</strong> {{ n.author ?? 'console' }}: {{ n.note }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Audit history</h2>
+{% if audit is empty %}<p class="empty">No entries.</p>{% else %}
+<table><thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Actor</th><th scope="col">Details</th></tr></thead>
+<tbody>{% for a in audit %}<tr><td>{{ a.occurred_at|ts }}</td><td>{{ a.action }}</td><td>{{ a.actor_email ?? (a.actor_type ~ (a.actor_id ? ': ' ~ a.actor_id : '')) }}</td><td>{% if a.detail is empty %}—{% else %}<dl class="inline-dl">{% for k, v in a.detail %}<dt>{{ k }}</dt><dd>{{ v is iterable ? v|json_encode : (v is same as(true) ? 'true' : (v is same as(false) ? 'false' : (v ?? 'null'))) }}</dd>{% endfor %}</dl>{% endif %}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% if is_granted('PLATFORM.AUDIT.VIEW') %}<p><a href="{{ path('dashboard_operator_audit', {target_type: 'client', target_id: c.id}) }}">Full audit log for this client</a></p>{% endif %}
 {% endblock %}

@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.8 · **Template:** [`infra/.env.example`](../../infra/.env.example)
+**Status:** normative contract for specification 2.10 · **Templates:** [`infra/.env.example`](../../infra/.env.example) (development), [`infra/production.env.example`](../../infra/production.env.example) (production, from the *Production profile* below)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -48,6 +48,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `mailpit` | Mailpit (development only) |
 | `fake-smtp` | Deterministic SMTP test service |
 | `proxy` | nginx reverse proxy |
+| `deployment` | the production topology and its tooling (`infra/podman/smarthost-production.sh.in`, `smarthostctl prod`); no container reads these |
 
 *Phase* is the first phase that needs the variable.
 
@@ -59,7 +60,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `SMARTHOST_PUBLIC_BASE_URL` | app, delivery | no | 2 | `https://localhost:8443` | Public HTTPS origin for the API, tracking URLs and emailed dashboard sign-in links (which are built from it, never from a request's Host header). No trailing slash. In development it is the published nginx port, so links in Mailpit open in the browser. |
 | `SMARTHOST_LOG_LEVEL` | app, webhook-worker, validator, delivery | no | 1 | `info` | `debug`, `info`, `warning` or `error`. |
 | `SMARTHOST_LOG_FORMAT` | app, webhook-worker, validator, delivery | no | 1 | `json` | `json` (default), or `text` for local debugging only. |
-| `SMARTHOST_LIVE_DELIVERY_ENABLED` | postfix, delivery | no | 1 | `false` | Capture/live switch. When it is `false` (capture mode), Postfix relays every outbound message to `POSTFIX_RELAYHOST` (Mailpit) and refuses to start without one. `true` (live mode) is accepted **only** with `SMARTHOST_ENV=production` and an empty `POSTFIX_RELAYHOST`; any other combination is a startup error. In development, the internal Podman network additionally has no Internet route. |
+| `SMARTHOST_LIVE_DELIVERY_ENABLED` | postfix, delivery | no | 1 | `false` | Capture/held/live switch. When it is `false` outside production (capture mode), Postfix relays every outbound message to `POSTFIX_RELAYHOST` (Mailpit) and refuses to start without one. When it is `false` in production (held mode, before live activation, specification 2.9), Postfix has no relayhost and refuses outbound recipients temporarily (450) except the dashboard sign-in mail (`APP_MAIL_FROM`), and the Go daemon claims no send jobs. `true` (live mode) is accepted **only** with `SMARTHOST_ENV=production` and an empty `POSTFIX_RELAYHOST`; any other combination is a startup error. It is switched on only by `smarthostctl prod live-enable`, after the activation preflight passes. In development, the internal Podman network additionally has no Internet route. |
 | `SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS` | app, delivery | no | 2 | `false` | Controlled local/test mode that lets unverified or DKIM-inactive sending domains be used. It is never permitted in production. |
 | `SMARTHOST_BOUNCE_DOMAIN` | delivery, postfix | no | 4 | `bounce.smarthost.localhost` | Dedicated domain for VERP return paths, Message-ID domains and inbound DSNs. |
 | `SMARTHOST_VERP_LOCAL_PART` | delivery, postfix | no | 4 | `bounce` | Local-part base of the return path (`bounce+TOKEN@domain`). |
@@ -71,6 +72,22 @@ secret has a value in the template, and that safety switches default to safe val
 | `SMARTHOST_SPOOL_GID` | postfix, delivery | no | 1 | `5000` | Numeric group that owns both shared volumes. The delivery container runs with this as its primary group. |
 | `SMARTHOST_DELIVERY_UID` | postfix, delivery | no | 1 | `5001` | Numeric UID of the Go delivery process. Postfix `virtual(8)` writes DSN Maildir files as this UID (`virtual_uid_maps`), because it creates them with mode 0600 (verified in Phase 1). Go can therefore read and claim them without any write access to the observability volume. |
 | `SMARTHOST_OPENDKIM_MILTER_ADDRESS` | postfix, opendkim | no | 1 | `inet:opendkim:8891` | Milter socket on the private network. OpenDKIM listens on it and Postfix connects to it. |
+
+## Production deployment (`deployment`)
+
+Read only by the production topology script and `smarthostctl prod`; the development pod ignores them.
+
+| Variable | Consumers | Secret | Phase | Example | Meaning |
+|---|---|---|---|---|---|
+| `SMARTHOST_INSTANCE` | deployment | no | 8 | `smarthost` | Name prefix of the production containers, networks, volumes and Podman secrets (`smarthost-postgres`, `smarthost-internal`, ...). Only the default instance installs systemd units; another name is for a local rehearsal beside the development pod. |
+| `SMARTHOST_IMAGE_TAG` | deployment | no | 8 | `dev` | Tag of the `localhost/smarthost-*` images the production topology runs. `smarthostctl prod build` tags the current checkout with it, so an upgrade builds a new tag and a rollback returns to the previous one. |
+| `SMARTHOST_INTERNAL_SUBNET` | deployment | no | 8 | `10.89.20.0/24` | Subnet of the private `<instance>-internal` network (no Internet route). Every service joins it. |
+| `SMARTHOST_EGRESS_SUBNET` | deployment | no | 8 | `10.89.21.0/24` | Subnet of the `<instance>-egress` network, joined only by the services that need the Internet (Postfix, validator, webhook worker, application DNS). |
+| `SMARTHOST_INGRESS_SUBNET` | deployment | no | 8 | `10.89.22.0/24` | Subnet of the private `<instance>-ingress` network (no Internet route), joined only by nginx and Postfix. It carries the inbound SMTP connections nginx passes to Postfix's PROXY-protocol listener (`postfix-ingress:25`), so no other container can reach that listener. |
+| `SMARTHOST_EGRESS_ENABLED` | deployment | no | 8 | `false` | `true` in production. `false` creates the egress network as internal too (no Internet route at all): a rehearsal of the production topology. Live delivery requires `true`. |
+| `SMARTHOST_PUBLIC_IPV4` | deployment | no | 8 | | The production host's public IPv4 address: the sending IP (PTR, SPF) and the address the public hostname and the bounce domain's MX must resolve to. Required in production. Outbound mail is IPv4 only (`inet_protocols = ipv4`). |
+| `POSTFIX_SMTP_BIND` | deployment, proxy | no | 8 | | Inbound SMTP listener on the host for the bounce domain (DSNs, ARF reports). In production `0.0.0.0:25`: the systemd socket `<instance>-ingress.socket` binds it and hands it to nginx, which listens on exactly this address and passes each connection to Postfix with the PROXY protocol, so Postfix sees the real client address. Empty: none (the development pod). |
+| `SMARTHOST_SSH_PORT` | deployment | no | 8 | `22` | The host's SSH port, kept open by the generated host firewall rules (`smarthostctl prod firewall`). |
 
 ## Database
 
@@ -100,7 +117,7 @@ secret has a value in the template, and that safety switches default to safe val
 |---|---|---|---|---|---|
 | `APP_ENV` | app, webhook-worker | no | 1 | `dev` | Symfony environment: `dev`, `test` or `prod`. |
 | `APP_SECRET` | app, webhook-worker | **yes** | 1 | | Symfony kernel secret (CSRF, signed URIs). |
-| `TRUSTED_PROXIES` | app, webhook-worker | no | 1 | `10.89.20.0/24` | CIDR of nginx: the `smarthost-internal` Podman network (created by `infra/podman/smarthost-pod.sh.in`). |
+| `TRUSTED_PROXIES` | app, webhook-worker | no | 1 | `10.89.20.0/24` | Addresses whose `X-Forwarded-For`/`X-Forwarded-Proto` Symfony trusts. Development: the pod's internal network (`smarthost-internal`, `infra/podman/smarthost-pod.sh.in`). **Empty in production:** no proxy stands in front of nginx. nginx accepts the client's TCP connection itself (the socket systemd hands it) and passes the peer address as FastCGI `REMOTE_ADDR`, so Symfony's client address is `REMOTE_ADDR` and forwarded headers are ignored. |
 | `MAILER_DSN` | app | **yes** | 2 | | Symfony Mailer transport for Smarthost's own low-volume notifications only. Never used for tracked sends. |
 | `APP_API_RATE_LIMIT_PER_MINUTE` | app | no | 2 | `600` | Default per-API-key request limit. |
 | `APP_API_MAX_REQUEST_BYTES` | app | no | 2 | `10485760` | Request body limit (10 MiB, 413 above it). It is not raised to fit large send jobs. |
@@ -109,6 +126,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `APP_ENCRYPTION_KEYS` | app, webhook-worker | **yes** | 2 | | Application keyring for webhook signing secrets, in the form `key_id:base64key[,…]`. The first key encrypts; any listed key decrypts. |
 | `APP_WEBHOOK_MAX_ATTEMPTS` | webhook-worker | no | 7 | `8` | Retry limit before a delivery becomes `failed`. |
 | `APP_WEBHOOK_TIMEOUT_SECONDS` | webhook-worker | no | 7 | `10` | Per-attempt HTTP timeout. |
+| `APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS` | webhook-worker | no | 8 | `5` | TCP/TLS connection timeout of an attempt (`max_connect_duration`); at most `APP_WEBHOOK_TIMEOUT_SECONDS`. |
 | `APP_WEBHOOK_POLL_INTERVAL_SECONDS` | webhook-worker | no | 7 | `5` | Polling fallback when no NOTIFY arrives. |
 | `APP_WEBHOOK_LEASE_SECONDS` | webhook-worker | no | 7 | `60` | Delivery lease. It must exceed the HTTP timeout, and long attempts renew it. |
 | `APP_WEBHOOK_RETRY_BASE_SECONDS` | webhook-worker | no | 7 | `60` | Base for exponential backoff. |
@@ -126,12 +144,27 @@ secret has a value in the template, and that safety switches default to safe val
 | `APP_RETENTION_USAGE_RECORDS_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
 | `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` | app | no | 7 | | Webhook delivery history (`webhook_deliveries` and their delivered outbox events). Empty means no automatic deletion: rows stay durable until a production retention policy sets a period. Policy only; nothing deletes them yet. |
 | `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. Empty disables this. |
-| `APP_MAIL_FROM` | app | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail Smarthost"). Its domain should be DKIM-signed by OpenDKIM. |
+| `APP_MAIL_FROM` | app, postfix | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail Smarthost"). Its domain should be DKIM-signed by OpenDKIM. Postfix lets only the web application's submission account use it as envelope sender, and in production held mode it is the only sender Postfix delivers. |
 | `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |
 | `APP_MAIL_SUBMISSION_HOST` | app | no | 6 | `postfix` | Postfix submission host for the web application's own mail (sign-in links). |
 | `APP_MAIL_SUBMISSION_PORT` | app | no | 6 | `587` | Authenticated submission port (STARTTLS, OpenDKIM milter). |
 | `APP_MAIL_SUBMISSION_USERNAME` | app, postfix | no | 6 | `smarthost-app` | SASL account of the web application on Postfix submission (separate from the delivery daemon's). |
 | `APP_MAIL_SUBMISSION_PASSWORD` | app, postfix | **yes** | 6 | | SASL password for that account. |
+| `APP_PUBLIC_ONBOARDING_ENABLED` | app | no | 9 | `false` | Gate for any public or self-service client onboarding (specification 2.10). `false` (the default and the production profile): no public channel may create a client; clients are created by operators only. `true` admits public application records, which are always `pending_approval` and never receive credentials before an operator approves them. This release contains no public registration route; enabling the gate is a later operator decision (docs/production/onboarding.md). |
+| `APP_ACCEPTABLE_USE_POLICY_VERSION` | app | no | 9 | | Identifier of the service-policy (acceptable use) version in force, for example `2026-10`. Empty: no policy version in force, nothing to accept. When set, approving a client that requires policy acceptance needs a recorded acceptance of exactly this version. Only the version is stored, never the policy text. |
+| `APP_THROTTLED_CLIENT_API_RATE_PER_MINUTE` | app | no | 9 | `60` | API requests per minute for all keys of a `throttled` client together (the lower of this and the client's own limit). |
+| `APP_CLIENT_API_KEY_LIMIT` | app | no | 9 | `10` | Installation ceiling of usable (neither revoked nor expired) API keys per client; a client limit may only lower it. |
+| `APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT` | app | no | 9 | `10` | Installation ceiling of webhook endpoints per client. |
+| `APP_CLIENT_SENDING_DOMAIN_LIMIT` | app | no | 9 | `25` | Installation ceiling of sending domains per client. |
+| `APP_REPUTATION_MIN_MESSAGES` | app | no | 9 | `100` | Minimum messages submitted in a window before a rate alert is raised (avoids alerts on a handful of messages). |
+| `APP_REPUTATION_HARD_BOUNCE_WARNING_PERCENT` | app | no | 9 | `2` | Hard-bounce rate (percent of messages submitted in the window) that raises a warning. |
+| `APP_REPUTATION_HARD_BOUNCE_CRITICAL_PERCENT` | app | no | 9 | `5` | Hard-bounce rate that raises a critical alert. |
+| `APP_REPUTATION_COMPLAINT_WARNING_PERCENT` | app | no | 9 | `0.1` | Complaint rate (percent) that raises a warning. |
+| `APP_REPUTATION_COMPLAINT_CRITICAL_PERCENT` | app | no | 9 | `0.3` | Complaint rate that raises a critical alert. |
+| `APP_REPUTATION_DEFERRAL_WARNING_PERCENT` | app | no | 9 | `15` | Rate of messages deferred or soft-bounced (percent) that raises a warning. |
+| `APP_REPUTATION_DEFERRAL_CRITICAL_PERCENT` | app | no | 9 | `30` | Deferral rate that raises a critical alert. |
+| `APP_REPUTATION_VOLUME_INCREASE_WARNING_FACTOR` | app | no | 9 | `3` | Messages submitted in the last 24 hours, as a multiple of the daily average of the 7 days before, that raises a warning (needs at least `APP_REPUTATION_MIN_MESSAGES` in the last 24 hours). |
+| `APP_REPUTATION_VOLUME_INCREASE_CRITICAL_FACTOR` | app | no | 9 | `10` | Volume increase that raises a critical alert. |
 
 ## Python validator (`validator`)
 
@@ -169,6 +202,8 @@ secret has a value in the template, and that safety switches default to safe val
 | `DELIVERY_PER_DOMAIN_CONCURRENCY` | delivery | no | 4 | `2` | Concurrent submissions per recipient domain. |
 | `DELIVERY_PER_DOMAIN_RATE_PER_MINUTE` | delivery | no | 4 | `60` | Submission rate cap per recipient domain. |
 | `DELIVERY_DEFERRAL_BACKOFF_SECONDS` | delivery | no | 4 | `900` | Provider backoff after repeated deferrals. |
+| `DELIVERY_GLOBAL_RATE_PER_MINUTE` | delivery | no | 8 | `0` | Installation-wide warm-up ceiling: at most this many submissions per minute for the whole delivery daemon, whatever the domains or clients. `0` means no global ceiling. The production profile starts low; the operator raises it stage by stage (runbook). |
+| `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE` | delivery | no | 8 | `10` | Submissions per minute for each client whose status is `throttled` (the operator's per-client throttle). Applies to running jobs within a lease renewal. |
 | `DELIVERY_DSN_NOTIFY` | delivery | no | 4 | `FAILURE,DELAY` | RFC 3461 NOTIFY parameter. |
 | `DELIVERY_DSN_RET` | delivery | no | 4 | `HDRS` | RFC 3461 RET parameter. |
 | `DELIVERY_FILE_POLL_INTERVAL_SECONDS` | delivery | no | 4 | `2` | Poll interval for the shared log and DSN spool. |
@@ -184,7 +219,7 @@ secret has a value in the template, and that safety switches default to safe val
 | Variable | Consumers | Secret | Phase | Example | Meaning |
 |---|---|---|---|---|---|
 | `POSTFIX_MYHOSTNAME` | postfix | no | 1 | `smarthost.localhost` | `myhostname`. |
-| `POSTFIX_RELAYHOST` | postfix | no | 1 | `[mailpit]:1025` | In development, Mailpit. In production it is empty, which is allowed only when `SMARTHOST_LIVE_DELIVERY_ENABLED=true`. |
+| `POSTFIX_RELAYHOST` | postfix | no | 1 | `[mailpit]:1025` | In development, Mailpit. In production it is always empty (held and live mode); a relayhost with `SMARTHOST_ENV=production` is a startup and render error. |
 | `POSTFIX_TLS_CERT_FILE` | postfix | no | 1 | `/run/secrets/postfix_tls_cert` | Path to the mounted certificate. |
 | `POSTFIX_TLS_KEY_FILE` | postfix | no | 1 | `/run/secrets/postfix_tls_key` | Path to the mounted private key. |
 | `POSTFIX_MESSAGE_SIZE_LIMIT` | postfix | no | 1 | `10240000` | `message_size_limit` in bytes. |
@@ -211,10 +246,84 @@ secret has a value in the template, and that safety switches default to safe val
 
 | Variable | Consumers | Secret | Phase | Example | Meaning |
 |---|---|---|---|---|---|
-| `PROXY_HTTPS_BIND` | proxy | no | 1 | `127.0.0.1:8443` | Published HTTPS listener. In production it is `0.0.0.0:443`. |
+| `PROXY_HTTPS_BIND` | proxy | no | 1 | `127.0.0.1:8443` | HTTPS listener on the host. Development: the pod's published port. Production `0.0.0.0:443`: the systemd socket `<instance>-ingress.socket` binds it and hands it to nginx, which listens on exactly this address (socket activation keeps each client's own address). |
 | `PROXY_SERVER_NAME` | proxy | no | 1 | `localhost` | nginx `server_name`. Must match the host in `SMARTHOST_PUBLIC_BASE_URL`. |
 | `PROXY_FASTCGI_ADDRESS` | proxy | no | 1 | `symfony-app:9000` | PHP-FPM FastCGI address on the internal network. There is no separate PHP HTTP application server. |
 | `PROXY_TLS_CERT_FILE` | proxy | no | 1 | `/run/secrets/proxy_tls_cert` | Path to the mounted certificate. |
 | `PROXY_TLS_KEY_FILE` | proxy | no | 1 | `/run/secrets/proxy_tls_key` | Path to the mounted private key. |
 
-The nginx configuration lives under `infra/` and is the same in development and production.
+The nginx configuration lives under `infra/nginx/`. Production uses the same HTTPS server, derived at
+image build time with its `listen` set to `PROXY_HTTPS_BIND`, plus the SMTP stream server for
+`POSTFIX_SMTP_BIND` (`infra/nginx/production/`).
+
+## Production profile
+
+The production values of the variables above (specification 2.9). `python3
+infra/lib/smarthost_render.py env-example` writes them into
+[`infra/production.env.example`](../../infra/production.env.example); `smarthostctl prod init-env`
+copies that template to the production host's `infra/.env` and generates every secret there (they
+never exist anywhere else). Values in `example.com`, `example.net` or `203.0.113.0/24` are
+placeholders: `smarthostctl prod check` (and every `prod` command that renders) rejects them.
+
+| Variable | Production value | Why |
+|---|---|---|
+| `SMARTHOST_ENV` | `production` | Enables the production safety rules. |
+| `APP_ENV` | `prod` | Symfony production kernel (no debug, generic error pages). |
+| `SMARTHOST_LIVE_DELIVERY_ENABLED` | `false` | Installation starts in held mode; `smarthostctl prod live-enable` activates live delivery after the activation preflight. |
+| `SMARTHOST_PUBLIC_BASE_URL` | `https://smarthost.example.com` | Must be `https://` + `PROXY_SERVER_NAME`. |
+| `PROXY_SERVER_NAME` | `smarthost.example.com` | The public hostname (TLS certificate, A record). |
+| `PROXY_HTTPS_BIND` | `0.0.0.0:443` | Public HTTPS (IPv4), bound by the systemd ingress socket and inherited by nginx. |
+| `POSTFIX_SMTP_BIND` | `0.0.0.0:25` | Public inbound SMTP for the bounce domain (IPv4), bound by the systemd ingress socket; nginx passes it to Postfix with the PROXY protocol. |
+| `TRUSTED_PROXIES` | | No proxy in front of nginx: Symfony uses `REMOTE_ADDR`, the client address nginx accepted, and ignores forwarded headers. |
+| `APP_PUBLIC_ONBOARDING_ENABLED` | `false` | Clients are created and approved by operators only (Phase 9). Enabling public onboarding is a later operator decision. |
+| `POSTFIX_MYHOSTNAME` | `smarthost.example.com` | EHLO name; the sending IP's PTR must name it. |
+| `POSTFIX_RELAYHOST` | | No relay in production. |
+| `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |
+| `SMARTHOST_PUBLIC_IPV4` | `203.0.113.10` | The host's public IPv4 (placeholder: TEST-NET-3). |
+| `SMARTHOST_EGRESS_ENABLED` | `true` | Postfix, validator, webhook worker and application DNS reach the Internet. |
+| `SMARTHOST_IMAGE_TAG` | `0.1.8` | The released version being deployed. |
+| `SMARTHOST_LOG_LEVEL` | `info` | |
+| `APP_ADMIN_EMAIL` | `admin@example.com` | The operator's mailbox (receives the ADMIN sign-in links). |
+| `APP_MAIL_FROM` | `no-reply@example.com` | A verified, DKIM-signed sending domain. |
+| `APP_WEBHOOK_MAX_ATTEMPTS` | `12` | About a day of retries with the backoff below (60 s doubling to 6 h). |
+| `APP_WEBHOOK_TIMEOUT_SECONDS` | `10` | |
+| `APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS` | `5` | |
+| `APP_WEBHOOK_POLL_INTERVAL_SECONDS` | `5` | |
+| `APP_WEBHOOK_LEASE_SECONDS` | `60` | Comfortably above the request timeout. |
+| `APP_WEBHOOK_RETRY_BASE_SECONDS` | `60` | |
+| `APP_WEBHOOK_RETRY_MAX_SECONDS` | `21600` | |
+| `APP_WEBHOOK_SECRET_OVERLAP_HOURS` | `24` | |
+| `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` | | Must be empty in production (SSRF). |
+| `VALIDATOR_SMTP_PROBE_ENABLED` | `false` | RCPT probing from the sending IP is an operator decision (reputation); enable deliberately. |
+| `VALIDATOR_SMTP_ROUTE_OVERRIDE` | | Must be empty in production. |
+| `VALIDATOR_SMTP_HELO_HOSTNAME` | `smarthost.example.com` | |
+| `VALIDATOR_SMTP_MAIL_FROM` | `validator@bounce.example.com` | |
+| `DELIVERY_GLOBAL_CONCURRENCY` | `2` | Warm-up stage 0 (seed testing); raised by the operator per the runbook. |
+| `DELIVERY_PER_DOMAIN_CONCURRENCY` | `1` | Warm-up stage 0. |
+| `DELIVERY_PER_DOMAIN_RATE_PER_MINUTE` | `10` | Warm-up stage 0. |
+| `DELIVERY_GLOBAL_RATE_PER_MINUTE` | `5` | Warm-up stage 0: an installation-wide hard ceiling. |
+| `DELIVERY_DEFERRAL_BACKOFF_SECONDS` | `1800` | Back off longer from a deferring provider while the IP is new. |
+| `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE` | `2` | |
+
+## Retention settings in production
+
+Empty means **no automatic deletion**; the data stays until a period is configured. Only
+`APP_RETENTION_STAGED_CONTENT_DAYS` has a default, because rendered content is transient by design.
+No deletion command exists yet for the long-term categories. The production runbook requires the
+operator to record a decision for each category before long-term operation; choosing a period is a
+compliance decision, not a technical one.
+
+| Variable | What the category contains | When empty |
+|---|---|---|
+| `APP_RETENTION_STAGED_CONTENT_DAYS` | Rendered subject/HTML/text of recipients that never reached Postfix (abandoned, cancelled, suppressed, permanently failed). Content is purged at Postfix acceptance anyway. | Not allowed to be empty in practice (default 7). |
+| `APP_RETENTION_VALIDATION_DAYS` | Validation jobs, per-address results and evidence (addresses, classifications, SMTP probe evidence). | Kept indefinitely. |
+| `APP_RETENTION_MESSAGE_METADATA_DAYS` | Messages and their append-only events (recipient address, status, SMTP outcomes, recorded opens/clicks). | Kept indefinitely. |
+| `APP_RETENTION_TRACKING_DAYS` | Validity of tracking tokens and link mappings. | Tokens never expire. |
+| `APP_RETENTION_SUPPRESSIONS_DAYS` | Lifted or expired suppressions (active ones are never deleted by retention). | Kept indefinitely. |
+| `APP_RETENTION_UNMATCHED_DSN_DAYS` | Resolved or dismissed unmatched DSNs with their parsed evidence. | Kept indefinitely. |
+| `APP_RETENTION_AUDIT_LOG_DAYS` | The audit log (operator and system actions). | Kept indefinitely. |
+| `APP_RETENTION_USAGE_RECORDS_DAYS` | Metering records (validation addresses, submitted messages). | Kept indefinitely. |
+| `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` | Webhook delivery history and delivered outbox events. | Kept indefinitely. |
+| `DELIVERY_DSN_RETENTION_DAYS` | Processed DSN files in the spool's `done/` directory (the parsed result is in the database). | Default 7; transient by design. |
+| `POSTFIX_LOG_RETENTION_DAYS` | Rotated Postfix log files in the observability volume. | Default 14; must exceed the longest tolerated Go outage. |
+

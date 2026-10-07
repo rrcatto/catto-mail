@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Client\ClientStatusTransitions;
+use App\Domain\DomainRuleViolation;
+use App\Enum\ClientOrigin;
 use App\Enum\ClientStatus;
 use App\Util\Clock;
 use Doctrine\ORM\Mapping as ORM;
@@ -28,6 +31,29 @@ class Client
     #[ORM\Column(type: 'boolean')]
     private bool $canSubmitGlobalSuppressions = false;
 
+    #[ORM\Column(type: 'text', enumType: ClientOrigin::class)]
+    private ClientOrigin $origin = ClientOrigin::Operator;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $billingContactEmail = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $abuseContactEmail = null;
+
+    #[ORM\Column(type: 'timestamptz')]
+    private \DateTimeImmutable $statusChangedAt;
+
+    /** The first transition to active (approval). */
+    #[ORM\Column(type: 'timestamptz', nullable: true)]
+    private ?\DateTimeImmutable $approvedAt = null;
+
+    #[ORM\Column(type: 'timestamptz', nullable: true)]
+    private ?\DateTimeImmutable $closedAt = null;
+
+    /** Whether approval needs an acceptance of the policy version in force (Phase 9). */
+    #[ORM\Column(type: 'boolean')]
+    private bool $policyAcceptanceRequired = true;
+
     public function __construct(
         #[ORM\Column(type: 'text')]
         private string $companyName,
@@ -38,6 +64,7 @@ class Client
     ) {
         $this->id = Uuid::v7();
         $this->createdAt = Clock::now();
+        $this->statusChangedAt = $this->createdAt;
     }
 
     public function getId(): Uuid { return $this->id; }
@@ -45,12 +72,51 @@ class Client
     public function getContactEmail(): string { return $this->contactEmail; }
     public function getPlan(): string { return $this->plan; }
     public function getStatus(): ClientStatus { return $this->status; }
-    public function setStatus(ClientStatus $status): void { $this->status = $status; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function canSubmitGlobalSuppressions(): bool { return $this->canSubmitGlobalSuppressions; }
+    public function getOrigin(): ClientOrigin { return $this->origin; }
+    public function getBillingContactEmail(): ?string { return $this->billingContactEmail; }
+    public function getAbuseContactEmail(): ?string { return $this->abuseContactEmail; }
+    public function getStatusChangedAt(): \DateTimeImmutable { return $this->statusChangedAt; }
+    public function getApprovedAt(): ?\DateTimeImmutable { return $this->approvedAt; }
+    public function getClosedAt(): ?\DateTimeImmutable { return $this->closedAt; }
+    public function isPolicyAcceptanceRequired(): bool { return $this->policyAcceptanceRequired; }
 
     /** Only an operator changes this (smarthost:client:global-suppressions, audited). */
     public function setCanSubmitGlobalSuppressions(bool $allowed): void { $this->canSubmitGlobalSuppressions = $allowed; }
+
+    public function setOrigin(ClientOrigin $origin): void { $this->origin = $origin; }
+    public function setPolicyAcceptanceRequired(bool $required): void { $this->policyAcceptanceRequired = $required; }
+
+    /** Account metadata (App\Client\ClientLifecycle::updateAccount, audited). */
+    public function updateAccount(string $companyName, string $contactEmail, ?string $billingContactEmail, ?string $abuseContactEmail, string $plan): void
+    {
+        $this->companyName = $companyName;
+        $this->contactEmail = $contactEmail;
+        $this->billingContactEmail = $billingContactEmail;
+        $this->abuseContactEmail = $abuseContactEmail;
+        $this->plan = $plan;
+    }
+
+    /**
+     * Applies a lifecycle transition (App\Client\ClientStatusTransitions): records when the
+     * status changed, the first approval and the closure. Only App\Client\ClientLifecycle
+     * calls this, inside its audited transaction.
+     */
+    public function transitionTo(ClientStatus $to, \DateTimeImmutable $at): void
+    {
+        if (!ClientStatusTransitions::allowed($this->status, $to)) {
+            throw new DomainRuleViolation(\sprintf('A client cannot change from %s to %s.', $this->status->value, $to->value));
+        }
+        $this->status = $to;
+        $this->statusChangedAt = $at;
+        if (ClientStatus::Active === $to) {
+            $this->approvedAt ??= $at;
+        }
+        if (ClientStatus::Closed === $to) {
+            $this->closedAt = $at;
+        }
+    }
 
     /**
      * D-31: only active and throttled clients may create or add resource-consuming
@@ -67,5 +133,10 @@ class Client
     public function isClosed(): bool
     {
         return ClientStatus::Closed === $this->status;
+    }
+
+    public function isThrottled(): bool
+    {
+        return ClientStatus::Throttled === $this->status;
     }
 }

@@ -25,8 +25,8 @@ use Symfony\Component\Security\Http\EntryPoint\AuthenticationEntryPointInterface
 /**
  * `Authorization: Bearer <api key>` for /v1 (OpenAPI securitySchemes.apiKey).
  *
- * The key is looked up by its SHA-256 hash; revoked keys and keys of closed
- * clients are rejected with the same 401 as unknown keys (no oracle). Failed
+ * The key is looked up by its SHA-256 hash; revoked and expired keys and keys of
+ * closed clients are rejected with the same 401 as unknown keys (no oracle). Failed
  * attempts are rate limited per client IP. last_used_at is maintained with
  * one-minute granularity so that busy keys do not write on every request.
  */
@@ -64,7 +64,7 @@ final class ApiKeyAuthenticator extends AbstractAuthenticator implements Authent
 
         return new SelfValidatingPassport(new UserBadge($hash, function (string $hash): ApiClientUser {
             $key = $this->em->getRepository(ApiKey::class)->findOneBy(['keyHash' => $hash]);
-            if (null === $key || $key->isRevoked() || $key->getClient()->isClosed()) {
+            if (null === $key || !$key->isUsable() || $key->getClient()->isClosed()) {
                 throw new CustomUserMessageAuthenticationException('invalid');
             }
             $this->connection->executeStatement(

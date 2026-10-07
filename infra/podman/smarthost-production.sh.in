@@ -1,0 +1,372 @@
+#!/usr/bin/env bash
+# catto-mail PRODUCTION topology (Phase 8, specification 2.9). Rendered by
+# `smarthostctl prod render` into infra/.generated/podman/smarthost-production.sh;
+# do not edit the rendered copy. The development pod (smarthost-pod.sh.in, D-35)
+# is unchanged; this script is used only with SMARTHOST_ENV=production.
+#
+# Why not one pod: the members of a pod share one network namespace, so every
+# member would get the same connectivity. Production gives each service only what
+# it needs (docs/production/README.md, network matrix):
+#
+#   <instance>-internal  --internal, no Internet route. Every service; the only
+#                        network of postgres, opendkim, nginx and the delivery daemon.
+#   <instance>-egress    routed (NAT through the host). Only postfix (outbound SMTP),
+#                        validator (DNS, SMTP probes), webhook-worker (HTTPS to client
+#                        endpoints) and symfony-app (DNS for domain verification).
+#                        With SMARTHOST_EGRESS_ENABLED=false it is created --internal
+#                        too: a rehearsal of this topology with no Internet at all.
+#   <instance>-ingress   --internal. Only nginx and postfix: nginx passes inbound SMTP
+#                        to Postfix's PROXY-protocol listener (postfix-ingress:25).
+#
+# Ingress (client addresses preserved): no container publishes a port. The systemd
+# socket <instance>-ingress.socket binds PROXY_HTTPS_BIND (443) and POSTFIX_SMTP_BIND
+# (25) on the host, and <instance>-ingress.service starts nginx with both sockets.
+# nginx terminates HTTPS (REMOTE_ADDR = the client) and passes SMTP to Postfix with
+# the PROXY protocol (Postfix logs and checks the client). nginx is therefore started
+# and stopped only through those units (hostctl below), never with `podman start`.
+# Services have fixed addresses on each network and /etc/hosts entries for each other,
+# so name resolution does not depend on the aardvark-dns version or on the order of a
+# dual-homed container's resolvers.
+#
+# SMARTHOST_HOSTCTL (tool location, not service configuration): when set, systemd
+# user commands run as "$SMARTHOST_HOSTCTL machine systemctl ...". smarthostctl sets
+# it when the Podman engine is a WSL machine (the local rehearsal). Otherwise this
+# script calls `systemctl --user` directly (the production host, smarthost.service).
+#
+# Like the development pod, every object is persistent (D-35): created once, then
+# only started and stopped; only `remove` (upgrade, recreate) deletes containers and
+# nothing here ever deletes a named volume or network.
+#
+#   create             networks + volumes (if missing), then the containers
+#   start              ordered start: postgres -> DB tasks -> services (nginx through
+#                      the ingress units) -> wait healthy
+#   stop               stop the services in reverse order (containers are kept; the
+#                      ingress socket is stopped with nginx and releases 25/443)
+#   remove             remove the containers (volumes and networks are kept)
+#   replace <svc...>   recreate the named containers from the current images and
+#                      configuration and start them (e.g. postfix delivery after a
+#                      live-delivery change)
+#   tasks [names]      run the ordered DB tasks (bootstrap, migrate, grants)
+#   wait-healthy [s]   wait until every service reports healthy
+#   exists             exit 0 when all service containers exist
+#   names              print the container names
+#   postfix-exec       run a command in Postfix if it is running (timers), else no-op
+#   app-exec           run a command in the application container as www-data if it is
+#                      running (the reputation timer), else no-op
+set -euo pipefail
+
+I=${SMARTHOST_INSTANCE}
+TAG=${SMARTHOST_IMAGE_TAG}
+GENERATED=@GENERATED@
+REPO=@REPO@
+PG_IMAGE=docker.io/library/postgres:16.15-trixie
+NET_INT="$I-internal"
+NET_EG="$I-egress"
+NET_IN="$I-ingress"
+INTERNAL_SUBNET=${SMARTHOST_INTERNAL_SUBNET}
+EGRESS_SUBNET=${SMARTHOST_EGRESS_SUBNET}
+INGRESS_SUBNET=${SMARTHOST_INGRESS_SUBNET}
+EGRESS_ENABLED=${SMARTHOST_EGRESS_ENABLED}
+PROXY_HTTPS_BIND=${PROXY_HTTPS_BIND}
+POSTFIX_SMTP_BIND=${POSTFIX_SMTP_BIND}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_DB=${POSTGRES_DB}
+PROXY_TLS_CERT_FILE=${PROXY_TLS_CERT_FILE}
+PROXY_TLS_KEY_FILE=${PROXY_TLS_KEY_FILE}
+POSTFIX_TLS_CERT_FILE=${POSTFIX_TLS_CERT_FILE}
+POSTFIX_TLS_KEY_FILE=${POSTFIX_TLS_KEY_FILE}
+OPENDKIM_KEY_DIR=${OPENDKIM_KEY_DIR}
+OPENDKIM_TABLES_DIR=${OPENDKIM_TABLES_DIR}
+OBS_DIR=${SMARTHOST_POSTFIX_OBSERVABILITY_DIR}
+SPOOL_DIR=${SMARTHOST_DSN_SPOOL_DIR}
+DELIVERY_UID=${SMARTHOST_DELIVERY_UID}
+SPOOL_GID=${SMARTHOST_SPOOL_GID}
+
+# Start order; stop runs it backwards. No mailpit, no fake-smtp in production.
+SERVICES=(postgres opendkim postfix symfony-app webhook-worker nginx validator delivery)
+TASKS=(db-bootstrap db-migrate db-grants)
+VOLUMES=(postgres-data postfix-queue postfix-observability dsn-spool opendkim-keys opendkim-tables)
+# Fixed host part of each service on the internal and ingress networks (.1 is the gateway).
+declare -A HOSTPART=([postgres]=10 [opendkim]=11 [postfix]=12 [symfony-app]=13 [webhook-worker]=14
+                     [nginx]=15 [validator]=16 [delivery]=17)
+
+say() { echo "smarthost-production: $*"; }
+die() { echo "smarthost-production: ERROR: $*" >&2; exit 1; }
+image() { echo "localhost/smarthost-$1:$TAG"; }
+env_file() { echo "--env-file=$GENERATED/env/$1.env"; }
+ip_of() { echo "${INTERNAL_SUBNET%.*/*}.${HOSTPART[$1]}"; }
+ingress_ip_of() { echo "${INGRESS_SUBNET%.*/*}.${HOSTPART[$1]}"; }
+# The names other services connect to (contract: SMARTHOST_DB_HOST=postgres, ...).
+hosts() {
+  local s
+  for s in postgres opendkim postfix symfony-app; do printf -- '--add-host=%s:%s\n' "$s" "$(ip_of "$s")"; done
+}
+internal() { echo "--network=$NET_INT:ip=$(ip_of "$1")${2:+,alias=$2}"; }
+egress() { echo "--network=$NET_EG"; }
+ingress() { echo "--network=$NET_IN:ip=$(ingress_ip_of "$1")"; }
+# Postfix binds its PROXY-protocol listener to this name; nginx connects to it.
+ingress_host() { echo "--add-host=postfix-ingress:$(ingress_ip_of postfix)"; }
+
+hostctl() {
+  if [[ -n "${SMARTHOST_HOSTCTL:-}" ]]; then "$SMARTHOST_HOSTCTL" machine systemctl "$@"; else systemctl --user "$@"; fi
+}
+UNIT_SOCKET="$I-ingress.socket"
+UNIT_INGRESS="$I-ingress.service"
+UNIT_REPUTATION_TIMER="$I-reputation-evaluate.timer"
+exists() { local s; for s in "${SERVICES[@]}"; do podman container exists "$I-$s" || return 1; done; }
+
+ensure_networks() {
+  if podman network exists "$NET_INT"; then
+    [[ "$(podman network inspect "$NET_INT" --format '{{.Internal}}')" == true ]] || die "$NET_INT exists but is not internal"
+  else
+    podman network create --internal --subnet "$INTERNAL_SUBNET" --label project=smarthost \
+      --label "smarthost.instance=$I" "$NET_INT" >/dev/null
+    say "created network $NET_INT (internal: no Internet route)"
+  fi
+  local want_internal=true
+  [[ "$EGRESS_ENABLED" == true ]] && want_internal=false
+  if podman network exists "$NET_EG"; then
+    [[ "$(podman network inspect "$NET_EG" --format '{{.Internal}}')" == "$want_internal" ]] \
+      || die "$NET_EG exists with internal=$(podman network inspect "$NET_EG" --format '{{.Internal}}'), but SMARTHOST_EGRESS_ENABLED=$EGRESS_ENABLED: remove the containers and the network to change it"
+  else
+    local flags=()
+    [[ "$want_internal" == true ]] && flags+=(--internal)
+    podman network create "${flags[@]}" --subnet "$EGRESS_SUBNET" --label project=smarthost \
+      --label "smarthost.instance=$I" "$NET_EG" >/dev/null
+    say "created network $NET_EG ($([[ $want_internal == true ]] && echo 'internal: rehearsal, no Internet' || echo 'routed: Internet egress'))"
+  fi
+  if podman network exists "$NET_IN"; then
+    [[ "$(podman network inspect "$NET_IN" --format '{{.Internal}}')" == true ]] || die "$NET_IN exists but is not internal"
+  else
+    podman network create --internal --subnet "$INGRESS_SUBNET" --label project=smarthost \
+      --label "smarthost.instance=$I" "$NET_IN" >/dev/null
+    say "created network $NET_IN (internal: nginx -> Postfix SMTP with the PROXY protocol)"
+  fi
+}
+
+ensure_volumes() {
+  local v
+  for v in "${VOLUMES[@]}"; do podman volume create --ignore --label project=smarthost --label "smarthost.instance=$I" "$I-$v" >/dev/null; done
+}
+
+secret_exists() { podman secret exists "$I-$1" 2>/dev/null; }
+
+# Every service container: project and instance labels, no image pulls, restarted
+# by Podman if its process fails (a deliberate stop is never restarted). nginx sets
+# restart=no: systemd restarts it with the ingress sockets (<instance>-ingress.service).
+service() {
+  local name="$1"; shift
+  mapfile -t h < <(hosts)
+  podman create --name "$I-$name" --hostname "$name" --label project=smarthost --label "smarthost.instance=$I" \
+    --label smarthost.topology=production --pull never --restart "${restart:-on-failure}" "${h[@]}" "$@" >/dev/null
+  say "created container $I-$name"
+}
+
+create_one() {
+  case "$1" in
+    postgres)
+      service postgres "$(internal postgres postgres)" "$(env_file postgres)" \
+        -v "$I-postgres-data:/var/lib/postgresql/data" \
+        --health-cmd "pg_isready -h 127.0.0.1 -U $POSTGRES_USER -d $POSTGRES_DB -q" \
+        --health-interval 10s --health-start-period 30s --health-retries 6 \
+        "$PG_IMAGE" ;;
+    opendkim)
+      # The only container that mounts the DKIM key volume.
+      service opendkim "$(internal opendkim opendkim)" "$(env_file opendkim)" \
+        -v "$I-opendkim-keys:$OPENDKIM_KEY_DIR" -v "$I-opendkim-tables:$OPENDKIM_TABLES_DIR" \
+        --health-cmd "nc -z 127.0.0.1 8891" --health-interval 15s --health-start-period 5s --health-retries 4 \
+        "$(image opendkim)" ;;
+    postfix)
+      # No published port: inbound SMTP arrives from nginx on the ingress network
+      # (PROXY protocol, smarthost-postfix-entrypoint).
+      service postfix "$(egress)" "$(internal postfix postfix)" "$(ingress postfix)" "$(ingress_host)" "$(env_file postfix)" \
+        --secret "$I-postfix-tls-cert,type=mount,target=$POSTFIX_TLS_CERT_FILE" \
+        --secret "$I-postfix-tls-key,type=mount,target=$POSTFIX_TLS_KEY_FILE" \
+        -v "$I-postfix-queue:/var/spool/postfix" \
+        -v "$I-postfix-observability:$OBS_DIR" -v "$I-dsn-spool:$SPOOL_DIR" \
+        --health-cmd smarthost-postfix-healthcheck --health-interval 15s --health-start-period 15s --health-retries 4 \
+        "$(image postfix)" ;;
+    symfony-app)
+      service symfony-app "$(egress)" "$(internal symfony-app symfony-app)" "$(env_file app)" \
+        --health-cmd smarthost-fpm-healthcheck --health-interval 15s --health-start-period 10s --health-retries 4 \
+        "$(image app)" ;;
+    webhook-worker)
+      service webhook-worker "$(egress)" "$(internal webhook-worker)" "$(env_file webhook-worker)" \
+        --user www-data --stop-signal SIGTERM --stop-timeout 30 \
+        --health-cmd smarthost-webhook-worker-healthcheck --health-interval 30s --health-start-period 20s --health-retries 3 \
+        "$(image app)" php bin/console smarthost:webhook:work ;;
+    nginx)
+      # No published port: the HTTPS and SMTP sockets come from <instance>-ingress.socket
+      # (NGINX="3;4;" makes nginx inherit them). The production templates listen on
+      # PROXY_HTTPS_BIND and POSTFIX_SMTP_BIND exactly, so the inherited sockets match.
+      restart=no service nginx "$(internal nginx)" "$(ingress nginx)" "$(ingress_host)" "$(env_file proxy)" \
+        -e NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-production \
+        -e "NGINX=3;4;" \
+        --secret "$I-proxy-tls-cert,type=mount,target=$PROXY_TLS_CERT_FILE" \
+        --secret "$I-proxy-tls-key,type=mount,target=$PROXY_TLS_KEY_FILE" \
+        --health-cmd "wget -q -O /dev/null http://127.0.0.1:8080/nginx-health" \
+        --health-interval 15s --health-start-period 5s --health-retries 4 \
+        "$(image nginx)" ;;
+    validator)
+      service validator "$(egress)" "$(internal validator)" "$(env_file validator)" \
+        --health-cmd "python -m smarthost_validator health" --health-interval 30s --health-start-period 20s --health-retries 3 \
+        "$(image validator)" ;;
+    delivery)
+      # Observability is read-only for Go; the DSN spool is read-write (claim by rename).
+      service delivery "$(internal delivery)" "$(env_file delivery)" --user "$DELIVERY_UID:$SPOOL_GID" \
+        -v "$I-postfix-observability:$OBS_DIR:ro" -v "$I-dsn-spool:$SPOOL_DIR" \
+        --health-cmd "smarthost-delivery health" --health-interval 30s --health-start-period 30s --health-retries 3 \
+        "$(image delivery)" ;;
+    *) die "unknown service $1" ;;
+  esac
+}
+
+cmd_create() {
+  local s missing=()
+  for s in postfix-tls-cert postfix-tls-key proxy-tls-cert proxy-tls-key; do secret_exists "$s" || missing+=("$I-$s"); done
+  ((${#missing[@]} == 0)) || die "Podman secrets missing: ${missing[*]} (smarthostctl prod tls ...)"
+  for s in opendkim postfix app nginx validator delivery; do
+    podman image exists "$(image "$s")" || die "image $(image "$s") missing (smarthostctl prod build)"
+  done
+  for s in "${SERVICES[@]}"; do podman container exists "$I-$s" && die "container $I-$s already exists (use replace/remove)"; done
+  ensure_networks
+  ensure_volumes
+  for s in "${SERVICES[@]}"; do create_one "$s"; done
+}
+
+run_task() {
+  local task="$1"; local args=()
+  case "$task" in
+    db-bootstrap) args=("$(env_file bootstrap)" -v "$REPO/infra/postgres:/bootstrap:ro" --entrypoint /bootstrap/bootstrap.sh "$PG_IMAGE") ;;
+    db-migrate)   args=("$(env_file app)" --user www-data "$(image app)"
+                        php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration) ;;
+    db-grants)    args=("$(env_file bootstrap)" -v "$REPO/infra/postgres:/bootstrap:ro" --entrypoint /bootstrap/grants.sh "$PG_IMAGE") ;;
+    *) die "unknown task $task" ;;
+  esac
+  mapfile -t h < <(hosts)
+  podman rm --force --ignore "$I-$task" >/dev/null
+  if podman run --rm --name "$I-$task" --network "$NET_INT" "${h[@]}" --label project=smarthost \
+      --label "smarthost.instance=$I" --pull never "${args[@]}" | sed "s/^/  $task: /"; then
+    say "task $task ok"
+  else
+    die "task $task failed"
+  fi
+}
+
+cmd_tasks() {
+  local t list=("$@")
+  ((${#list[@]})) || list=("${TASKS[@]}")
+  for t in "${list[@]}"; do run_task "$t"; done
+}
+
+health() { podman inspect "$I-$1" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing; }
+
+# nginx runs only under its socket-activated unit (see the header).
+ingress_start() {
+  hostctl cat "$UNIT_INGRESS" >/dev/null 2>&1 && hostctl cat "$UNIT_SOCKET" >/dev/null 2>&1 \
+    || die "the ingress units $UNIT_SOCKET and $UNIT_INGRESS are not installed (smarthostctl prod install)"
+  hostctl reset-failed "$UNIT_SOCKET" "$UNIT_INGRESS" >/dev/null 2>&1 || true
+  if ! hostctl start "$UNIT_SOCKET" "$UNIT_INGRESS"; then
+    hostctl status --no-pager --lines 5 "$UNIT_SOCKET" "$UNIT_INGRESS" >&2 || true
+    die "the ingress did not start. If the socket could not bind $PROXY_HTTPS_BIND/$POSTFIX_SMTP_BIND, set net.ipv4.ip_unprivileged_port_start=25 on the host (runbook §1; smarthostctl prod preflight --section host)"
+  fi
+}
+
+ingress_stop() {
+  hostctl stop "$UNIT_INGRESS" "$UNIT_SOCKET" >/dev/null 2>&1 || true
+  podman container exists "$I-nginx" && podman stop --time 10 "$I-nginx" >/dev/null 2>&1 || true
+}
+
+wait_healthy() {
+  local deadline=$((SECONDS + ${1:-300})) s pending
+  while :; do
+    pending=()
+    for s in "${@:2}"; do [[ "$(health "$s")" == healthy ]] || pending+=("$s"); done
+    ((${#pending[@]} == 0)) && return 0
+    ((SECONDS < deadline)) || die "not healthy within the timeout: ${pending[*]}"
+    sleep 2
+  done
+}
+
+cmd_start() {
+  exists || die "the production containers do not exist (smarthostctl prod install)"
+  podman start "$I-postgres" >/dev/null
+  wait_healthy 300 postgres
+  say "postgres healthy"
+  cmd_tasks
+  local s
+  for s in "${SERVICES[@]:1}"; do
+    if [[ "$s" == nginx ]]; then ingress_start; else podman start "$I-$s" >/dev/null; fi
+  done
+  wait_healthy 300 "${SERVICES[@]}"
+  say "all ${#SERVICES[@]} services healthy"
+  # Phase 9: the client reputation evaluation every 15 minutes (installed with the units).
+  if hostctl cat "$UNIT_REPUTATION_TIMER" >/dev/null 2>&1; then
+    hostctl start "$UNIT_REPUTATION_TIMER" || say "WARNING: $UNIT_REPUTATION_TIMER did not start"
+  fi
+}
+
+cmd_stop() {
+  local i s
+  hostctl stop "$UNIT_REPUTATION_TIMER" >/dev/null 2>&1 || true
+  for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
+    s="${SERVICES[$i]}"
+    if [[ "$s" == nginx ]]; then ingress_stop; continue; fi
+    podman container exists "$I-$s" && podman stop --time 30 "$I-$s" >/dev/null 2>&1 || true
+  done
+  say "stopped (containers retained; ingress sockets released)"
+}
+
+cmd_remove() {
+  local i s
+  for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
+    s="${SERVICES[$i]}"
+    [[ "$s" == nginx ]] && ingress_stop
+    podman rm --force --ignore --time 30 "$I-$s" >/dev/null
+  done
+  say "containers removed (volumes, networks and secrets kept)"
+}
+
+cmd_replace() {
+  (($#)) || die "replace: name the services (${SERVICES[*]})"
+  local s
+  for s in "$@"; do
+    [[ " ${SERVICES[*]} " == *" $s "* ]] || die "unknown service $s"
+    [[ "$s" == nginx ]] && ingress_stop
+    podman rm --force --ignore --time 30 "$I-$s" >/dev/null
+    create_one "$s"
+    if [[ "$s" == nginx ]]; then ingress_start; else podman start "$I-$s" >/dev/null; fi
+  done
+  wait_healthy 300 "$@"
+  say "replaced and healthy: $*"
+}
+
+cmd_app_exec() {
+  if [[ "$(podman container inspect --format '{{.State.Running}}' "$I-symfony-app" 2>/dev/null)" == true ]]; then
+    exec podman exec -u www-data "$I-symfony-app" "$@"
+  fi
+  say "$I-symfony-app is not running; skipped $*"
+}
+
+cmd_postfix_exec() {
+  if [[ "$(podman container inspect --format '{{.State.Running}}' "$I-postfix" 2>/dev/null)" == true ]]; then
+    exec podman exec "$I-postfix" "$@"
+  fi
+  say "$I-postfix is not running; skipped $*"
+}
+
+action="${1:-}"; shift || true
+case "$action" in
+  create) cmd_create ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  remove) cmd_remove ;;
+  replace) cmd_replace "$@" ;;
+  tasks) cmd_tasks "$@" ;;
+  wait-healthy) wait_healthy "${1:-300}" "${SERVICES[@]}" ;;
+  exists) exists ;;
+  names) for s in "${SERVICES[@]}"; do echo "$I-$s"; done ;;
+  postfix-exec) cmd_postfix_exec "$@" ;;
+  app-exec) cmd_app_exec "$@" ;;
+  *) die "usage: $0 create|start|stop|remove|replace <svc...>|tasks [names]|wait-healthy [s]|exists|names|postfix-exec <cmd>|app-exec <cmd>" ;;
+esac

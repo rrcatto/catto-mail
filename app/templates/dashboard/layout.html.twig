@@ -34,7 +34,8 @@
             <li><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}"{% if section == 'sending' %} aria-current="page"{% endif %}>Sending</a></li>
             <li><a href="{{ path('dashboard_client_suppressions', {clientId: cid}) }}"{% if section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>
             <li><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}"{% if section == 'domains' %} aria-current="page"{% endif %}>Sending domains</a></li>
-            <li><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}"{% if section == 'usage' %} aria-current="page"{% endif %}>Usage</a></li>
+            <li><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}"{% if section == 'usage' and client is defined %} aria-current="page"{% endif %}>Usage</a></li>
+            <li><a href="{{ path('dashboard_client_api_keys', {clientId: cid}) }}"{% if section == 'api_keys' %} aria-current="page"{% endif %}>API keys</a></li>
             <li><a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}"{% if section == 'webhooks' and client is defined %} aria-current="page"{% endif %}>Webhooks</a></li>
         </ul>
     {% endif %}
@@ -43,6 +44,8 @@
         <ul>
             {% if is_granted('PLATFORM.OVERVIEW.VIEW') %}<li><a href="{{ path('dashboard_operator_overview') }}"{% if client is not defined and section == 'overview' %} aria-current="page"{% endif %}>System overview</a></li>{% endif %}
             {% if is_granted('PLATFORM.CLIENT.VIEW') %}<li><a href="{{ path('dashboard_operator_clients') }}"{% if section == 'clients' %} aria-current="page"{% endif %}>Clients</a></li>{% endif %}
+            {% if is_granted('PLATFORM.ABUSE.VIEW') %}<li><a href="{{ path('dashboard_operator_alerts') }}"{% if section == 'alerts' %} aria-current="page"{% endif %}>Abuse &amp; reputation</a></li>{% endif %}
+            {% if is_granted('PLATFORM.USAGE.VIEW') %}<li><a href="{{ path('dashboard_operator_usage') }}"{% if section == 'usage' and client is not defined %} aria-current="page"{% endif %}>Usage &amp; billing</a></li>{% endif %}
             {% if is_granted('PLATFORM.USER.VIEW') %}<li><a href="{{ path('dashboard_operator_users') }}"{% if section == 'users' %} aria-current="page"{% endif %}>Users</a></li>{% endif %}
             {% if is_granted('SYSTEM.ROLE.VIEW') %}<li><a href="{{ path('dashboard_operator_roles') }}"{% if section == 'roles' %} aria-current="page"{% endif %}>Roles &amp; permissions</a></li>{% endif %}
             {% if is_granted('PLATFORM.DSN.VIEW') %}<li><a href="{{ path('dashboard_operator_dsns') }}"{% if section == 'dsns' %} aria-current="page"{% endif %}>Unmatched DSNs</a></li>{% endif %}
