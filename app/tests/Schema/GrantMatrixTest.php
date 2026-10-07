@@ -34,7 +34,7 @@ final class GrantMatrixTest extends TestCase
             }
             foreach (array_map('trim', explode(',', $m[1])) as $table) {
                 foreach (array_keys(self::ROLES) as $i => $role) {
-                    $out[$table][$role] = '–' === $cells[$i] ? [] : preg_split('/\s+/', preg_replace('/[¹³⁴]/u', '', $cells[$i]));
+                    $out[$table][$role] = '–' === $cells[$i] ? [] : preg_split('/\s+/', preg_replace('/[¹³⁴⁵]/u', '', $cells[$i]));
                 }
             }
         }
@@ -45,7 +45,7 @@ final class GrantMatrixTest extends TestCase
     public function testTableAndColumnPrivilegesEqualTheContract(): void
     {
         $matrix = self::matrix();
-        self::assertCount(39, $matrix, 'schema.md §6 should list all 39 tables');
+        self::assertCount(48, $matrix, 'schema.md §6 should list all 48 tables');
         $c = Db::owner();
         $problems = [];
         foreach ($matrix as $table => $roles) {

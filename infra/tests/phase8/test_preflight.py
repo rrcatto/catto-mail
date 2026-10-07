@@ -143,7 +143,7 @@ class GrantMatrixTest(unittest.TestCase):
 
     def test_schema_md_matrix(self) -> None:
         m = pf.grant_matrix((ROOT / "docs/schema/schema.md").read_text())
-        self.assertEqual(39, len(m))
+        self.assertEqual(48, len(m))
         self.assertEqual({"S", "I", "U"}, m["delivery_heartbeats"]["delivery"])
         self.assertEqual({"S", "I"}, m["client_notes"]["app"])
         self.assertEqual(set(), m["client_alerts"]["delivery"])
@@ -463,8 +463,43 @@ class GeneratedTextTest(unittest.TestCase):
             self.assertIn(needle, text)
         rules = pf.firewall_ruleset(values, 1001)
         self.assertIn("tcp dport { 22, 25, 443 } ct state new accept", rules)
-        self.assertIn("meta skuid 1001 tcp dport { 25, 53, 80, 443 } accept", rules)
+        self.assertIn("meta skuid 1001 tcp dport { 22, 25, 53, 80, 443 } accept", rules)
         self.assertIn("policy drop", rules)
+
+
+class PreUpgradeTest(unittest.TestCase):
+    def test_grants_are_compared_after_the_upgrade_not_before(self) -> None:
+        values = production_values()
+        healthy = {s: {"State": {"Health": {"Status": "healthy"}}} for s in pf.SERVICES}
+        host = FakeHost(values, inspect=healthy, sql={"SELECT 1": [["1"]], "role_table_grants": [], "client_reputation_metrics": [["60"]]},
+                        exec_={("symfony-app", "php", "bin/console", "doctrine:migrations:up-to-date"): (0, "up to date")})
+        before = {c.name: c.level for c in pf.Preflight(values, host, FakeResolver({}), pre_upgrade=True).run(("runtime",))}
+        after = {c.name: c.level for c in pf.Preflight(values, host, FakeResolver({})).run(("runtime",))}
+        self.assertEqual("SKIP", before["grants current"])
+        self.assertEqual("FAIL", after["grants current"], "no grants at all: the post-upgrade check still compares them")
+
+
+class LocalEngineTest(unittest.TestCase):
+    """The production units use the user's own Podman API socket; that engine is still local."""
+
+    def remote(self, env: dict[str, str], reported: str) -> bool:
+        host = pf.Host(production_values())
+        with mock.patch.dict(pf.os.environ, env, clear=True), \
+                mock.patch.object(host, "run", return_value=(0, reported + "\n")) as run:
+            result = host.podman_remote()
+        self.calls = run.call_count
+        return result
+
+    def test_own_runtime_socket_is_local(self):
+        self.assertFalse(self.remote({"XDG_RUNTIME_DIR": "/run/user/1001",
+                                      "CONTAINER_HOST": "unix:///run/user/1001/podman/podman.sock"}, "true"))
+        self.assertEqual(self.calls, 0)
+
+    def test_other_socket_or_plain_podman_asks_podman(self):
+        self.assertTrue(self.remote({"XDG_RUNTIME_DIR": "/run/user/1000",
+                                     "CONTAINER_HOST": "unix:///mnt/wsl/podman-sockets/m/podman-user.sock"}, "true"))
+        self.assertTrue(self.remote({}, "true"))
+        self.assertFalse(self.remote({}, "false"))
 
 
 if __name__ == "__main__":

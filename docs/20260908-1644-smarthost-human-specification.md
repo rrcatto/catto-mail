@@ -1,6 +1,6 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.10. This is a documentation revision, not a software release version.
+**Specification version:** 2.11. This is a documentation revision, not a software release version.
 **Revision date:** 6 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
@@ -204,7 +204,7 @@ rootless containers, `<instance>-<service>` (default instance `smarthost`). They
 development pod is unchanged.
 
 ```text
-production host (Ubuntu 24.04, rootless Podman, lingering service user)
+production host (Ubuntu Server 26.04 LTS, rootless Podman, lingering service user)
 │
 ├── <instance>-internal  (internal: no route out; fixed addresses .10-.17)
 │   postgres · opendkim · nginx · delivery              ← internal only (nginx also on ingress)
@@ -1822,6 +1822,104 @@ No implementation should claim reliable spam-trap detection because there is no 
 
 ---
 
+## Operator self-service (specification 2.11)
+
+An operator who did not write the software must be able to rent a clean **Ubuntu Server 26.04
+LTS** VPS, run one installer, sign in, and be guided through configuring, testing,
+understanding and operating catto-mail from the web application. The guides are
+`docs/production/VPS-INSTALL.md` (primary), `components.md` and `architecture.md`. The production
+safety model is unchanged.
+
+**Components** have one canonical name each: Catto-mail Web Application, Catto-mail Webhook
+Worker, Catto-mail Email Validator, Catto-mail Delivery Daemon, Postfix Mail Transfer Agent,
+OpenDKIM Signing Service, PostgreSQL Database, nginx Frontend. On the host: the host agent and
+the service user's systemd units. **BIND is not required**: catto-mail only queries DNS.
+
+**Installer.**
+- `install-catto-mail`, run as root, installs an exact release tag (never a branch).
+- It prepares the host from Ubuntu packages only (Podman, Git, Python, OpenSSL, nftables, rsync,
+  lego), creates the `cattomail` service user with lingering, and persists the low-port setting.
+- It writes `infra/.env` with generated secrets, builds the images, installs a certificate (Let's
+  Encrypt when configured, otherwise a temporary self-signed one), installs the units and starts
+  everything in **HELD** mode.
+- It then checks health, takes a first backup, generates the firewall rules (applied only on
+  request), verifies automatic start, and prints a single-use sign-in link.
+- Every step prints PASS, WARN or FAIL. A FAIL says what failed, why, how to fix it and whether
+  re-running is safe; re-running skips finished steps.
+
+**First sign-in.** `smarthostctl prod admin-link` prints an ADMIN-only sign-in link (15 minutes,
+one use, audited). It needs a shell on the host as the service user, which already controls every
+secret.
+
+**Host agent.**
+- A systemd user service on the host. It reports the host-side checks (OS, Podman, lingering,
+  units, disk, memory, clock, firewall, containers, secret file modes, backups, certificate
+  renewal, boot recovery, and hourly the production preflight).
+- It carries out what administrators request in the dashboard: diagnostics, holding or releasing
+  the Postfix queue, live enable or disable, backup, restore rehearsal, DKIM keys and certificate
+  renewal, each with the existing audited tooling.
+- The web application only records requests; it never runs host commands.
+
+**Setup wizard.**
+- Operator › System setup takes the administrator through 19 steps in dependency order: welcome,
+  host, web identity, SMTP identity, DNS, TLS, DKIM, database, web application, validator,
+  delivery daemon, Postfix, OpenDKIM, webhook worker, backups, seed test, bounce test, reboot test
+  and production readiness.
+- Each step shows live checks with explanations and help links.
+- Progress is stored and the wizard is resumable. A new installation opens it after sign-in, and
+  it stays available afterwards.
+
+**Diagnostics.**
+- Every check reports PASS, WARN, FAIL, SKIPPED or INFO, with a human explanation and a fix.
+- The history keeps requested runs, changes of result, and one scheduled result per check and
+  day. Secrets are never stored.
+- System › Health shows every component, the delivery mode (HELD, LIVE, PAUSED, STOPPED), the
+  queues, the last backup and the certificates.
+
+**Emergency stop.**
+- "STOP SENDING EMAIL NOW" on every operator page needs `SYSTEM.DELIVERY.CONTROL` and a reason.
+- It sets a database stop that the delivery daemon reads within seconds, and the host agent holds
+  the Postfix queue.
+- Resuming, and enabling live delivery, need typed confirmations.
+
+**Certificates.** Let's Encrypt with DNS-01 through the host's `lego` and the operator's DNS
+provider; port 80 is never opened. A daily timer renews and installs. A manual fallback exists.
+
+**Backups.**
+- Daily, encrypted when configured, pruned, and copied with rsync to an operator-chosen target;
+  an on-host-only backup is a WARN.
+- The restore rehearsal restores the newest backup into a temporary database, verifies it and
+  drops it.
+
+**Help.** Operator › Help explains, from the implementation:
+- the system, the components and the flows;
+- validation and its results, suppressions, sending, delivery states, tracking and its limits,
+  bounces and complaints;
+- DNS, PTR, SPF, DKIM, DMARC and TLS;
+- Postfix, the delivery daemon, the validator and the web application in depth;
+- backups, logs, upgrades, security and troubleshooting.
+
+**Address batches and re-permission.**
+- An administrator uploads up to 10,000 addresses (TXT or CSV) on behalf of a client and sees a
+  preview. Nothing is lost: duplicates and malformed rows are kept and reported.
+- The batch is validated through ordinary validation jobs and reviewed by **separate state
+  dimensions**:
+  - validation result and warning flags;
+  - send eligibility;
+  - consent;
+  - delivery state;
+  - engagement.
+- Typo suggestions are never applied automatically.
+- Sends go in stages (seed, controlled, rollout, full), only to eligible addresses, and beyond a
+  seed test only after the batch's recorded compliance approval.
+- Re-permission messages carry personal links to `/p/{token}`, where the recipient confirms,
+  unsubscribes from this list (the client's unsubscribe, not a suppression), or opts out globally
+  (a global suppression). Answers are idempotent and audited, and forwarded to the client as
+  `repermission.responded`.
+- ctnlist's handling of that event is outstanding (`docs/integration/ctnlist.md`).
+
+---
+
 # 20. Development Phases
 
 The phases below are deliberately ordered to prove the most important architectural assumptions before substantial user-interface or SaaS work.
@@ -2119,6 +2217,23 @@ remains disabled. Still pending, and decided by the owner:
 
 ---
 
+## Phase 10: Operator Self-Service
+
+**Purpose:** an operator without knowledge of the code installs catto-mail on a clean Ubuntu
+Server 26.04 LTS VPS and configures, tests, understands and operates it from the web application.
+
+**Repository side implemented (specification 2.11).** The installer, the host agent, the setup
+wizard, diagnostics and history, help, the emergency stop, certificate automation, backups and
+the restore rehearsal, address batches and re-permission (section 19, *Operator self-service*).
+Still to be proven on a real VPS:
+
+- the provider's port-25 policy, PTR and public DNS;
+- Let's Encrypt with the operator's DNS provider;
+- real delivery, bounces and complaints;
+- the reboot of a real machine.
+
+---
+
 # 21. Explicit Non-Goals for the First Product
 
 Do not add the following simply because they are technically fashionable:
@@ -2162,6 +2277,7 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.11 | 7 October 2026 | Operator self-service (section 19, *Operator self-service*; Phase 10): the one-command installer for Ubuntu Server 26.04 LTS from an exact release tag, the bootstrap sign-in link, the host agent, the setup wizard, diagnostics with history and system health, the delivery modes and the web emergency stop, Let's Encrypt DNS-01 automation, scheduled, encrypted, off-host backups and the restore rehearsal, log shortcuts, help and tutorials, administrator address batches with separate address state dimensions, staged sends and re-permission with `repermission.responded`; the ctnlist integration document. |
 | 2.10 | 7 October 2026 | Phase 9 repository-side public SaaS hardening (section 16, *SaaS operations*): client lifecycle with approval, throttling, suspension and closure (reasons, permissions, audit); disabled public-onboarding gate; service-policy acceptance; contact metadata and private notes; per-client limits with installation ceilings and concurrency-safe quotas (`429 quota-exceeded`); API-key names and expiry; usage summaries, reconciliation, provider-neutral billing statements and export; reputation metrics and alerts without automatic action; webhook endpoint health; the public integration guide at `/docs/api`. |
 | 2.9 | 6 October 2026 | Phase 8 repository-side production readiness: production topology (standalone containers on internal and egress networks, network matrix, firewall), `smarthostctl prod`, the production configuration profile and safety rules, capture/held/live/paused delivery states with an audited, preflight-gated activation (`SYSTEM.DELIVERY.CONTROL`), the production preflight (host, runtime, exposure, ingress, TLS, DNS identity, SPF, DKIM, DMARC, bounce domain, Postfix, delivery), the socket-activated ingress that preserves client addresses (no published ports; SMTP to Postfix with the PROXY protocol; `TRUSTED_PROXIES` empty), the checked low-port host prerequisite, the launch decisions (IPv4 only, validator probing off, retention unset), production DKIM keys, Postfix submission sender ownership, the installation-wide warm-up ceiling and the throttled-client rate, emergency pause, `delivery_heartbeats` (Postfix queue depth), backups, upgrades, seed testing and the runbook; `APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS` and a response-header bound. |
 | 2.8 | 6 October 2026 | Phase 7 Smarthost side: the webhook delivery contract (body, headers, signature input, at-least-once with event-id de-duplication, fan-out timing, `webhook.test` addressing, retry and permanent-failure rules, SSRF destination policy with address pinning and no redirects, response and time limits, no automatic endpoint disabling), the real webhook worker (leases, fencing, heartbeats), dashboard webhook management. `webhook_deliveries` diagnostics; `webhook.test` names exactly one endpoint (`webhook_endpoint_id` required); `webhook_worker_heartbeats` and dashboard indexes; `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` (empty: no automatic deletion). Decisions: no endpoint-management API, no suppression-lookup API, production webhook values in Phase 8. |

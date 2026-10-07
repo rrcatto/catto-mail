@@ -1,0 +1,10 @@
+# A stand-in for a clean Ubuntu Server 26.04 LTS VPS (specification 2.11), used only by
+# infra/tests/installer-test.sh: the Ubuntu 26.04 image with systemd as PID 1, plus what a
+# cloud image already has (dbus, iproute2, ca-certificates) and git, which the installation
+# guide asks the operator to install before cloning. Everything else comes from the installer.
+FROM docker.io/library/ubuntu:26.04
+RUN apt-get update -qq \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq systemd systemd-sysv dbus iproute2 git ca-certificates >/dev/null \
+ && rm -rf /var/lib/apt/lists/*
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

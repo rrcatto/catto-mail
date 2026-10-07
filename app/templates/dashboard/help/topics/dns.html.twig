@@ -1,0 +1,17 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>catto-mail only <em>reads</em> DNS. Your domains stay with your DNS provider; no DNS server (BIND) runs on the catto-mail server. System setup › DNS lists the exact records of your installation with a live test.</p>
+<p>Example names used below: web <code>mail.example.com</code>, mail host <code>mta.example.com</code>, bounce domain <code>bounce.example.com</code>, sending domain <code>news.example.org</code>, server IP <code>203.0.113.10</code>.</p>
+<table class="dense"><thead><tr><th scope="col">Record</th><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Why</th></tr></thead><tbody>
+<tr><td>A</td><td>mail.example.com</td><td>203.0.113.10</td><td>The dashboard and API address.</td></tr>
+<tr><td>A</td><td>mta.example.com</td><td>203.0.113.10</td><td>The mail server's name; the PTR must point back to it.</td></tr>
+<tr><td>PTR</td><td>10.113.0.203.in-addr.arpa</td><td>mta.example.com</td><td>Reverse DNS, set at your <strong>VPS provider</strong>. <a href="{{ path('dashboard_operator_help_topic', {topic: 'ptr'}) }}">PTR</a></td></tr>
+<tr><td>MX</td><td>bounce.example.com</td><td>10 mta.example.com.</td><td>Bounces and complaints come back to this server.</td></tr>
+<tr><td>TXT</td><td>bounce.example.com</td><td>v=spf1 ip4:203.0.113.10 -all</td><td>SPF of the envelope sender. <a href="{{ path('dashboard_operator_help_topic', {topic: 'spf'}) }}">SPF</a></td></tr>
+<tr><td>TXT</td><td>mta.example.com</td><td>v=spf1 ip4:203.0.113.10 -all</td><td>SPF of the EHLO name.</td></tr>
+<tr><td>TXT</td><td>s2026a._domainkey.news.example.org</td><td>v=DKIM1; k=rsa; p=MIIB…</td><td>The DKIM public key (from System setup › DKIM). <a href="{{ path('dashboard_operator_help_topic', {topic: 'dkim'}) }}">DKIM</a></td></tr>
+<tr><td>TXT</td><td>_dmarc.news.example.org</td><td>v=DMARC1; p=none; rua=mailto:dmarc@news.example.org</td><td>DMARC policy of the sending domain. <a href="{{ path('dashboard_operator_help_topic', {topic: 'dmarc'}) }}">DMARC</a></td></tr>
+<tr><td>TXT</td><td>_smarthost-verification.news.example.org</td><td>(the token shown when the domain is added)</td><td>Proves the client controls the sending domain. <a href="{{ path('dashboard_operator_help_topic', {topic: 'sending-domains'}) }}">Sending domains</a></td></tr>
+</tbody></table>
+<p>The sign-in mail sender's domain (<code>APP_MAIL_FROM</code>) needs DKIM (and ideally DMARC) like any sending domain. DNS changes can take from minutes to hours to be visible; the checks query the public DNS.</p>
+{% endblock %}

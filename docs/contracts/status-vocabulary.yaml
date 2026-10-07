@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.10). Every enum value used in the database, the /v1 API,
+# (specification 2.11). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.5.0"
-specification_version: "2.10"
+vocabulary_version: "2.6.0"
+specification_version: "2.11"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -537,6 +537,7 @@ webhook_event_type:
     message.hard_bounced: {origin: spec}
     message.complained: {origin: spec}
     webhook.test: {origin: contract, meaning: Emitted only by POST /v1/webhooks/test.}
+    repermission.responded: {origin: contract, meaning: "A recipient answered a re-permission message (confirmed, unsubscribed from this list, or global opt-out) (specification 2.11)."}
 
 webhook_subject_type:
   values:
@@ -544,6 +545,7 @@ webhook_subject_type:
     send_job: {origin: contract}
     message: {origin: contract}
     webhook_endpoint: {origin: contract, meaning: Subject of webhook.test.}
+    address_batch_entry: {origin: contract, meaning: Subject of repermission.responded (specification 2.11).}
 
 webhook_endpoint_status:
   values:
@@ -592,3 +594,182 @@ audit_actor_type:
     user: {origin: contract, meaning: A dashboard user (users.id).}
     api_key: {origin: contract}
     system: {origin: contract, meaning: Workers and scheduled processes.}
+
+# ---------------------------------------------------------------------------
+# Operator self-service and address batches (specification 2.11)
+# ---------------------------------------------------------------------------
+
+system_request_action:
+  description: system_requests.action - work the web application asks of the host agent.
+  values:
+    diagnostics.run: {origin: contract, meaning: "Run the host-side checks (the production preflight and host facts) and record the results."}
+    delivery.pause: {origin: contract, meaning: "Hold the Postfix queue (the audited emergency pause); the delivery daemon already stopped through delivery_controls."}
+    delivery.resume: {origin: contract, meaning: "Release the Postfix queue after the emergency stop was lifted."}
+    delivery.live_enable: {origin: contract, meaning: "Run the activation preflight and, if it passes, enable live delivery (smarthostctl prod live-enable)."}
+    delivery.live_disable: {origin: contract, meaning: "Return to held mode (smarthostctl prod live-disable)."}
+    backup.run: {origin: contract, meaning: "Take a backup now, prune old ones and copy it off the host if configured."}
+    backup.restore_rehearsal: {origin: contract, meaning: "Restore the newest backup into a temporary database, verify it and drop it again."}
+    dkim.generate: {origin: contract, meaning: "Generate a new DKIM key for a domain and selector (not yet signing)."}
+    dkim.activate: {origin: contract, meaning: "Activate a published DKIM selector after its DNS record matches the key."}
+    tls.renew: {origin: contract, meaning: "Obtain or renew the Let's Encrypt certificate (DNS-01) and install it."}
+
+system_request_status:
+  description: system_requests.status.
+  values:
+    pending: {origin: contract}
+    running: {origin: contract, meaning: "Claimed by the host agent."}
+    succeeded: {origin: contract}
+    failed: {origin: contract, meaning: "The action ran and failed; result_summary says why."}
+    cancelled: {origin: contract, meaning: "Withdrawn before the agent claimed it."}
+
+system_component:
+  description: system_checks.component and system_check_runs.component - the part of the system a check covers.
+  values:
+    host: {origin: contract, meaning: "The Ubuntu host, Podman, the service user, disk, memory, clock."}
+    boot: {origin: contract, meaning: "Automatic start after a reboot (lingering, units, the ingress socket)."}
+    database: {origin: contract, meaning: "PostgreSQL, migrations, grants."}
+    web: {origin: contract, meaning: "The Catto-mail Web Application (Symfony)."}
+    validator: {origin: contract, meaning: "The Catto-mail Email Validator (Python)."}
+    delivery: {origin: contract, meaning: "The Catto-mail Delivery Daemon (Go)."}
+    postfix: {origin: contract, meaning: "The Postfix Mail Transfer Agent."}
+    opendkim: {origin: contract, meaning: "The OpenDKIM Signing Service."}
+    dns: {origin: contract, meaning: "Public DNS records (A, PTR, MX, SPF, DKIM, DMARC)."}
+    tls: {origin: contract, meaning: "HTTPS and SMTP certificates."}
+    nginx: {origin: contract, meaning: "The nginx Frontend and the ingress socket."}
+    tracking: {origin: contract, meaning: "Open and click tracking endpoints."}
+    webhook: {origin: contract, meaning: "The Catto-mail Webhook Worker."}
+    bounce: {origin: contract, meaning: "The bounce path (inbound SMTP, DSN spool, parsing, suppression)."}
+    backup: {origin: contract, meaning: "Backups, off-host copies and restore rehearsals."}
+    security: {origin: contract, meaning: "Exposure, relay protection, file modes, secrets."}
+
+system_check_result:
+  description: system_checks.result and system_check_runs.result.
+  values:
+    pass: {origin: contract}
+    warn: {origin: contract, meaning: "Works, but needs attention."}
+    fail: {origin: contract, meaning: "Does not work, or is unsafe."}
+    skipped: {origin: contract, meaning: "Not run (a prerequisite is missing, or it does not apply)."}
+    info: {origin: contract, meaning: "A fact, not a judgement."}
+
+system_check_source:
+  description: system_checks.source and system_check_runs.source.
+  values:
+    agent: {origin: contract, meaning: "The host agent (host, systemd, DNS, TLS, Postfix, backups)."}
+    application: {origin: contract, meaning: "The web application itself (database, workers, tracking)."}
+
+system_check_trigger:
+  description: system_check_runs.run_trigger - why a result was kept in the history.
+  values:
+    scheduled: {origin: contract, meaning: "The first scheduled result of the check on a UTC day."}
+    requested: {origin: contract, meaning: "An administrator asked for the run."}
+    changed: {origin: contract, meaning: "The result differs from the previous one."}
+
+setup_step_state:
+  description: setup_steps.state (no row = not done yet).
+  values:
+    done: {origin: contract}
+    skipped: {origin: contract, meaning: "The administrator chose to come back later."}
+
+address_batch_purpose:
+  description: address_batches.purpose.
+  values:
+    validation: {origin: contract, meaning: "Validate and review a list; sending is for seed and controlled tests only."}
+    repermission: {origin: contract, meaning: "Ask the people on an old list whether they still want mail (confirm, unsubscribe, global opt-out)."}
+
+address_batch_file_format:
+  description: address_batches.file_format.
+  values:
+    txt: {origin: contract, meaning: "One address per line."}
+    csv: {origin: contract, meaning: "Comma-separated with a header row; one column holds the address."}
+
+address_batch_entry_outcome:
+  description: address_batch_entries.outcome - what the import did with an input row. No row is ever dropped.
+  values:
+    imported: {origin: contract, meaning: "A new address of this batch."}
+    duplicate: {origin: contract, meaning: "The same normalised address appeared on an earlier row (duplicate_of_entry_id)."}
+    malformed: {origin: contract, meaning: "The row cannot be an e-mail address at all (no @, control characters, too long); not validated."}
+
+consent_state:
+  description: >-
+    address_batch_entries.consent_state - what the recipient told us through a re-permission
+    message. The subscription itself belongs to the client application; this records the
+    evidence and is forwarded with repermission.responded.
+  values:
+    unknown: {origin: contract, meaning: "No re-permission message sent."}
+    unconfirmed: {origin: contract, meaning: "A re-permission message was sent; no answer yet."}
+    confirmed: {origin: contract, meaning: "The recipient confirmed they want to stay subscribed."}
+    unsubscribed: {origin: contract, meaning: "The recipient left this list (the client's own unsubscribe; not a Smarthost suppression)."}
+    global_opt_out: {origin: contract, meaning: "The recipient asked for no mail through this Smarthost at all (a global recipient_global_opt_out suppression)."}
+
+batch_review_decision:
+  description: address_batch_entries.review_decision - the administrator's decision on a result that needs review.
+  values:
+    include: {origin: contract, meaning: "Send to it despite a risky, unknown or temporarily unverifiable result."}
+    exclude: {origin: contract, meaning: "Never send to it from this batch."}
+
+typo_decision:
+  description: address_batch_entries.typo_decision - the administrator's decision on a typo suggestion. An address is never corrected automatically.
+  values:
+    accepted: {origin: contract, meaning: "The suggested address replaces this one; it is added as a correction entry and validated."}
+    rejected: {origin: contract, meaning: "The address stays as entered."}
+
+batch_send_stage:
+  description: address_batch_sends.stage - the rollout stage of a send created from a batch.
+  values:
+    seed: {origin: contract, meaning: "A handful of addresses the operator owns."}
+    controlled: {origin: contract, meaning: "A small known-good sample of the batch."}
+    rollout: {origin: contract, meaning: "A further portion, while bounces, complaints and deferrals are watched."}
+    full: {origin: contract, meaning: "Every remaining eligible address."}
+
+# Operator-facing address states, derived (not stored). Each is a separate dimension: one
+# address can be syntactically valid, unconfirmed, eligible for a seed test, later hard
+# bounced and globally suppressed. The dashboard and the help pages use these names.
+operator_address_states:
+  validation_result:
+    derived_from: validation_addresses (processing_state, overall_classification)
+    derived_values:
+      pending: Not validated yet (or still being validated).
+      valid: "deliverable or probably_deliverable: the domain accepts mail and nothing contradicts the mailbox. Evidence, never proof of a reading human."
+      invalid: "undeliverable: bad syntax, a domain that does not exist or accepts no mail, or a mailbox the server rejected."
+      risky: "risky: accept-all domain, disposable domain, or a high-confidence typo."
+      unknown: "unknown: the evidence is ambiguous (probe blocked, invalid DNS answer, address literal)."
+      temporary_failure: "temporarily_unverifiable: DNS or SMTP kept failing temporarily until the retries ran out."
+  validation_flags:
+    derived_from: validation_addresses (is_domain_typo_suspected, is_disposable, is_role, is_catch_all_or_accept_all)
+    derived_values:
+      typo_suspected: The domain looks like a typo; a suggestion is shown, never applied automatically.
+      disposable: A known disposable-address domain.
+      role_account: A role mailbox such as info@ or sales@.
+      accept_all: The server accepts any recipient on this domain.
+  send_eligibility:
+    derived_from: validation result, review and typo decisions, consent, active suppressions
+    derived_values:
+      eligible: Valid (or included after review), not suppressed, not unsubscribed.
+      pending_review: Pending, risky, unknown, temporary failure, or an undecided typo suggestion.
+      blocked_invalid: Invalid or malformed.
+      blocked_hard_bounce: An active hard-bounce suppression.
+      blocked_complaint: An active complaint suppression.
+      blocked_suppressed: Another active suppression (repeated soft bounces, operator block, global opt-out).
+      blocked_unsubscribed: The recipient unsubscribed from this list through a re-permission message.
+      excluded: Excluded by the administrator, or replaced by an accepted typo correction.
+  delivery_state:
+    derived_from: messages.current_status (message_status)
+    derived_values:
+      not_sent: No message from this batch.
+      created: Created by the delivery daemon.
+      queued: Waiting for a pacing slot.
+      submitted: Accepted by Postfix for delivery.
+      deferred: Temporarily refused; Postfix retries.
+      remote_accepted: The receiving server accepted responsibility. Not proof of inbox placement or reading.
+      soft_bounced: Finally refused for a temporary reason.
+      hard_bounced: Permanently refused.
+      complained: The recipient reported it as spam.
+      suppressed: Not sent because of a suppression.
+      failed: Could not be submitted.
+      outcome_unknown: The outcome could not be determined; never counted as delivered.
+  engagement_state:
+    derived_from: message_events (open_recorded, click_recorded)
+    derived_values:
+      not_opened: No recorded open; the message may still have been read (images blocked).
+      open_observed: The tracking image was fetched - by the person, a mail client, a privacy proxy or a scanner.
+      clicked: A tracked link was followed.

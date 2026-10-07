@@ -42,7 +42,7 @@ import (
 const HeartbeatFile = "/tmp/smarthost-delivery-heartbeat"
 
 // Version is the catto-mail software version (app/src/Version.php).
-const Version = "0.1.8"
+const Version = "0.1.9"
 
 func main() {
 	cmd := "run"

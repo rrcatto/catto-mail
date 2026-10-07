@@ -1,6 +1,6 @@
 project:
   name: Smarthost
-  specification_version: "2.10"
+  specification_version: "2.11"
   specification_date: "2026-10-07"
   original_specification_date: "2026-09-08"
   version_note: >-
@@ -375,6 +375,15 @@ project_boundaries:
       - client_reputation_metrics
       - client_alerts
       - audit_log
+      - system_requests
+      - system_checks
+      - system_check_runs
+      - system_state
+      - setup_steps
+      - delivery_controls
+      - address_batches
+      - address_batch_entries
+      - address_batch_sends
     client_application_owns:
       - mailing_lists
       - subscribers
@@ -531,7 +540,7 @@ podman_environment:
           privileged); accepted for a dedicated single-purpose host. `preflight --section host`
           checks the running value against the configured binds and its persistence;
           install/create/start/recreate/replace/upgrade refuse to proceed and print the remediation
-        other: [Ubuntu Server 24.04, Podman >= 4.9, lingering service user, podman.socket]
+        other: [Ubuntu Server 26.04 LTS, Podman >= 4.9 (26.04 ships 5.7), lingering service user, podman.socket]
       host_firewall: >-
         `smarthostctl prod firewall` generates an nftables ruleset: inbound SSH, 25 and 443; the
         service user's outbound traffic (the rootless containers' egress) limited to DNS, 25, 80
@@ -2102,6 +2111,123 @@ schema:
         - target_id
         - detail_json
         - occurred_at
+    system_requests:
+      purpose: "work the web application asks of the host agent (diagnostics, pause/resume, live enable/disable, backup, restore rehearsal, DKIM, TLS renewal); audited at request time, performed on the host by the agent (specification 2.11)"
+      key_fields:
+        - id
+        - action
+        - params_json
+        - status
+        - requested_by_user_id
+        - note
+        - requested_at
+        - started_at
+        - finished_at
+        - result_summary
+        - result_json
+    system_checks:
+      purpose: "the latest result of every system check, from the host agent or the application (specification 2.11)"
+      key_fields:
+        - check_key
+        - component
+        - title
+        - result
+        - summary
+        - detail_json
+        - duration_ms
+        - source
+        - ran_at
+        - changed_at
+    system_check_runs:
+      purpose: "meaningful system-check history: requested runs, changes of result, one scheduled result per check and day (specification 2.11)"
+      key_fields:
+        - id
+        - check_key
+        - component
+        - title
+        - result
+        - summary
+        - duration_ms
+        - source
+        - run_trigger
+        - ran_at
+    system_state:
+      purpose: "reports of the host agent: host facts, containers, backups, boot recovery, TLS (specification 2.11)"
+      key_fields:
+        - state_key
+        - value_json
+        - updated_at
+    setup_steps:
+      purpose: "progress of the administrator setup wizard; resumable (specification 2.11)"
+      key_fields:
+        - step_key
+        - state
+        - note
+        - updated_at
+        - updated_by_user_id
+    delivery_controls:
+      purpose: "the installation-wide emergency stop set from the web application; read by the delivery daemon (specification 2.11)"
+      key_fields:
+        - id
+        - emergency_stop
+        - changed_at
+        - changed_by_user_id
+        - note
+    address_batches:
+      purpose: "administrator-uploaded address lists (at most 10,000 rows) validated and optionally sent on behalf of one client, with the batch compliance approval (specification 2.11)"
+      key_fields:
+        - id
+        - client_id
+        - name
+        - description
+        - source
+        - purpose
+        - original_filename
+        - file_format
+        - email_column
+        - file_sha256
+        - uploaded_by_user_id
+        - created_at
+        - data_rows
+        - imported_count
+        - duplicate_count
+        - malformed_count
+        - blank_count
+        - list_id
+        - compliance_approved_at
+        - compliance_approved_by_user_id
+        - compliance_reference
+    address_batch_entries:
+      purpose: "one row per non-blank input row (never dropped) and per accepted typo correction: import outcome, validation link, review and typo decisions, re-permission consent evidence and response token hash (specification 2.11)"
+      key_fields:
+        - id
+        - batch_id
+        - row_number
+        - original_value
+        - normalized_address
+        - outcome
+        - outcome_detail
+        - duplicate_of_entry_id
+        - corrects_entry_id
+        - validation_address_id
+        - review_decision
+        - typo_decision
+        - consent_state
+        - consent_changed_at
+        - response_token_hash
+        - response_token_expires_at
+        - created_at
+    address_batch_sends:
+      purpose: "send jobs created from a batch and their rollout stage (specification 2.11)"
+      key_fields:
+        - id
+        - batch_id
+        - send_job_id
+        - stage
+        - recipient_count
+        - subject
+        - created_by_user_id
+        - created_at
   indexes_required:
     - validation_addresses.job_id
     - validation_addresses.normalized_address
@@ -2338,6 +2464,143 @@ saas_operations:
     PLATFORM.ABUSE.VIEW, PLATFORM.ABUSE.MANAGE; the OPERATOR role holds them; console commands
     name the acting operator (--operator) and check the same permissions.
 
+operator_self_service:
+  # Specification 2.11 (owner instruction 2026-10-07): an operator who did not write the software
+  # installs catto-mail on a clean Ubuntu Server 26.04 LTS VPS with one command, then configures,
+  # tests, understands and operates it from the web application. Guides:
+  # docs/production/VPS-INSTALL.md (primary), components.md, architecture.md.
+  principle: >-
+    The system explains itself, tests itself and says what still needs attention. The production
+    safety model is unchanged: rootless Podman, network isolation, the socket-activated ingress,
+    held-by-default deployment, explicit audited live activation, DKIM isolation, least-privilege
+    database roles, authoritative suppressions.
+  components: >-
+    Canonical names, used everywhere: Catto-mail Web Application (symfony-app), Catto-mail Webhook
+    Worker (webhook-worker), Catto-mail Email Validator (validator), Catto-mail Delivery Daemon
+    (delivery), Postfix Mail Transfer Agent (postfix), OpenDKIM Signing Service (opendkim),
+    PostgreSQL Database (postgres), nginx Frontend (nginx); on the host the host agent and the
+    systemd user units. BIND (a DNS server) is not required: catto-mail only queries DNS.
+  installer:
+    command: install-catto-mail (repository root), run as root on Ubuntu Server 26.04 LTS
+    release: >-
+      an exact Git tag vX.Y.Z (never a branch), cloned for the service user. From v0.1.9 each
+      release also has a GitHub Release page with notes and the source as zip and tar.gz with
+      SHA256SUMS (owner decision 2026-10-07); the installer and upgrades use the tag.
+    steps: >-
+      OS, resources and public IPv4; packages from Ubuntu only (podman and its rootless helpers,
+      git, python3, openssl, nftables, rsync, openssh-client, lego); the service user cattomail
+      with subordinate IDs; lingering; net.ipv4.ip_unprivileged_port_start=25 persisted; the
+      user's Podman socket; the release; infra/.env with generated secrets (0600); prod check;
+      image build; certificates (Let's Encrypt when configured, otherwise a temporary self-signed
+      bootstrap certificate); prod install (units, networks, volumes, containers); prod start in
+      HELD mode; health; host checks; first backup; firewall rules generated (applied only with
+      --apply-firewall); automatic start verified; a bootstrap sign-in link.
+    properties: >-
+      Every step prints PASS/WARN/FAIL; a FAIL names what, why, how to fix and whether re-running
+      is safe. Idempotent: finished steps are detected and skipped; existing configuration and data
+      are kept. It never enables live delivery and never changes the firewall unless asked.
+  bootstrap_sign_in: >-
+    `smarthostctl prod admin-link` prints a single-use sign-in link for an administrator
+    (APP_ADMIN_EMAIL or a user with ADMIN): at most 15 minutes, used once, only its hash stored,
+    redeemed through the ordinary sign-in, audited (auth.host_login_link_issued). It needs a shell
+    on the host as the service user, which already controls every secret; no other bypass exists.
+  host_agent: >-
+    <instance>-host-agent.service (`smarthostctl prod agent run`, stdlib Python on the host) is the
+    only bridge between the web application and the host. It reports host facts and host-side
+    checks (OS, Podman, rootless, lingering, units, disk, memory, clock, firewall, containers,
+    secret file modes, backups, certificate renewal, the boot recovery, and hourly the production
+    preflight) and carries out the requests administrators record in the dashboard
+    (system_requests: diagnostics.run, delivery.pause/resume, delivery.live_enable/disable,
+    backup.run, backup.restore_rehearsal, dkim.generate/activate, tls.renew) with the existing
+    audited tooling. The web application never runs host commands. Protocol: the console command
+    smarthost:system:agent (claim, finish, report, diagnostics), JSON on stdin and stdout.
+  diagnostics:
+    storage: system_checks (latest result per check), system_check_runs (history), system_state (agent reports)
+    results: PASS, WARN, FAIL, SKIPPED, INFO, each with a human explanation, a fix and a help topic
+    history: every requested run, every change of result, and the first scheduled result of a check per UTC day; secrets are redacted before storage
+    application_checks: database role, schema version, web health, tracking endpoints, a deterministic validation job (syntax-invalid addresses only, no network), delivery and webhook heartbeats, the host agent, bounce processing, the emergency stop
+    host_checks: host, boot, containers, security, backups, TLS renewal, and the preflight sections config, host, runtime, exposure, ingress, tls, dns, dkim, postfix, delivery
+  setup_wizard: >-
+    Operator › System setup (SYSTEM.SETUP.MANAGE): welcome, host, web identity, SMTP identity, DNS,
+    TLS, DKIM, database, web application, validator, delivery daemon, Postfix, OpenDKIM, webhook
+    worker, backups, seed delivery test, bounce test, reboot test, production readiness. Progress
+    is stored (setup_steps), the wizard is resumable, an administrator is taken to it after sign-in
+    until the readiness step is done, and it stays available afterwards. Live delivery remains a
+    separate, deliberate action.
+  delivery_modes: >-
+    HELD (live delivery not activated), LIVE, PAUSED (the emergency stop or pause flag; the Postfix
+    queue held), STOPPED (the delivery daemon has no fresh heartbeat). Shown on every operator page.
+  emergency_stop: >-
+    "STOP SENDING EMAIL NOW" (SYSTEM.DELIVERY.CONTROL, a reason) sets delivery_controls.emergency_stop,
+    which the delivery daemon reads with the pause flag file every few seconds, and asks the host
+    agent to hold the Postfix queue. `smarthostctl prod pause/resume` set the same database stop.
+    Resuming needs the typed confirmation RESUME SENDING; live enablement needs ENABLE LIVE DELIVERY.
+  backups: >-
+    <instance>-backup.timer at BACKUP_SCHEDULE: a backup into BACKUP_DIR (database, infra/.env, DKIM
+    keys and tables, TLS secrets, manifest), AES-256 encrypted when BACKUP_ENCRYPTION_PASSPHRASE_FILE
+    is set, the newest BACKUP_KEEP kept, copied with rsync to BACKUP_OFFHOST_TARGET (any SSH target
+    or mounted path; no provider is chosen). A backup that is not off-host is a WARN. The restore
+    rehearsal restores the newest backup into a temporary database, verifies checksums, tables and
+    the migration level, and drops it.
+  certificates: >-
+    Let's Encrypt with DNS-01 through lego and ACME_DNS_PROVIDER (credentials in
+    ACME_CREDENTIALS_FILE, never in infra/.env); port 80 is never opened. `prod tls acme
+    issue|renew|ensure|status`; <instance>-tls-renew.timer renews daily ACME_RENEW_DAYS before
+    expiry and installs with `prod tls set`. A manual provider prints the TXT record (no unattended
+    renewal). Expiry and renewal failures are diagnostics.
+  logs: "`smarthostctl prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent [lines|-f]`"
+  help: >-
+    Operator › Help (PLATFORM.HELP.VIEW): topics on the system, components, flows, validation and its
+    results, lists, re-permission, suppressions, sending and rollout, delivery states, tracking,
+    bounces, complaints, emergency controls, DNS, PTR, SPF, DKIM, DMARC, TLS, each component in depth,
+    clients, sending domains, backups, logs, upgrades, security and troubleshooting; linked in context
+    from the dashboard and from every check.
+  terminology: >-
+    "Remote accepted", never "delivered to inbox"; "open observed", never "read"; validation is not
+    consent; an ordinary unsubscribe is the client's state, not a Smarthost suppression.
+  address_batches:
+    purpose: >-
+      Administrator tool (SYSTEM.ADDRESS_BATCH.MANAGE) to validate an address list of up to 10,000
+      rows on behalf of one client, review it and, with approval, send in stages; also the
+      re-permission workflow. Not a replacement for the client's mailing-list application.
+    import: >-
+      TXT (one address per line) or CSV (header row, chosen column), UTF-8, at most 10 MiB. Preview
+      before import. Cleanup only of surrounding whitespace, mailto:, Name <address>, and the D-18
+      domain lower-casing. Every non-blank row is kept: imported, duplicate (of the first row with
+      the same normalised address) or malformed (not an address; reported, not validated). File
+      name, SHA-256, column, administrator, time, name, description, source and row numbers are
+      recorded. CSV reports per category; formula-like cells are neutralised.
+    validation: >-
+      Ordinary validation jobs of the batch's client (external reference address-batch:<id>; each
+      address's external reference is the entry id), so quotas apply and the Email Validator does
+      the work. The page follows the progress.
+    state_dimensions: >-
+      Separate, never one status (status-vocabulary operator_address_states): validation result
+      (pending, valid, invalid, risky, unknown, temporary_failure) with flags (typo_suspected,
+      disposable, role_account, accept_all); send eligibility (eligible, pending_review, blocked_*,
+      excluded); consent (unknown, unconfirmed, confirmed, unsubscribed, global_opt_out); delivery
+      state (the message status); engagement (not_opened, open_observed, clicked). Typo suggestions
+      are never applied automatically: an accepted suggestion is added as a correction entry and
+      validated.
+    sending: >-
+      Stages seed (typed-in addresses the administrator owns, at most 20), controlled, rollout, full;
+      only eligible, not-yet-sent entries are selected; anything but a seed test needs the batch's
+      recorded compliance approval and List-Id; the ordinary send-job service applies the client's
+      domain rules, quotas and limits, and the delivery daemon's suppression check stays
+      authoritative; in HELD mode the job waits. Every message is subscription class with the
+      recipient's own answer links as its unsubscribe URL.
+  repermission: >-
+    Public page /p/{token}: 256-bit random tokens, stored as SHA-256 with an expiry
+    (APP_REPERMISSION_RESPONSE_DAYS), no address in any URL, no session or cookie. GET only shows the
+    three choices; a POST answers: confirm (consent confirmed), unsubscribe from this list (the
+    client's unsubscribe; no suppression; also RFC 8058 one-click), global opt-out (a global
+    recipient_global_opt_out suppression reported for the batch's client; final on the page).
+    Answers are idempotent, audited without the address, and forwarded as repermission.responded.
+  client_integration: >-
+    ctnlist (docs/integration/ctnlist.md): ctnlist owns subscribers, lists and consent; catto-mail
+    owns validation, sending, suppression, events and infrastructure; integration only through the
+    API and webhooks. The ctnlist-side handling of repermission.responded is outstanding.
+
 compliance:
   scope:
     - applicable_data_protection_law
@@ -2413,7 +2676,7 @@ production_operations:
     levels: [PASS, WARN, FAIL, INFO, SKIP]
     sections:
       config: "the production safety rules; the warm-up ceiling; retention decisions pending"
-      host: "OS (Ubuntu 24.04), Podman >= 4.9, binaries, lingering, podman.socket, net.ipv4.ip_unprivileged_port_start against the configured binds (running and persisted); checked before containers are created or started"
+      host: "OS (Ubuntu 26.04 LTS), Podman >= 4.9, binaries, lingering, podman.socket, net.ipv4.ip_unprivileged_port_start against the configured binds (running and persisted); checked before containers are created or started"
       runtime: "images, health, database, migrations current, grants equal to schema.md section 6"
       exposure: "no published container port, network membership per the matrix (ingress network: nginx and Postfix only), private keys only in their owner, network flags, host listeners"
       ingress: "the ingress socket and service active with exactly the configured binds, nginx holding the inherited sockets, Postfix port 25 as the PROXY-protocol listener on the ingress network only, TRUSTED_PROXIES empty, and the two-source proof at nginx and Postfix (smarthostctl prod ingress-check)"
@@ -2871,6 +3134,29 @@ implementation_phases:
       threshold calibration, pricing and plans, policy text, and the decision to open public
       onboarding.
 
+  - phase: 10
+    name: operator_self_service
+    objective: >-
+      an operator without knowledge of the code installs catto-mail on a clean Ubuntu Server 26.04
+      LTS VPS and configures, tests, understands and operates it from the web application
+    deliverables:
+      - one-command installer from an exact release tag
+      - bootstrap administrator sign-in
+      - administrator setup wizard
+      - permanent diagnostics with history, and a system health dashboard
+      - help and tutorials
+      - host agent for host-side checks and dashboard requests
+      - Let's Encrypt (DNS-01) automation, scheduled and off-host backups, restore rehearsal
+      - administrator address batches, validation review, staged sends, re-permission
+    acceptance:
+      - the installer runs on Ubuntu Server 26.04 LTS and starts in held mode
+      - every subsystem has a diagnostic with an explanation
+      - nothing is sent without the operator's deliberate action
+    repository_side: >-
+      Specification 2.11 (operator_self_service). Pending on a real VPS: the provider's port-25
+      policy, PTR, public DNS, Let's Encrypt with the operator's DNS provider, outbound delivery,
+      real bounces and complaints, and the reboot of a real machine.
+
 first_implementation_priority:
   order:
     - canonical specifications
@@ -3086,5 +3372,22 @@ revision_history:
       client_notes, client_policy_acceptances, billing_statements, billing_statement_lines,
       client_reputation_metrics, client_alerts, new clients and api_keys columns, one usage unit
       per message. OpenAPI 1.0.0-draft.8; status vocabulary 2.5.0.
+    decisions_incorporated: []
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.11"
+    date: "2026-10-07"
+    summary: >-
+      Operator self-service (owner instruction): operator_self_service and implementation phase 10.
+      The one-command installer for Ubuntu Server 26.04 LTS from an exact release tag; the host
+      agent (host-side checks and audited dashboard requests); the bootstrap sign-in link; the
+      administrator setup wizard; diagnostics with history and the system health dashboard; the
+      delivery modes and the web emergency stop (delivery_controls, read by the delivery daemon);
+      Let's Encrypt DNS-01 automation; scheduled, encrypted, off-host backups and the restore
+      rehearsal; log shortcuts; the help and tutorials; administrator address batches with the
+      separate address state dimensions, staged sends and the re-permission page with
+      repermission.responded; the ctnlist integration document. Schema: system_requests,
+      system_checks, system_check_runs, system_state, setup_steps, delivery_controls,
+      address_batches, address_batch_entries, address_batch_sends. OpenAPI 1.0.0-draft.9;
+      status vocabulary 2.6.0. Production host target: Ubuntu Server 26.04 LTS.
     decisions_incorporated: []
     decision_log: docs/architecture/open-decisions.md

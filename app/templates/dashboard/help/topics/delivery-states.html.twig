@@ -1,0 +1,31 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<h2>What catto-mail can know</h2>
+<ul>
+<li>That the delivery daemon handed a message to Postfix (<strong>submitted</strong>).</li>
+<li>That Postfix tried to deliver it, and what the receiving server answered: <strong>remote accepted</strong>, <strong>deferred</strong> (temporary refusal; Postfix retries for up to five days), or rejected (<strong>hard bounced</strong> / <strong>soft bounced</strong>).</li>
+<li>That a bounce (DSN) arrived later, or a complaint from a feedback loop.</li>
+<li>That the tracking image was fetched (<strong>open observed</strong>) or a tracked link followed (<strong>clicked</strong>).</li>
+</ul>
+<h2>What it cannot know</h2>
+<ul>
+<li>Whether the message landed in the inbox or the spam folder. "Remote accepted" means the receiving server took responsibility; what it does next is invisible to senders.</li>
+<li>Whether a person read it. Opens are imperfect (see <a href="{{ path('dashboard_operator_help_topic', {topic: 'tracking'}) }}">tracking</a>).</li>
+</ul>
+<p>So catto-mail says <strong>remote accepted</strong>, never "delivered to inbox".</p>
+<h2>Message states</h2>
+<table class="dense"><tbody>
+<tr><th scope="row">Created</th><td>The delivery daemon created the message.</td></tr>
+<tr><th scope="row">Queued</th><td>Waiting for a pacing slot in the daemon.</td></tr>
+<tr><th scope="row">Submitted</th><td>Postfix accepted it for delivery.</td></tr>
+<tr><th scope="row">Deferred</th><td>The receiver refused temporarily; Postfix retries.</td></tr>
+<tr><th scope="row">Remote accepted</th><td>The receiving server accepted it. Not proof of inbox placement or reading.</td></tr>
+<tr><th scope="row">Soft bounced</th><td>Finally refused for a temporary reason (retries ended), or a temporary bounce arrived.</td></tr>
+<tr><th scope="row">Hard bounced</th><td>Permanently refused (e.g. the mailbox does not exist).</td></tr>
+<tr><th scope="row">Complained</th><td>The recipient reported it as spam (via a feedback loop).</td></tr>
+<tr><th scope="row">Suppressed</th><td>Not sent: the address is suppressed.</td></tr>
+<tr><th scope="row">Failed</th><td>Could not be submitted to Postfix.</td></tr>
+<tr><th scope="row">Outcome unknown</th><td>Postfix's queue entry vanished without a logged outcome. Never counted as delivered.</td></tr>
+</tbody></table>
+<p>A state only moves forward: a late "deferred" log line cannot undo a "remote accepted".</p>
+{% endblock %}

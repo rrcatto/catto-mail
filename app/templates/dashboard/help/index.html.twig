@@ -1,0 +1,9 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Help{% endblock %}
+{% block body %}
+<h1>Help and tutorials</h1>
+<p>How catto-mail works, explained without the source code. Start with the first group; the setup wizard links to the right page at each step.</p>
+<div class="cards">
+{% for group, topics in groups %}<section class="card"><h2>{{ group }}</h2><ul class="plain">{% for slug, title in topics %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}">{{ title }}</a></li>{% endfor %}</ul></section>{% endfor %}
+</div>
+{% endblock %}

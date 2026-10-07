@@ -1,0 +1,10 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+<p>One summary of every subsystem. PASS everywhere (WARN understood) means the installation is ready. <strong>Live delivery stays a separate, deliberate action</strong>
+under <a href="{{ path('dashboard_operator_system') }}">Health &amp; delivery</a>: it runs the activation preflight and is audited.</p>
+<div class="scroll"><table class="dense"><tbody>
+{% for label, r in readiness %}<tr><th scope="row">{{ label }}</th><td>{{ ui.result(r.result) }}</td>
+<td><small>{% set bad = r.checks|filter(c => c.result in ['fail', 'warn']) %}{% for c in bad|slice(0, 2) %}{{ c.title }}: {{ c.summary }}<br>{% else %}{% if r.checks is empty %}no check yet{% endif %}{% endfor %}</small></td></tr>{% endfor %}
+<tr><th scope="row">Live delivery</th><td><span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span></td><td></td></tr>
+</tbody></table></div>
+<h2>Real-server acceptance checklist</h2>
+<p class="muted">The guide <code>docs/production/VPS-INSTALL.md</code> holds the complete checklist; each line maps to a row above or to the seed, bounce and reboot tests.</p>

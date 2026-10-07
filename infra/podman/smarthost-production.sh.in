@@ -113,6 +113,8 @@ hostctl() {
 UNIT_SOCKET="$I-ingress.socket"
 UNIT_INGRESS="$I-ingress.service"
 UNIT_REPUTATION_TIMER="$I-reputation-evaluate.timer"
+# Specification 2.11: the host agent and the backup and certificate-renewal timers.
+INSTANCE_EXTRAS=("$UNIT_REPUTATION_TIMER" "$I-backup.timer" "$I-tls-renew.timer" "$I-host-agent.service")
 exists() { local s; for s in "${SERVICES[@]}"; do podman container exists "$I-$s" || return 1; done; }
 
 ensure_networks() {
@@ -300,15 +302,19 @@ cmd_start() {
   done
   wait_healthy 300 "${SERVICES[@]}"
   say "all ${#SERVICES[@]} services healthy"
-  # Phase 9: the client reputation evaluation every 15 minutes (installed with the units).
-  if hostctl cat "$UNIT_REPUTATION_TIMER" >/dev/null 2>&1; then
-    hostctl start "$UNIT_REPUTATION_TIMER" || say "WARNING: $UNIT_REPUTATION_TIMER did not start"
-  fi
+  # Phase 9 and specification 2.11: the reputation evaluation, the backup and certificate-renewal
+  # timers, and the host agent (each only when installed with the units).
+  local u
+  for u in "${INSTANCE_EXTRAS[@]}"; do
+    if hostctl cat "$u" >/dev/null 2>&1; then
+      hostctl start "$u" || say "WARNING: $u did not start"
+    fi
+  done
 }
 
 cmd_stop() {
   local i s
-  hostctl stop "$UNIT_REPUTATION_TIMER" >/dev/null 2>&1 || true
+  hostctl stop "${INSTANCE_EXTRAS[@]}" >/dev/null 2>&1 || true
   for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
     s="${SERVICES[$i]}"
     if [[ "$s" == nginx ]]; then ingress_stop; continue; fi

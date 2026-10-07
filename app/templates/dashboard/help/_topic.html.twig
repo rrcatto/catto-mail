@@ -1,0 +1,9 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}{{ title }} · Help{% endblock %}
+{% block body %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_help') }}">Help</a> › {{ group }}</p>
+<h1>{{ title }}</h1>
+<article class="help-body">{% block content %}{% endblock %}</article>
+<nav aria-label="Other help pages"><h2>Other pages in “{{ group }}”</h2><ul class="plain">{% for slug, t in groups[group] %}{% if slug != topic %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}">{{ t }}</a></li>{% endif %}{% endfor %}</ul>
+<p><a href="{{ path('dashboard_operator_help') }}">All help pages</a></p></nav>
+{% endblock %}

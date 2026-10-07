@@ -1,0 +1,27 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>Clients send through the API: create a send job, add recipients with their finished content, submit. Administrators can also send from an <a href="{{ path('dashboard_operator_help_topic', {topic: 'uploading-lists'}) }}">address batch</a>. Both go through the same send-job rules and the same delivery daemon.</p>
+<h2>Never start with the whole list</h2>
+<p>Mailbox providers judge a new server and IP address by how it behaves. A sudden large send from an unknown IP, especially to an old list with stale addresses, produces bounces, spam-folder placement and blocks that take weeks to undo. Go in stages:</p>
+<ol>
+<li><strong>System seed test</strong> — a handful of addresses you own, at different providers. Check that each arrives and its headers show <code>dkim=pass</code>, <code>spf=pass</code>, <code>dmarc=pass</code> (System setup › Seed test).</li>
+<li><strong>Controlled delivery test</strong> — a small known-good sample of the list.</li>
+<li><strong>Gradual rollout</strong> — larger portions, while you watch hard and soft bounces, complaints, deferrals and blocks (the batch report, Operator › Abuse &amp; reputation, and the providers' tools such as Google Postmaster Tools and Microsoft SNDS).</li>
+<li><strong>Full eligible list</strong> — only when the earlier stages are clean.</li>
+</ol>
+<h2>The limits that protect you</h2>
+<ul>
+<li><code>DELIVERY_GLOBAL_RATE_PER_MINUTE</code> — an installation-wide hard ceiling on message starts per minute (5 in the production template: warm-up stage 0).</li>
+<li><code>DELIVERY_PER_DOMAIN_CONCURRENCY</code> and <code>DELIVERY_PER_DOMAIN_RATE_PER_MINUTE</code> — per receiving domain (1 connection, 10 per minute at stage 0).</li>
+<li><code>DELIVERY_DEFERRAL_BACKOFF_SECONDS</code> — how long the daemon backs off a provider that defers.</li>
+<li>Per-client quotas and the throttled-client rate.</li>
+</ul>
+<p>The runbook's <em>Warm-up</em> section gives the stage table (5 → 10 → 30 → 100 per minute) and when to move on: a few clean days per stage, hard bounces under 2 % and complaints under 0.1 %. Raise the values in <code>infra/.env</code> and run <code>smarthostctl prod replace delivery</code>.</p>
+<h2>Before every send</h2>
+<ul>
+<li>Invalid addresses, suppressed addresses (hard bounce, complaint, opt-out), unsubscribed and excluded addresses are never selected from a batch.</li>
+<li>The delivery daemon checks suppressions again before each message; that check cannot be bypassed.</li>
+<li>Anything but a seed test from a batch needs the batch's compliance approval: technical validation is not consent.</li>
+<li>In HELD mode the job is accepted and waits; nothing leaves the server.</li>
+</ul>
+{% endblock %}

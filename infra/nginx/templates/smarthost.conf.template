@@ -4,13 +4,16 @@
 # NGINX_LOCAL_RESOLVERS (set by the image when NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1).
 server_tokens off;
 
-# Tracking URLs (/t/o/<token>.gif, /t/c/<token>/<n>) carry opaque per-message
-# tokens. The access log records them redacted, query string dropped (Phase 6:
-# tracking tokens are not logged).
+# Tracking URLs (/t/o/<token>.gif, /t/c/<token>/<n>), re-permission pages (/p/<token>)
+# and dashboard sign-in links (/dashboard/login/verify?token=...) carry opaque secrets.
+# The access log records them redacted, query string dropped (Phase 6, specification 2.11:
+# tokens are never logged).
 map $request_uri $smarthost_log_uri {
     ~^/t/o/                                       "/t/o/[token].gif";
     ~^/t/c/[^/?]*/(?<smarthost_link_index>[0-9]+)  "/t/c/[token]/$smarthost_link_index";
     ~^/t/                                         "/t/[redacted]";
+    ~^/p/                                         "/p/[token]";
+    ~^/dashboard/login/verify                     "/dashboard/login/verify?[token]";
     default                                       $request_uri;
 }
 log_format smarthost '$remote_addr - $remote_user [$time_local] "$request_method $smarthost_log_uri $server_protocol" '

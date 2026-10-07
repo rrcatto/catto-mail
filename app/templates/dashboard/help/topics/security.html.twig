@@ -1,0 +1,16 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The diagnostics check, and the installer sets up:</p>
+<ul>
+<li><strong>No open relay</strong> — Postfix's port 25 refuses mail for other domains (tested by a live RCPT test that sends nothing).</li>
+<li><strong>Nothing internal is exposed</strong> — no container publishes a port; only the systemd socket holds 443 and 25; the database, PHP and the workers are on an internal network.</li>
+<li><strong>Client addresses preserved</strong> — so rate limits and logs see real visitors (the ingress check).</li>
+<li><strong>Secrets</strong> — <code>infra/.env</code>, the ACME credentials and the backup passphrase are mode 0600; each container receives only its own secrets; DKIM private keys exist only in the OpenDKIM container.</li>
+<li><strong>No tokens in logs</strong> — API keys, sign-in, tracking and re-permission tokens are never logged (nginx redacts them).</li>
+<li><strong>Sign-in</strong> — passwordless, single-use links; the host-printed first sign-in link is ADMIN-only, 15 minutes, once, audited.</li>
+<li><strong>Suppressions cannot be bypassed</strong> — the delivery daemon checks them before every submission, whatever created the job.</li>
+<li><strong>Least privilege</strong> — every component has its own database role with only the rights it needs.</li>
+<li><strong>Firewall</strong> — <code>smarthostctl prod firewall</code> generates nftables rules allowing only SSH, 25 and 443 inbound. They are not applied automatically, so you cannot lock yourself out: review and apply them (installation guide).</li>
+<li><strong>Audit</strong> — every operator action is recorded with who, when and why.</li>
+</ul>
+{% endblock %}

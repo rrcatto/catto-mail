@@ -78,3 +78,25 @@ label.check { flex-direction: row; align-items: center; gap: .4rem; }
 .stack label.check, .filters label.check { display: flex; flex-direction: row; }
 fieldset.perms { border: 1px solid var(--line); border-radius: 6px; margin: .6rem 0; padding: .4rem .8rem; }
 fieldset.perms label { display: block; margin: .25rem 0; }
+/* Specification 2.11: system health, setup, diagnostics, help. The word always carries the meaning. */
+.res { display: inline-block; min-width: 4.2em; text-align: center; padding: 0 .35rem; border: 2px solid var(--line); border-radius: 3px; font-weight: 700; font-size: .85em; }
+.res-pass { border-color: var(--ok); color: var(--ok); }
+.res-warn, .res-waiting, .res-manual { border-color: var(--warn); color: var(--warn); }
+.res-fail { border-color: var(--bad); color: var(--bad); }
+.res-skipped, .res-info, .res-none { color: var(--muted); }
+.mode { display: inline-block; padding: .1rem .6rem; border-radius: 4px; font-weight: 700; letter-spacing: .03em; border: 2px solid currentColor; }
+.mode-LIVE { color: var(--ok); }
+.mode-HELD { color: var(--accent); }
+.mode-PAUSED, .mode-STOPPED { color: var(--bad); }
+.modebar { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; padding: .4rem 1.2rem; border-bottom: 1px solid var(--line); font-size: .92em; }
+button.danger { background: var(--bad); border-color: var(--bad); font-weight: 700; }
+button.secondary { background: #fff; color: var(--accent); }
+progress { width: 100%; max-width: 40rem; height: 1.1rem; }
+.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: .35rem; }
+.steps li { display: flex; gap: .7rem; align-items: baseline; padding: .35rem .6rem; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; }
+.steps li.current { border-color: var(--accent); border-width: 2px; }
+.help-body { max-width: 52rem; }
+.help-body p, .help-body li { line-height: 1.55; }
+.help-body pre, pre.cmd { background: var(--panel); border: 1px solid var(--line); padding: .5rem .7rem; overflow-x: auto; }
+.helplink { font-size: .88em; }
+.flow { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow-x: auto; background: var(--panel); border: 1px solid var(--line); padding: .6rem; font-size: .85em; }

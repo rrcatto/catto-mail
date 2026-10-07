@@ -70,8 +70,12 @@ type Worker struct {
 	SettleDelay, AmbiguityDeadline time.Duration
 	// Now is the clock (tests).
 	Now func() time.Time
-	// paused mirrors the operator's emergency-pause flag (Phase 8).
+	// paused mirrors the operator's emergency pause: the flag file (Phase 8) or
+	// the web emergency stop in delivery_controls (specification 2.11).
 	paused atomic.Bool
+	// dbStop is the last emergency-stop value read from the database; it is kept
+	// when the database cannot be read (nothing can be claimed then anyway).
+	dbStop atomic.Bool
 }
 
 // New builds a worker from the configuration.
@@ -106,7 +110,8 @@ func New(cfg *config.Config, st *store.Store, log *logx.Logger) *Worker {
 
 func (w *Worker) logDir() string { return w.Cfg.ObservabilityDir + "/log" }
 
-// Paused reports the operator's emergency pause (flag in the observability volume).
+// Paused reports the operator's emergency pause (flag in the observability
+// volume, or the web emergency stop).
 func (w *Worker) Paused() bool { return w.paused.Load() }
 
 // Holding reports whether send work is held: production before live
@@ -115,16 +120,22 @@ func (w *Worker) Paused() bool { return w.paused.Load() }
 // jobs keep their leases, so they resume where they stopped.
 func (w *Worker) Holding() bool { return w.Cfg.HoldSendWork() || w.paused.Load() }
 
-// checkPause reads the pause flag once and applies it.
-func (w *Worker) checkPause() {
+// checkPause reads the pause flag and the web emergency stop once and applies them.
+func (w *Worker) checkPause(ctx context.Context) {
 	path := w.Cfg.PauseFlagPath()
 	_, err := os.Stat(path)
-	paused := err == nil
+	flag := err == nil
+	if stopped, err := w.Store.EmergencyStop(ctx); err == nil {
+		w.dbStop.Store(stopped)
+	} else if ctx.Err() == nil {
+		w.Log.Warning("cannot read the emergency stop; keeping the last known state", "err", err, "stopped", w.dbStop.Load())
+	}
+	paused := flag || w.dbStop.Load()
 	if w.paused.Swap(paused) != paused {
 		if paused {
-			w.Log.Warning("outbound paused by the operator: no new submissions", "flag", path)
+			w.Log.Warning("outbound paused by the operator: no new submissions", "flag", flag, "emergency_stop", w.dbStop.Load())
 		} else {
-			w.Log.Info("outbound pause lifted: submissions resume", "flag", path)
+			w.Log.Info("outbound pause lifted: submissions resume")
 		}
 	}
 	w.Lim.SetHeld(w.Holding())
@@ -133,7 +144,7 @@ func (w *Worker) checkPause() {
 // watchPause follows the pause flag every DELIVERY_FILE_POLL_INTERVAL_SECONDS.
 func (w *Worker) watchPause(ctx context.Context) {
 	for {
-		w.checkPause()
+		w.checkPause(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -148,7 +159,7 @@ func (w *Worker) Run(ctx context.Context) {
 	wake := make(chan struct{}, 1)
 	go w.listen(ctx, wake)
 	go w.deferralFeedback(ctx)
-	w.checkPause() // before the first claim: a pause in force at start-up holds from the start
+	w.checkPause(ctx) // before the first claim: a pause in force at start-up holds from the start
 	go w.watchPause(ctx)
 	if w.Cfg.HoldSendWork() {
 		w.Log.Warning("live delivery is not enabled in production: send jobs are held (not claimed) until " +

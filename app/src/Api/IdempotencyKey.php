@@ -25,4 +25,17 @@ final class IdempotencyKey
 
         return new self($value);
     }
+
+    /**
+     * A key for work the application creates itself (administrator address batches and
+     * system tests, specification 2.11), with the same format rule as the header.
+     */
+    public static function internal(string $value): self
+    {
+        if (\strlen($value) < 8 || \strlen($value) > 255 || 1 !== preg_match('/^[\x21-\x7E]+$/', $value)) {
+            throw new \InvalidArgumentException('An idempotency key is 8-255 visible ASCII characters.');
+        }
+
+        return new self($value);
+    }
 }

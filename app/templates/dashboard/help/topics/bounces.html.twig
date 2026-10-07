@@ -1,0 +1,18 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>A <strong>bounce</strong> is a refusal. It reaches catto-mail in one of two ways:</p>
+<ol>
+<li><strong>During delivery</strong> — the receiving server refuses while Postfix is talking to it. Postfix logs the answer; the delivery daemon reads the log.</li>
+<li><strong>Later, by mail</strong> — the server accepted the message, then sends a delivery status notification (DSN) to the envelope sender. Every catto-mail message has a VERP envelope sender <code>bounce+&lt;token&gt;@&lt;bounce domain&gt;</code>, so the DSN comes back to this server's port 25 (the bounce domain's MX), Postfix stores it in the bounce spool, and the delivery daemon parses it and matches the token to the exact message.</li>
+</ol>
+<h2>Hard and soft</h2>
+<ul>
+<li><strong>Hard bounce</strong> — permanent (5xx). If the failure is about the specific mailbox (e.g. 5.1.1 unknown user), a <strong>global suppression</strong> is created: no client may mail that address again.</li>
+<li><strong>Soft bounce</strong> — temporary (4xx), or a temporary DSN. Only repeated mailbox-specific soft bounces (3 within 30 days) create a temporary suppression.</li>
+<li>Failures that are about the sender, the IP, the receiving domain's policy or the connection never suppress the recipient: they are recorded with their scope so you can see them in the reputation figures.</li>
+</ul>
+<h2>Unmatched bounces</h2>
+<p>A DSN that cannot be matched with confidence (forwarded, rewritten, or from an old message) is not guessed: it appears under Operator › Unmatched DSNs, where you can match it to a message or dismiss it with a reason.</p>
+<h2>Watch the rate</h2>
+<p>Operator › Abuse &amp; reputation shows each client's hard-bounce rate. Above 2 % something is wrong with the list; above 5 % stop and clean it.</p>
+{% endblock %}

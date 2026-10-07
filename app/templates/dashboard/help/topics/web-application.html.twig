@@ -1,0 +1,22 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The <strong>Catto-mail Web Application</strong> is a Symfony (PHP) application in the <code>smarthost-symfony-app</code> container, behind nginx. It answers requests; the background work is done by the workers.</p>
+<h2>It owns</h2>
+<ul>
+<li><strong>Sign-in and access:</strong> passwordless single-use links by e-mail (or printed on the server for the first sign-in), roles and permission keys, client memberships.</li>
+<li><strong>The operator and client dashboards</strong>, including System health, Diagnostics, System setup, Address batches and this Help.</li>
+<li><strong>The client API</strong> (<code>/v1</code>): validation jobs, send jobs, messages and events, global opt-outs, webhook tests — authenticated by API key, every request checked against the published contract (<code>/docs/api</code>).</li>
+<li><strong>Clients and API keys</strong>, their lifecycle, limits and quotas.</li>
+<li><strong>Sending domains</strong> and their TXT verification.</li>
+<li><strong>Tracking endpoints</strong> (<code>/t/o</code>, <code>/t/c</code>) and <strong>re-permission pages</strong> (<code>/p</code>).</li>
+<li><strong>Suppression administration</strong> (operators), reputation alerts, usage and billing statements.</li>
+<li><strong>The webhook outbox</strong>: it records events for the webhook worker in the same database transaction.</li>
+</ul>
+<h2>What it does not do</h2>
+<ul>
+<li>It never validates addresses (the validator does), never sends mail (the delivery daemon and Postfix do), never sends webhooks (the webhook worker does).</li>
+<li>It never runs commands on the server: host actions are requests the host agent carries out.</li>
+<li>It cannot read DKIM private keys or other components' secrets.</li>
+</ul>
+<p>Logs: <code>smarthostctl prod logs app</code>.</p>
+{% endblock %}

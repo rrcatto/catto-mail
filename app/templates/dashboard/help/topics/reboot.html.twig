@@ -1,0 +1,18 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>After a normal reboot, catto-mail starts by itself, in this order:</p>
+<ol>
+<li>Ubuntu starts the catto-mail user's own systemd, because <strong>lingering</strong> is on (<code>loginctl enable-linger cattomail</code>).</li>
+<li>That systemd starts the Podman API socket and <code>smarthost.service</code>.</li>
+<li><code>smarthost.service</code> runs the topology script's <code>start</code>: PostgreSQL first, then the database tasks (roles, migrations, grants), then OpenDKIM, Postfix, the web application, the webhook worker, the validator and the delivery daemon, and finally the <strong>ingress socket</strong> (ports 443 and 25) with nginx, and the timers.</li>
+<li>Each container's health check must pass; the host agent then records a <strong>boot report</strong> (shown in System setup › Reboot test).</li>
+</ol>
+<p>The delivery mode is preserved: live delivery is a configuration setting and the emergency stop is stored in the database and in a flag file, so a PAUSED or HELD installation stays so after the reboot.</p>
+<h2>If it did not come back</h2>
+<ul>
+<li><code>loginctl show-user cattomail -p Linger</code> must say <code>Linger=yes</code>.</li>
+<li>As cattomail: <code>systemctl --user status smarthost.service</code> and <code>journalctl --user -u smarthost.service</code>.</li>
+<li><code>infra/bin/smarthostctl prod status</code> lists every container and the ingress socket.</li>
+<li><code>infra/bin/smarthostctl prod start</code> starts it by hand; <code>prod install</code> re-links the services into the boot target.</li>
+</ul>
+{% endblock %}

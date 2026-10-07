@@ -1,0 +1,28 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>Every address gets one <strong>validation result</strong>, possibly with <strong>warning flags</strong>. The result is separate from whether you may send to it (eligibility), what the person told you (consent), what happened to a message (delivery) and whether an open or click was seen (engagement): one address can be valid, unconfirmed, eligible for a seed test, later hard bounced and suppressed, all at once.</p>
+<table class="dense"><thead><tr><th scope="col">Result</th><th scope="col">Means</th><th scope="col">Typical evidence</th></tr></thead><tbody>
+<tr><th scope="row">Pending</th><td>Not validated yet, or still being validated (possibly waiting to retry).</td><td>—</td></tr>
+<tr><th scope="row">Valid</th><td>The domain accepts mail and nothing contradicts the address. With probing on and a domain that rejects unknown addresses, the mailbox itself accepted. Never proof that a person reads it.</td><td>MX found; probe accepted (if enabled)</td></tr>
+<tr><th scope="row">Invalid</th><td>It cannot receive mail.</td><td>bad syntax; domain does not exist; null MX; no mail host; mailbox rejected permanently (5.1.1)</td></tr>
+<tr><th scope="row">Risky</th><td>It may receive mail, but sending is risky.</td><td>the domain accepts every address (accept-all); disposable domain; high-confidence typo</td></tr>
+<tr><th scope="row">Unknown</th><td>The evidence is ambiguous.</td><td>the probe was blocked by policy; invalid DNS answer; address literal (<code>user@[1.2.3.4]</code>)</td></tr>
+<tr><th scope="row">Temporary failure</th><td>DNS or the mail server kept failing temporarily until the retries ran out. Try again later.</td><td>timeouts, 4xx answers, provider back-off</td></tr>
+</tbody></table>
+<h2>Warning flags</h2>
+<ul>
+<li><strong>Typo suspected</strong> — a suggestion is shown. You decide: accept it (the corrected address is added and validated) or keep the address as entered. Nothing is corrected automatically.</li>
+<li><strong>Disposable</strong> — a known throw-away address service.</li>
+<li><strong>Role account</strong> — info@, sales@ and similar.</li>
+<li><strong>Accept-all</strong> — the server accepts any address on the domain, so acceptance proves nothing.</li>
+</ul>
+<h2>Confidence</h2>
+<p>Each verdict carries low, medium or high confidence. It is a category, never a probability. Nothing is ever "valid" with high confidence, because mail-server acceptance is evidence, not proof of a person.</p>
+<h2>Send eligibility (address batches)</h2>
+<ul>
+<li><strong>Eligible</strong> — valid (or included by you after review), not suppressed, not unsubscribed, no undecided typo.</li>
+<li><strong>Needs review</strong> — pending, risky, unknown, temporary failure, or an undecided typo suggestion. Include or exclude it explicitly.</li>
+<li><strong>Blocked</strong> — invalid or malformed; hard bounce, complaint or another active suppression; unsubscribed from this list.</li>
+<li><strong>Excluded</strong> — duplicates, replaced by an accepted typo correction, or excluded by you.</li>
+</ul>
+{% endblock %}

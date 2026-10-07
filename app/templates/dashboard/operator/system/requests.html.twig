@@ -1,0 +1,19 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Host requests{% endblock %}
+{% block body %}
+<h1>Host requests</h1>
+<p>The web application never runs commands on the server. Actions that need the host (checks, holding the Postfix queue, live activation, backups, DKIM keys, certificates)
+    are recorded here and carried out by the <strong>host agent</strong>, a service on the server that runs as the catto-mail user
+    ({% if agent_age is null %}<strong>it has never reported: run <code>smarthostctl prod install</code> on the server</strong>{% else %}last report {{ agent_age|duration }} ago{% endif %}).
+    {{ ui.help('components') }}</p>
+<div class="scroll"><table class="dense">
+    <thead><tr><th scope="col">Requested</th><th scope="col">Action</th><th scope="col">By</th><th scope="col">Status</th><th scope="col">Finished</th><th scope="col">Outcome</th><th></th></tr></thead>
+    <tbody>{% for r in requests %}<tr>
+        <td>{{ r.requested_at|ts }}</td><td>{{ r.action }}{% set p = r.params_json|json_counts %}{% if p is not empty %}<br><small>{% for k, v in p %}{{ k }}={{ v }} {% endfor %}</small>{% endif %}{% if r.note %}<br><small class="muted">{{ r.note }}</small>{% endif %}</td>
+        <td>{{ r.requested_by ?? 'system' }}</td><td>{{ ui.result(r.status == 'succeeded' ? 'pass' : (r.status == 'failed' ? 'fail' : (r.status == 'cancelled' ? 'skipped' : 'waiting'))) }} {{ r.status }}</td>
+        <td>{{ r.finished_at|ts }}</td><td>{{ r.result_summary }}</td>
+        <td>{% if r.status == 'pending' and is_granted('SYSTEM.DIAGNOSTICS.RUN') %}<form method="post" action="{{ path('dashboard_operator_system_request_cancel', {id: r.id}) }}">{{ ui.csrf() }}<button type="submit" class="secondary">Cancel</button></form>{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="7" class="empty">No request yet.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

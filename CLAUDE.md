@@ -3,7 +3,7 @@
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.10) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.11) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -64,7 +64,16 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
   - Public docs at `/docs/api`. Operator guide: `docs/production/onboarding.md`.
   - Tests are in `smarthostctl test phase2`, including `Phase9TenantIsolationTest` and
     `Phase9QueryPlanTest`; the rehearsal has a Phase 9 section.
-- Do not start Phase 10 or later work unless the user explicitly asks for it.
+- **Phase 10** (operator self-service, spec 2.11, `operator_self_service`): repository side
+  implemented (v0.1.9, the first GitHub Release).
+  - The installer `install-catto-mail`; the host agent `infra/lib/smarthost_agent.py`
+    (`<instance>-host-agent.service`).
+  - `app/src/System/`: diagnostics, requests, the setup wizard, the emergency stop.
+  - `app/src/AddressBatch/`: batches and re-permission; `app/src/Help/` with
+    `templates/dashboard/help/`.
+  - Guides: `docs/production/VPS-INSTALL.md`, `components.md`, `architecture.md`,
+    `docs/integration/ctnlist.md`.
+- Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -152,6 +161,17 @@ This is a public repository. Documentation, comments, examples, tests, configura
     - There is no `/v1` webhook-endpoint CRUD and no suppression-lookup API.
     - `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` empty means no automatic deletion.
     - Production `APP_WEBHOOK_*` values belong to Phase 8.
+- **Operator self-service (spec 2.11).**
+  - The web application never runs host commands. Host actions are `system_requests`, carried
+    out by the host agent with the production CLI. Add an action to the vocabulary, the
+    agent's `handle()` and `SystemRequests::validParams` together.
+  - The emergency stop is `delivery_controls` (read by Go) plus the Postfix hold. Never weaken
+    live activation: it always runs the activation preflight.
+  - Address batches use ordinary validation and send jobs. Never bypass suppressions or the
+    batch's compliance approval. Show separate state dimensions, never one status.
+  - Stored check output and request results go through `Redactor`.
+  - Shell code may remove only paths it created (`remove_owned` in `smarthostctl-prod`).
+  - Help pages must describe the real implementation; update them with behaviour changes.
 - **SaaS operations (Phase 9, spec 2.10).**
   - Public onboarding stays disabled (`APP_PUBLIC_ONBOARDING_ENABLED=false`) and has no route.
     Never add a public registration route without an explicit owner decision.

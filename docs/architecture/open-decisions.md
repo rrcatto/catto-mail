@@ -341,6 +341,23 @@ None of these blocks the repository work; the defaults are safe.
   deletion).
 - **Opening public onboarding:** the criteria are in `docs/production/onboarding.md`.
 
+### Operator self-service (owner instruction, specification 2.11, 2026-10-07)
+
+| Choice | Where |
+|---|---|
+| **The web application never runs host commands.** A small host agent (stdlib Python, a systemd user service of the service user) does host-side checks and carries out recorded requests through the existing production CLI. The web application records each request, checked and audited; the agent claims it through a console command. The privilege boundary is unchanged: the web role still cannot reach the host. | `infra/lib/smarthost_agent.py`, `system_requests` |
+| **The emergency stop is a database flag the delivery daemon reads** (with the existing pause flag file, every few seconds), so the web button stops submissions immediately without host access. The Postfix queue hold follows through the agent within a minute. `prod pause` sets both. | `delivery_controls`, `worker.checkPause` |
+| Bootstrap sign-in is a host-printed single-use link (ADMIN-only, ≤ 15 minutes, audited), not a password or a setup token in the web: whoever can run it already holds every secret. | `LoginLinkService::issueHostLink` |
+| The installer is one bash script at the repository root, from Ubuntu packages only, installing a release tag. It generates but does not apply the firewall unless asked, so it cannot lock the operator out. Certificates: Let's Encrypt when configured, otherwise a self-signed bootstrap certificate (the TLS checks fail until it is replaced, so live activation is refused). | `install-catto-mail` |
+| Let's Encrypt uses DNS-01 with Ubuntu's `lego` (many DNS providers through one credentials file, and a manual mode), never port 80. Credentials stay outside `infra/.env` and are read as `NAME=value` lines, never executed. | `prod tls acme` |
+| Backups: encryption with `openssl enc -aes-256-cbc -pbkdf2` and a passphrase file (no new dependency); off-host copies with rsync to any SSH target or mounted path (no provider chosen); the restore rehearsal uses a temporary database in the same PostgreSQL. Only paths the tooling created (timestamp names, `restore.XXXXXX`) are ever removed. | `smarthostctl-prod` |
+| Check history keeps requested runs, changes of result and the first result per check and day, so the history stays readable at hourly runs. | `SystemChecks` |
+| Address batches reuse ordinary validation jobs and send jobs of a chosen client, so quotas, sending-domain rules and the delivery daemon's suppression check apply unchanged. No single address "status": five derived dimensions. | `app/src/AddressBatch/` |
+| **Re-permission answers are stored as evidence on the batch entry and forwarded to the client** (`repermission.responded`). An unsubscribe from the list remains the client's state and never a suppression (D-30); a global opt-out becomes the existing `recipient_global_opt_out` suppression reported for the batch's client. The page answers only on POST (link scanners GET). | `RepermissionService` |
+| The operator-facing validation result maps the validator's classification without new classes: deliverable and probably deliverable are *valid*; *temporarily unverifiable* is *temporary failure*. Flags come from the stored evidence. | `EntryStates` |
+| ctnlist is not modified from this repository; the outstanding ctnlist work is specified for its own maintainers. | `docs/integration/ctnlist.md` |
+| **GitHub Releases (owner decision, v0.1.9):** each release gets a release page with its CHANGELOG notes and the source as `catto-mail-vX.Y.Z.zip`/`.tar.gz` (made with `git archive` from the tag) plus `SHA256SUMS`, next to GitHub's automatic archives. The installer and upgrades keep using the immutable Git tag. | `VPS-INSTALL.md` §12 |
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are

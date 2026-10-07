@@ -1,0 +1,55 @@
+{# Delivery mode and its controls (specification 2.11). Variables: delivery (DeliveryControl::status). #}
+{% import 'dashboard/_macros.html.twig' as ui %}
+<section class="card" aria-labelledby="delivery-h">
+    <h2 id="delivery-h">Delivery mode: <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span></h2>
+    <p>{{ delivery.explanation }}</p>
+    <dl>
+        <dt>Emergency stop</dt><dd>{% if delivery.emergency_stop %}<strong>IN FORCE</strong> since {{ delivery.stop_changed_at|ts }} — {{ delivery.stop_note }}{% else %}not in force{% endif %}</dd>
+        <dt>Delivery daemon heartbeat</dt><dd>{{ delivery.heartbeat_age is null ? 'never' : (delivery.heartbeat_age|duration ~ ' ago') }}</dd>
+        <dt>Installation-wide rate ceiling</dt><dd>{{ delivery.global_rate_per_minute ?? '—' }} messages per minute (DELIVERY_GLOBAL_RATE_PER_MINUTE)</dd>
+        <dt>Postfix queue</dt><dd>{% if delivery.queue %}{{ delivery.queue.active }} active, {{ delivery.queue.deferred }} deferred, {{ delivery.queue.hold }} held, {{ delivery.queue.incoming }} incoming <small class="muted">(snapshot {{ delivery.queue_snapshot_age|duration }} old)</small>{% else %}no snapshot yet{% endif %}</dd>
+    </dl>
+    <details><summary>What HELD, LIVE, PAUSED and STOPPED mean</summary>
+        <ul class="plain">
+            <li><strong>HELD</strong> — the installation has not been switched to live delivery. Send jobs are accepted and wait; nothing goes to the Internet except dashboard sign-in mail. This is how every installation starts.</li>
+            <li><strong>LIVE</strong> — mail is delivered to recipients' mail servers, within the configured rate limits. Switching to LIVE is a deliberate, audited action that first runs the activation preflight.</li>
+            <li><strong>PAUSED</strong> — the emergency stop is in force: the delivery daemon starts no new message and Postfix holds its queue. Nothing is lost; resuming continues where it stopped.</li>
+            <li><strong>STOPPED</strong> — the delivery daemon is not running at all (crashed, or the system is stopped). Nothing is sent and bounces wait in the spool until it runs again.</li>
+        </ul>
+        {{ ui.help('emergency-pause') }}
+    </details>
+    {% if is_granted('SYSTEM.DELIVERY.CONTROL') %}
+        {% if delivery.emergency_stop %}
+        <h3>Resume sending</h3>
+        <form method="post" action="{{ path('dashboard_operator_resume') }}" class="stack">
+            {{ ui.csrf() }}
+            <label>Why it is safe to resume (kept in the audit log) <input name="note" required minlength="3" maxlength="1000"></label>
+            <label>Type <code>RESUME SENDING</code> to confirm <input name="confirm" required autocomplete="off"></label>
+            <button type="submit">Resume sending</button>
+        </form>
+        {% else %}
+        <h3>Stop sending email now</h3>
+        <form method="post" action="{{ path('dashboard_operator_stop') }}" class="stack" data-controller="confirm" data-confirm-message-value="Stop sending all email now?">
+            {{ ui.csrf() }}
+            <label>Reason (kept in the audit log) <input name="note" required minlength="3" maxlength="1000"></label>
+            <button type="submit" class="danger">STOP SENDING EMAIL NOW</button>
+        </form>
+        {% endif %}
+        <h3>Live delivery</h3>
+        {% if delivery.live_delivery %}
+        <form method="post" action="{{ path('dashboard_operator_live') }}" class="stack">
+            {{ ui.csrf() }}<input type="hidden" name="to" value="disable">
+            <label>Reason <input name="note" required minlength="3" maxlength="1000"></label>
+            <button type="submit" class="secondary">Return to HELD mode</button>
+        </form>
+        {% else %}
+        <p>Enabling live delivery asks the host agent to run the <strong>activation preflight</strong> (every check live delivery depends on: TLS, DNS, PTR, SPF, DKIM, DMARC, outbound port 25, the ingress, relay protection). If anything fails, nothing changes and the request shows why. Do it only after the setup wizard's seed and bounce tests.</p>
+        <form method="post" action="{{ path('dashboard_operator_live') }}" class="stack">
+            {{ ui.csrf() }}<input type="hidden" name="to" value="enable">
+            <label>Reason (e.g. "seed and bounce tests passed on 2026-10-07") <input name="note" required minlength="3" maxlength="1000"></label>
+            <label>Type <code>ENABLE LIVE DELIVERY</code> to confirm <input name="confirm" required autocomplete="off"></label>
+            <button type="submit">Request live delivery</button>
+        </form>
+        {% endif %}
+    {% endif %}
+</section>

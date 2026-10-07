@@ -14,4 +14,5 @@ enum WebhookSubjectType: string
     case SendJob = 'send_job';
     case Message = 'message';
     case WebhookEndpoint = 'webhook_endpoint';
+    case AddressBatchEntry = 'address_batch_entry';
 }

@@ -1,0 +1,10 @@
+# catto-mail production: when the scheduled backup runs (BACKUP_SCHEDULE, an OnCalendar
+# expression). Persistent: a run missed while the server was off happens at the next start.
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: scheduled backup (${BACKUP_SCHEDULE})
+
+[Timer]
+OnCalendar=${BACKUP_SCHEDULE}
+Persistent=true
+RandomizedDelaySec=300
+Unit=${SMARTHOST_INSTANCE}-backup.service

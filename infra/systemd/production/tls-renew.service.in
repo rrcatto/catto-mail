@@ -1,0 +1,15 @@
+# catto-mail production: Let's Encrypt certificate renewal with the DNS-01 challenge
+# (specification 2.11). Rendered as <instance>-tls-renew.service; run daily by
+# <instance>-tls-renew.timer. Renews ACME_RENEW_DAYS before expiry with lego and the
+# ACME_DNS_PROVIDER credentials, then installs the certificate into nginx and Postfix
+# (smarthostctl prod tls set). Does nothing when ACME is not configured; a manual DNS
+# provider cannot renew unattended and is reported by the diagnostics instead.
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: certificate renewal (Let's Encrypt, DNS-01)
+
+[Service]
+Type=oneshot
+Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
+Environment=SMARTHOST_DOTENV=@DOTENV@
+Environment=SMARTHOST_GENERATED=@GENERATED@
+ExecStart=@REPO@/infra/bin/smarthostctl-prod tls acme renew

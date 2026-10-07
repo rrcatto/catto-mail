@@ -92,5 +92,19 @@ GRANT SELECT, INSERT, UPDATE ON delivery_heartbeats TO :"delivery";
 GRANT SELECT ON delivery_heartbeats TO :"app";
 GRANT SELECT, INSERT, DELETE ON audit_log TO :"app";
 GRANT INSERT ON audit_log TO :"webhook", :"validator", :"delivery";
+-- Operator self-service (specification 2.11). The host agent writes through the application
+-- console (role app); the web application only records requests and reads results.
+GRANT SELECT, INSERT, UPDATE ON system_requests, system_state, setup_steps TO :"app";
+-- A check the host agent no longer reports leaves the current results (its history stays).
+GRANT SELECT, INSERT, UPDATE, DELETE ON system_checks TO :"app";
+GRANT SELECT, INSERT ON system_check_runs TO :"app";
+-- The web emergency stop: set by the application, read by the delivery daemon.
+GRANT SELECT, INSERT, UPDATE ON delivery_controls TO :"app";
+GRANT SELECT ON delivery_controls TO :"delivery";
+-- Administrator address batches and re-permission; the webhook worker builds the
+-- repermission.responded payload from the entry and its batch.
+GRANT SELECT, INSERT, UPDATE ON address_batches, address_batch_entries TO :"app";
+GRANT SELECT, INSERT ON address_batch_sends TO :"app";
+GRANT SELECT ON address_batches, address_batch_entries TO :"webhook";
 
 COMMIT;

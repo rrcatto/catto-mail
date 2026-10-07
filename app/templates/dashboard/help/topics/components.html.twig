@@ -1,0 +1,21 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>catto-mail is eight cooperating programs, each in its own container, all run by the unprivileged user <code>cattomail</code> with rootless Podman. None of them needs anything installed on the server besides Podman.
+The complete reference (container names, systemd units, data, networks) is <code>docs/production/components.md</code>.</p>
+<table class="dense"><thead><tr><th scope="col">Component</th><th scope="col">Container</th><th scope="col">Does</th><th scope="col">Talks to</th></tr></thead><tbody>
+<tr><th scope="row">Catto-mail Web Application</th><td><code>smarthost-symfony-app</code></td><td>Dashboard, client API, tracking and re-permission pages, sign-in. Records work; never sends mail.</td><td>Database; DNS (domain verification)</td></tr>
+<tr><th scope="row">Catto-mail Webhook Worker</th><td><code>smarthost-webhook-worker</code></td><td>Sends signed notifications to client systems, with retries.</td><td>Database; client endpoints (HTTPS)</td></tr>
+<tr><th scope="row">Catto-mail Email Validator</th><td><code>smarthost-validator</code></td><td>Validates addresses from validation jobs.</td><td>Database; DNS; recipients' mail servers only if probing is enabled</td></tr>
+<tr><th scope="row">Catto-mail Delivery Daemon</th><td><code>smarthost-delivery</code></td><td>Turns send jobs into messages, submits them to Postfix, records outcomes, processes bounces and complaints.</td><td>Database; Postfix (port 587); Postfix's log, queue snapshots and bounce spool</td></tr>
+<tr><th scope="row">Postfix Mail Transfer Agent</th><td><code>smarthost-postfix</code></td><td>Delivers mail to the Internet; receives bounces and complaints.</td><td>OpenDKIM; recipients' mail servers (port 25)</td></tr>
+<tr><th scope="row">OpenDKIM Signing Service</th><td><code>smarthost-opendkim</code></td><td>Signs outgoing mail; holds the DKIM keys.</td><td>Postfix only</td></tr>
+<tr><th scope="row">PostgreSQL Database</th><td><code>smarthost-postgres</code></td><td>All state.</td><td>The four catto-mail components above, each with its own role</td></tr>
+<tr><th scope="row">nginx Frontend</th><td><code>smarthost-nginx</code></td><td>Receives HTTPS and SMTP from the Internet through a systemd socket, so client addresses are preserved.</td><td>The web application (FastCGI); Postfix (SMTP with the PROXY protocol)</td></tr>
+</tbody></table>
+<h2>On the server, outside the containers</h2>
+<ul>
+<li><strong>systemd (as the catto-mail user)</strong> starts everything at boot (<code>smarthost.service</code>), holds ports 443 and 25 (<code>smarthost-ingress.socket</code>), and runs timers (queue snapshots, log rotation, reputation, backups, certificate renewal).</li>
+<li><strong>The host agent</strong> (<code>smarthost-host-agent.service</code>) runs the host-side checks (systemd, DNS, TLS, Postfix, backups) and carries out what you request in the dashboard (backups, DKIM keys, live activation, holding the queue). The web application never runs host commands itself.</li>
+<li><strong>Not needed:</strong> no DNS server (BIND), no host Postfix, PHP, PostgreSQL, Go or Python packages. Your DNS stays with your DNS provider.</li>
+</ul>
+{% endblock %}

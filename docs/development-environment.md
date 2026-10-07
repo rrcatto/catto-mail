@@ -4,7 +4,8 @@
 processing, D-30, v0.1.5; Phase 6: tracking and dashboards with passwordless sign-in, roles and
 ACL, v0.1.6; Phase 7 Smarthost side: the webhook worker, specification 2.8, v0.1.7); Phases 8 and
 9 repository side (production tooling and rehearsal, public SaaS hardening, specification 2.10,
-v0.1.8). `smarthostctl verify`
+v0.1.8); Phase 10 operator self-service (installer, host agent, setup wizard, diagnostics, help,
+address batches, re-permission, specification 2.11, v0.1.9). `smarthostctl verify`
 passes all 176 checks (§6; `--clean` additionally starts from destroyed volumes), and
 `smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e`,
 `test phase5-e2e`, `test phase6-e2e` and `test phase7-e2e` the end-to-end runs (§7).
@@ -117,6 +118,7 @@ flowchart TD
 | `smarthostctl test phase6-e2e` | Phase 6 end to end against the **running** pod through nginx: tracking from a delivered message, open-redirect attempts, the dashboards as two client users and an operator, token-free logs (§7). It creates test clients and users and stops nothing. |
 | `smarthostctl test phase8` | Phase 8 production tooling without network (§8): configuration rules, the rendered production topology, the preflight logic with DNS/host/TLS fixtures, Postfix held/live/pause modes and sender ownership, the DKIM key tool, shellcheck. Throwaway containers only. |
 | `smarthostctl test phase8-rehearsal` | Deploys the **production** topology on this engine as the separate instance `smarthost-rehearsal` (no Internet egress, loopback ports 18443 and 12525) through `smarthostctl prod`, exercises it (§8) and removes it. It never touches the development pod. |
+| `smarthostctl test installer [--keep] [--with-upgrade]` | Runs `install-catto-mail` in a stand-in for a clean **Ubuntu Server 26.04 LTS** VPS (a systemd container `smarthost-installer-test` with rootless Podman inside), from this working tree committed as a test release tag. About half an hour. See below. |
 | `smarthostctl prod <command>` | **Production only** (refuses this development `.env`): see `docs/production/runbook.md`. |
 | `smarthostctl test phase7-e2e` | Phase 7 end to end against the **running** pod: an external client using only the API and the signed webhooks verified by a local receiver container (`smarthost-test-webhook-receiver`, alias `webhook-receiver`, removed afterwards). It creates a test client, SIGKILLs and restarts the webhook-worker container once, and stops nothing else (§7). |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
@@ -489,9 +491,42 @@ rehearsal configuration). It checks:
   mail is queued;
 - sender ownership, and the queue-depth heartbeat;
 - the preflight, and the refused live activation;
-- the audited pause and resume, and the refusal for an OPERATOR;
+- the audited pause and resume (also setting the database emergency stop), and the refusal for
+  an OPERATOR;
+- operator self-service (specification 2.11):
+  - the bootstrap sign-in link, redeemed once through nginx and never logged;
+  - the host agent and the backup, certificate and reputation timers running with the instance;
+  - a dashboard request carried out by the agent, the agent's host checks and the application
+    diagnostics;
+  - a scheduled encrypted backup copied to an off-host directory, the backup status and the
+    restore rehearsal;
+  - the log shortcuts and the certificate status;
+  - the re-permission page through nginx (no cookie, unknown tokens 404 and never logged);
 - backup and restore, D-35 stop/start (stop releases the ingress socket), and an upgrade to a new
   tag (client addresses still preserved).
+
+**`smarthostctl test installer`** (specification 2.11) tests the installer on Ubuntu Server 26.04 LTS.
+- The VPS stand-in is the Ubuntu 26.04 image with systemd as PID 1
+  (`infra/tests/installer/Containerfile`). The installer installs everything else, including
+  Podman, the service user and lingering.
+- The release is the working tree, committed as tag `v0.0.1` into a throwaway repository under
+  `infra/.generated/installer-test/`. It installs with the installer's test option
+  `--no-egress` (`SMARTHOST_EGRESS_ENABLED=false`: no container has an Internet route, and the
+  production rules then accept the `.test` host names it uses), so nothing resolves and nothing
+  is sent. The installer refuses private and documentation addresses as the public IPv4, so the
+  test passes `1.2.3.4`; nothing connects to it.
+- It checks:
+  - the 21 steps (PASS or WARN), HELD mode, the private `infra/.env`, the sign-in link (not
+    logged), and the firewall generated but not applied;
+  - a second run that skips the finished steps;
+  - the units, the sign-in link redeemed through the ingress socket on port 443, and the host
+    agent's checks;
+  - the web emergency stop: the delivery daemon pauses and the agent holds Postfix; resuming
+    needs RESUME SENDING;
+  - a container restart standing in for a reboot.
+- `--with-upgrade` also runs `prod upgrade` to a second tag and `prod rollback` to its backup.
+- `--keep` leaves the VPS container for inspection
+  (`podman exec -it smarthost-installer-test bash`).
 
 It also checks that no development container changed, and then removes every rehearsal container,
 volume, network, secret and image.
@@ -500,6 +535,13 @@ Latest runs (v0.1.8): `test phase8` 25/25 (49 unit tests); `test phase8-rehearsa
 including the Phase 9 section (reputation timer, approval with a reason, a quota refusal through
 nginx, the public API documentation, the evaluation through the timer's command path; rehearsal
 preflight: 53 PASS, 0 WARN, 0 FAIL, 1 SKIP; `prod ingress-check` 7/7 PASS).
+
+Latest runs (v0.1.9, Phase 10, specification 2.11): `verify` 176/176; `test phase2` 289
+tests; `test phase3` 295 pytest tests and the 10,000-address run; `test phase4` Go units and 34
+integration tests (including the web emergency stop); `phase4-e2e` 21/21; `phase5-e2e` 50/50;
+`phase6-e2e` 75/75; `phase7-e2e` 38/38; `test phase8` 25/25 (64 unit tests); `test
+phase8-rehearsal` 68/68 (rehearsal preflight 52 PASS, 1 WARN, 0 FAIL, 1 SKIP); `test installer
+--with-upgrade` 17/17.
 
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender

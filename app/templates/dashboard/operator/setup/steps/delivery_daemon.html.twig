@@ -1,0 +1,4 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+<p>The delivery daemon claims queued send jobs, skips suppressed addresses (checking again right before each submission), builds each message (VERP return path, tracking, List-Unsubscribe headers) and submits it to Postfix on port 587.
+It also follows Postfix's log and queue to record what happened to each message, and processes incoming bounces and complaints. Its responsibility ends when Postfix has accepted a message; from there Postfix delivers it. {{ ui.help('delivery-daemon') }}</p>
+<p>Mode now: <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span> — {{ delivery.explanation }}</p>

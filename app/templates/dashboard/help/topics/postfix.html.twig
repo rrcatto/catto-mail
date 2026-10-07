@@ -1,0 +1,21 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<dl>
+<dt>What is Postfix?</dt><dd>A widely used, robust mail server (a Mail Transfer Agent). It takes care of the hard parts of mail transport: talking SMTP to thousands of different servers, encryption, retries, queues.</dd>
+<dt>Why does catto-mail need it?</dt><dd>The delivery daemon prepares messages; Postfix actually delivers them to recipients' mail servers and receives what comes back (bounces, complaints).</dd>
+<dt>Must Ubuntu's own Postfix be installed?</dt><dd><strong>No.</strong> Postfix runs inside the <code>smarthost-postfix</code> container with catto-mail's configuration. Do not install Postfix on the server: it would compete for port 25.</dd>
+<dt>Port 25</dt><dd>The standard port between mail servers. Outbound: Postfix connects to recipients' servers on 25 — many VPS providers block it until you ask. Inbound: the bounce domain's MX points here; nginx receives the connection on the host's port 25 and passes it to Postfix with the PROXY protocol (so Postfix sees the real sender address). Postfix accepts only mail for the bounce domain and relays nothing.</dd>
+<dt>Port 587 (submission)</dt><dd>Where the delivery daemon (and the sign-in mail) hand messages to Postfix — authenticated, encrypted, and only on catto-mail's internal network, never from the Internet.</dd>
+<dt>The mail queue</dt><dd>Messages Postfix has accepted but not yet delivered: <em>active</em> (being delivered now), <em>deferred</em> (waiting to retry), <em>hold</em> (held by the emergency pause), <em>incoming</em>. System health shows the counts.</dd>
+<dt>A deferred message</dt><dd>The receiving server answered "try again later" (4xx): busy, greylisting, rate limiting. Postfix retries with growing intervals for up to five days, then gives up (soft bounce).</dd>
+<dt>Remote accepted</dt><dd>The receiving server answered "250 OK": it took responsibility for the message. That is the end of what Postfix can know — not inbox placement, not reading.</dd>
+<dt>If Gmail temporarily rejects</dt><dd>The message is deferred and retried automatically; the delivery daemon also slows down for that provider (<code>DELIVERY_DEFERRAL_BACKOFF_SECONDS</code>). Persistent rejections usually mean reputation or authentication problems: check SPF, DKIM, DMARC, PTR and the complaint rate.</dd>
+<dt>If an address does not exist</dt><dd>The server answers 550 5.1.1 (user unknown): a hard bounce. The address is suppressed globally.</dd>
+<dt>How a bounce comes back</dt><dd>Either as the immediate SMTP answer, logged by Postfix; or later as a bounce message (DSN) to the VERP return path, which arrives on port 25 and goes into the bounce spool for the delivery daemon. See <a href="{{ path('dashboard_operator_help_topic', {topic: 'bounces'}) }}">Bounces</a>.</dd>
+<dt>Postfix and OpenDKIM</dt><dd>Postfix calls OpenDKIM as a <em>milter</em> (mail filter) for every message on the submission port; OpenDKIM adds the signature before Postfix queues it.</dd>
+<dt>The delivery daemon and Postfix</dt><dd>The daemon submits over SMTP to port 587 and then only reads: Postfix's log files and periodic queue snapshots in a shared volume, and the bounce spool.</dd>
+<dt>Inspecting the queue</dt><dd><code>smarthostctl prod queue</code> (the list), <code>smarthostctl prod pause-status</code> (pause state and counts).</dd>
+<dt>Pausing</dt><dd>The emergency stop (see <a href="{{ path('dashboard_operator_help_topic', {topic: 'emergency-pause'}) }}">Stopping all mail</a>) makes Postfix hold its queue: nothing goes out, nothing is lost.</dd>
+</dl>
+<p>Logs: <code>smarthostctl prod logs postfix</code>.</p>
+{% endblock %}

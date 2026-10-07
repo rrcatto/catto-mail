@@ -1,0 +1,11 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Send report{% endblock %}
+{% block body %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Send report</p>
+<h1>{{ send.stage|capitalize }} send: {{ send.subject }}</h1>
+<p>Created {{ send.created_at|ts }} by {{ send.created_by ?? '—' }} · {{ send.recipient_count|number_format }} recipients · job status <strong>{{ send.status }}</strong>
+ · <a href="{{ path('dashboard_client_send_job', {clientId: batch.client_id, jobId: send.send_job_id}) }}">messages and timelines</a></p>
+{% include 'dashboard/operator/batches/_report.html.twig' with {report: report} %}
+<p><a href="{{ path('dashboard_operator_batch_entries', {id: batch.id, filter: 'sent'}) }}">Every address of this batch that was sent to</a> (drill into one to see its timeline).</p>
+{% endblock %}

@@ -1,6 +1,6 @@
 # Smarthost Environment-Variable Contract
 
-**Status:** normative contract for specification 2.10 · **Templates:** [`infra/.env.example`](../../infra/.env.example) (development), [`infra/production.env.example`](../../infra/production.env.example) (production, from the *Production profile* below)
+**Status:** normative contract for specification 2.11 · **Templates:** [`infra/.env.example`](../../infra/.env.example) (development), [`infra/production.env.example`](../../infra/production.env.example) (production, from the *Production profile* below)
 
 This is the single list of configuration variables that Smarthost services may read. A service
 must not read a variable that is not listed here. Adding a variable means updating this table and
@@ -88,6 +88,17 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `SMARTHOST_PUBLIC_IPV4` | deployment | no | 8 | | The production host's public IPv4 address: the sending IP (PTR, SPF) and the address the public hostname and the bounce domain's MX must resolve to. Required in production. Outbound mail is IPv4 only (`inet_protocols = ipv4`). |
 | `POSTFIX_SMTP_BIND` | deployment, proxy | no | 8 | | Inbound SMTP listener on the host for the bounce domain (DSNs, ARF reports). In production `0.0.0.0:25`: the systemd socket `<instance>-ingress.socket` binds it and hands it to nginx, which listens on exactly this address and passes each connection to Postfix with the PROXY protocol, so Postfix sees the real client address. Empty: none (the development pod). |
 | `SMARTHOST_SSH_PORT` | deployment | no | 8 | `22` | The host's SSH port, kept open by the generated host firewall rules (`smarthostctl prod firewall`). |
+| `ACME_EMAIL` | deployment | no | 10 | | Let's Encrypt account e-mail for the certificate tooling (`smarthostctl prod tls acme`, specification 2.11). Empty: automatic certificates are not configured. |
+| `ACME_DNS_PROVIDER` | deployment | no | 10 | | The DNS-01 provider of the ACME client `lego` (installed on the host by the installer), e.g. `cloudflare`, `route53`, `hetzner`, `ovh`; see `lego dnshelp`. `manual` prints the TXT record for you to create by hand (no automatic renewal). Port 80 is never opened. |
+| `ACME_CREDENTIALS_FILE` | deployment | no | 10 | | Path on the host of a file (mode 0600, outside the repository) with the DNS provider's credentials as `NAME=value` lines, exactly the variables `lego dnshelp -c <provider>` lists. Never in `infra/.env`; included in backups only if under the backup's configuration paths (it is not by default). |
+| `ACME_SERVER` | deployment | no | 10 | `https://acme-v02.api.letsencrypt.org/directory` | The ACME directory. Use `https://acme-staging-v02.api.letsencrypt.org/directory` to try the setup without the production rate limits. |
+| `ACME_RENEW_DAYS` | deployment | no | 10 | `30` | Renew when the certificate expires within this many days (the daily `<instance>-tls-renew.timer`). |
+| `BACKUP_DIR` | deployment | no | 10 | | Where scheduled backups are written on the host. Empty: `infra/.generated/backups`. Each backup is a 0700 directory, or a single encrypted file when `BACKUP_ENCRYPTION_PASSPHRASE_FILE` is set. |
+| `BACKUP_KEEP` | deployment | no | 10 | `14` | Scheduled backups kept on the host; older ones are deleted after a successful backup. |
+| `BACKUP_SCHEDULE` | deployment | no | 10 | `*-*-* 03:15:00` | When `<instance>-backup.timer` runs (a systemd `OnCalendar` expression, host time). |
+| `BACKUP_OFFHOST_TARGET` | deployment | no | 10 | | Where each backup is copied with `rsync` after it is written: `user@host:/path/` over SSH, or a local path on separately mounted storage. Empty: backups stay on this server only, which diagnostics report as WARN (not off-host). No storage provider is assumed. |
+| `BACKUP_OFFHOST_SSH_KEY` | deployment | no | 10 | | Path of the SSH private key `rsync` uses for `BACKUP_OFFHOST_TARGET` (mode 0600). Empty: the service user's SSH configuration. |
+| `BACKUP_ENCRYPTION_PASSPHRASE_FILE` | deployment | no | 10 | | Path of a file (mode 0600) holding a passphrase; when set, each backup is written as one AES-256 encrypted archive (`openssl enc -aes-256-cbc -pbkdf2`). Keep a copy of the passphrase away from the server: without it the backup cannot be restored. |
 
 ## Database
 
@@ -146,6 +157,7 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. Empty disables this. |
 | `APP_MAIL_FROM` | app, postfix | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail Smarthost"). Its domain should be DKIM-signed by OpenDKIM. Postfix lets only the web application's submission account use it as envelope sender, and in production held mode it is the only sender Postfix delivers. |
 | `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |
+| `APP_REPERMISSION_RESPONSE_DAYS` | app | no | 10 | `60` | How long the answer links of a re-permission message (`/p/<token>`: confirm, unsubscribe from this list, global opt-out) stay valid (specification 2.11). |
 | `APP_MAIL_SUBMISSION_HOST` | app | no | 6 | `postfix` | Postfix submission host for the web application's own mail (sign-in links). |
 | `APP_MAIL_SUBMISSION_PORT` | app | no | 6 | `587` | Authenticated submission port (STARTTLS, OpenDKIM milter). |
 | `APP_MAIL_SUBMISSION_USERNAME` | app, postfix | no | 6 | `smarthost-app` | SASL account of the web application on Postfix submission (separate from the delivery daemon's). |
@@ -281,7 +293,9 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |
 | `SMARTHOST_PUBLIC_IPV4` | `203.0.113.10` | The host's public IPv4 (placeholder: TEST-NET-3). |
 | `SMARTHOST_EGRESS_ENABLED` | `true` | Postfix, validator, webhook worker and application DNS reach the Internet. |
-| `SMARTHOST_IMAGE_TAG` | `0.1.8` | The released version being deployed. |
+| `SMARTHOST_IMAGE_TAG` | `0.1.9` | The released version being deployed. |
+| `ACME_SERVER` | `https://acme-v02.api.letsencrypt.org/directory` | Let's Encrypt production; the installer fills in `ACME_EMAIL` and the provider when you choose automatic certificates. |
+| `BACKUP_SCHEDULE` | `*-*-* 03:15:00` | A daily backup. Set `BACKUP_OFFHOST_TARGET` before relying on it. |
 | `SMARTHOST_LOG_LEVEL` | `info` | |
 | `APP_ADMIN_EMAIL` | `admin@example.com` | The operator's mailbox (receives the ADMIN sign-in links). |
 | `APP_MAIL_FROM` | `no-reply@example.com` | A verified, DKIM-signed sending domain. |

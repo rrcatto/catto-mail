@@ -1,0 +1,39 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Addresses of {{ batch.name }}{% endblock %}
+{% block body %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Addresses</p>
+<h1>Addresses: {{ filter|replace({'_': ' '}) }} <small class="muted">({{ total|number_format }})</small></h1>
+<form method="get" class="filters"><label>Show <select name="filter">{% for f in filters %}<option value="{{ f }}"{% if f == filter %} selected{% endif %}>{{ f|replace({'_': ' '}) }}</option>{% endfor %}</select></label><button type="submit">Show</button>
+    <a href="{{ path('dashboard_operator_batch_export', {id: batch.id, filter: filter}) }}">Download these as CSV</a></form>
+<p class="muted">Each address has separate dimensions: its validation result (with warning flags), whether it may be sent to, what the recipient answered, what happened to the message, and whether an open or click was observed. {{ ui.help('validation-results') }}</p>
+<form method="post" action="{{ path('dashboard_operator_batch_review', {id: batch.id}) }}">
+{{ ui.csrf() }}<input type="hidden" name="filter" value="{{ filter }}">
+<div class="scroll"><table class="dense">
+<thead><tr><th scope="col"><span class="sr">Select</span></th><th scope="col">Row</th><th scope="col">Address</th><th scope="col">Validation</th><th scope="col">Why</th><th scope="col">Eligibility</th><th scope="col">Consent</th><th scope="col">Delivery</th><th scope="col">Engagement</th></tr></thead>
+<tbody>{% for e in entries %}<tr>
+<td>{% if e.outcome == 'imported' %}<input type="checkbox" name="entries[]" value="{{ e.id }}" aria-label="Select row {{ e.row_number }}">{% endif %}</td>
+<td class="num">{{ e.row_number }}</td>
+<td><a href="{{ path('dashboard_operator_batch_entry', {id: batch.id, entryId: e.id}) }}">{{ e.normalized_address ?? e.original_value }}</a>{% if e.normalized_address and e.original_value != e.normalized_address %}<br><small class="muted">as uploaded: {{ e.original_value }}</small>{% endif %}{% if e.corrects_entry_id %}<br><small>accepted correction</small>{% endif %}</td>
+<td>{{ e.outcome != 'imported' ? e.outcome : labels.validation[e.validation_result] }}{% for f in e.flags %} <span class="tag">{{ f|replace({'_': ' '}) }}</span>{% endfor %}{% if e.review_decision %}<br><small>review: {{ e.review_decision }}</small>{% endif %}</td>
+<td><small>{{ e.explanation }}</small>
+    {% if e.suggested_address and not e.typo_decision %}<br>
+        <span>Suggestion: <strong>{{ e.suggested_address }}</strong></span>
+        <button type="submit" formaction="{{ path('dashboard_operator_batch_typo', {id: batch.id, entryId: e.id}) }}" name="decision" value="accept" class="secondary">Accept</button>
+        <button type="submit" formaction="{{ path('dashboard_operator_batch_typo', {id: batch.id, entryId: e.id}) }}" name="decision" value="reject" class="secondary">Keep as entered</button>
+        <input type="hidden" name="return_to" value="{{ app.request.requestUri }}">{% elseif e.typo_decision %}<br><small>typo suggestion {{ e.typo_decision }}</small>{% endif %}</td>
+<td>{{ labels.eligibility[e.eligibility] }}{% if e.suppression_reason %}<br><small>{{ e.suppression_reason }}</small>{% endif %}</td>
+<td>{{ labels.consent[e.consent_state] }}</td>
+<td>{{ labels.delivery[e.delivery_state] ?? e.delivery_state }}</td>
+<td>{{ labels.engagement[e.engagement] }}</td>
+</tr>{% else %}<tr><td colspan="9" class="empty">Nothing in this category.</td></tr>{% endfor %}</tbody></table></div>
+<fieldset class="filters"><legend>Review decision for addresses that need review (risky, unknown, temporary failure)</legend>
+    <label>Apply to <select name="scope"><option value="selected">the selected rows</option><option value="all_in_filter">every address in “{{ filter|replace({'_': ' '}) }}”</option></select></label>
+    <button type="submit" name="decision" value="include">Include (may be sent to)</button>
+    <button type="submit" name="decision" value="exclude" class="secondary">Exclude (never sent to)</button>
+    <button type="submit" name="decision" value="" class="secondary">Clear the decision</button>
+</fieldset>
+</form>
+<nav class="pager" aria-label="Pages">{% if page > 1 %}<a href="{{ path('dashboard_operator_batch_entries', {id: batch.id, filter: filter, page: page - 1}) }}">« Previous</a>{% endif %}
+<span class="pager-count">Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a href="{{ path('dashboard_operator_batch_entries', {id: batch.id, filter: filter, page: page + 1}) }}">Next »</a>{% endif %}</nav>
+{% endblock %}

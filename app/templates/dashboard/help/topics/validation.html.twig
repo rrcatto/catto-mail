@@ -1,0 +1,25 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The <strong>Catto-mail Email Validator</strong> processes every address of a validation job through the same stages, in order. Each stage records its finding; the last stage turns the evidence into one verdict.</p>
+<ol>
+<li><strong>Normalisation.</strong> Surrounding spaces are removed and the domain is lower-cased (international domains are converted to their ASCII form). The part before the @ is kept exactly as written: <code>John@example.com</code> and <code>john@example.com</code> are different addresses. The original input is always kept.</li>
+<li><strong>Syntax.</strong> The address must have a valid local part and a domain name. Invalid syntax is final: <em>invalid</em> (high confidence), and nothing else is checked.</li>
+<li><strong>Typo detection.</strong> The domain is compared with well-known mailbox-provider domains: a missing dot (<code>gmailcom</code>), a fake top-level domain (<code>.con</code>), swapped letters (<code>gmial.com</code>) or a small spelling distance. A suggestion is shown with a confidence; <strong>the address is never changed automatically</strong>. A high-confidence typo makes an otherwise valid result <em>risky</em>.</li>
+<li><strong>Domain and DNS.</strong> The domain's mail servers are looked up: MX records; a <em>null MX</em> (the domain says it accepts no mail); with no MX, the domain's own A/AAAA address as fallback; a non-existent domain (NXDOMAIN); or a domain with no mail host at all. Temporary DNS failures are retried.</li>
+<li><strong>Disposable domains.</strong> The domain is looked up in the disposable-domain table. catto-mail ships no list: the table is empty until an operator fills it, so this flag only appears for domains you added.</li>
+<li><strong>Role accounts.</strong> Local parts such as <code>info</code>, <code>sales</code>, <code>support</code>, <code>postmaster</code>, <code>noreply</code> are flagged: they usually reach several people or none. This is a warning flag only.</li>
+<li><strong>SMTP mailbox probe — only when enabled</strong> (<code>VALIDATOR_SMTP_PROBE_ENABLED</code>, off by default in production). The validator connects to the domain's mail server and asks <code>RCPT TO</code> for the address, then quits without sending anything. It also asks for a random address that cannot exist: if that is accepted too, the domain <strong>accepts all</strong> addresses and the answer proves nothing. Providers that block or throttle probes are backed off. Probing creates traffic from your sending IP, which some providers count against your reputation; that is why it is off unless you decide otherwise.</li>
+<li><strong>Classification.</strong> The evidence becomes one verdict (see <a href="{{ path('dashboard_operator_help_topic', {topic: 'validation-results'}) }}">Understanding validation results</a>).</li>
+</ol>
+<h2>Retries and temporary failures</h2>
+<p>A temporary DNS or SMTP failure (timeouts, "try again later", greylisting) is retried up to <code>VALIDATOR_MAX_ATTEMPTS</code> times (4 by default), with growing delays from <code>VALIDATOR_RETRY_BASE_SECONDS</code> (5 minutes) up to <code>VALIDATOR_RETRY_MAX_SECONDS</code> (2 hours). Only after the last attempt does the address get the final result <em>temporary failure</em> — never <em>invalid</em>, because a temporary condition says nothing permanent about the address. So a large job can take hours to finish its last few addresses.</p>
+<h2>Speed</h2>
+<p>The validator claims chunks of 250 addresses, runs up to 20 network checks at once, and never more than 2 at a time per domain or per mail server, so it does not hammer anyone. Several validator processes can share the work safely: each chunk is leased.</p>
+<h2>What validation cannot tell you</h2>
+<ul>
+<li>That a person owns or reads the mailbox. A "valid" address can be abandoned, a role mailbox, or a spam trap; spam traps cannot be detected.</li>
+<li>That the person wants your mail. Validation is never consent.</li>
+<li>Without probing, whether the mailbox exists at all — only that the domain accepts mail.</li>
+<li>That a message will reach the inbox.</li>
+</ul>
+{% endblock %}

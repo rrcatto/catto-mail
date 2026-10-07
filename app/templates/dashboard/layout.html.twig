@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+{% import 'dashboard/_macros.html.twig' as ui %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
@@ -53,8 +53,33 @@
             {% if is_granted('PLATFORM.AUDIT.VIEW') %}<li><a href="{{ path('dashboard_operator_audit') }}"{% if section == 'audit' %} aria-current="page"{% endif %}>Audit log</a></li>{% endif %}
             {% if is_granted('PLATFORM.WEBHOOK.VIEW') %}<li><a href="{{ path('dashboard_operator_webhooks') }}"{% if section == 'webhooks' and client is not defined %} aria-current="page"{% endif %}>Webhooks</a></li>{% endif %}
         </ul>
+        {% if is_granted('PLATFORM.SYSTEM.VIEW') or is_granted('SYSTEM.SETUP.MANAGE') or is_granted('PLATFORM.HELP.VIEW') %}
+        <span class="nav-title">System</span>
+        <ul>
+            {% if is_granted('PLATFORM.SYSTEM.VIEW') %}<li><a href="{{ path('dashboard_operator_system') }}"{% if section == 'system' %} aria-current="page"{% endif %}>Health &amp; delivery</a></li>
+            <li><a href="{{ path('dashboard_operator_diagnostics') }}"{% if section == 'diagnostics' %} aria-current="page"{% endif %}>Diagnostics</a></li>{% endif %}
+            {% if is_granted('SYSTEM.SETUP.MANAGE') %}<li><a href="{{ path('dashboard_operator_setup') }}"{% if section == 'setup' %} aria-current="page"{% endif %}>System setup</a></li>{% endif %}
+            {% if is_granted('SYSTEM.ADDRESS_BATCH.MANAGE') %}<li><a href="{{ path('dashboard_operator_batches') }}"{% if section == 'batches' %} aria-current="page"{% endif %}>Address batches</a></li>{% endif %}
+            {% if is_granted('PLATFORM.HELP.VIEW') %}<li><a href="{{ path('dashboard_operator_help') }}"{% if section == 'help' %} aria-current="page"{% endif %}>Help</a></li>{% endif %}
+        </ul>
+        {% endif %}
     {% endif %}
 </nav>
+{% if app.user.platformUser and is_granted('PLATFORM.SYSTEM.VIEW') %}
+    {% set ds = delivery_status() %}
+    <div class="modebar" role="status">
+        <span>Delivery: <a class="mode mode-{{ ds.mode }}" href="{{ path('dashboard_operator_system') }}">{{ ds.mode }}</a></span>
+        <span class="muted">{{ ds.explanation }}</span>
+        {% if is_granted('SYSTEM.DELIVERY.CONTROL') and not ds.emergency_stop %}
+        <form method="post" action="{{ path('dashboard_operator_stop') }}" class="inline" data-controller="confirm" data-confirm-message-value="Stop sending all email now? Nothing new is submitted and the Postfix queue is held until an administrator resumes.">
+            {{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ app.request.pathInfo starts with '/dashboard/operator/' ? app.request.pathInfo : '' }}">
+            <label class="sr" for="stop-note">Reason</label>
+            <input id="stop-note" name="note" required minlength="3" maxlength="1000" placeholder="Reason (kept in the audit log)" size="28">
+            <button type="submit" class="danger">STOP SENDING EMAIL NOW</button>
+        </form>
+        {% endif %}
+    </div>
+{% endif %}
 {% endif %}
 <main id="main">
     {% for type, messages in app.flashes %}

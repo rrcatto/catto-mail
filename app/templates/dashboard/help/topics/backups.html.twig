@@ -1,0 +1,24 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The installation is not ready for real use until backups work <strong>and leave the server</strong>.</p>
+<h2>What a backup contains</h2>
+<ul>
+<li>The database (<code>pg_dump</code>): every client, job, message, event, suppression, user and audit entry.</li>
+<li><code>infra/.env</code>: the configuration and every secret, including the encryption keys that protect webhook secrets.</li>
+<li>The DKIM private keys and the OpenDKIM tables.</li>
+<li>The TLS certificates and keys (when this Podman version can export them; otherwise keep the ACME account or certificate source).</li>
+<li>A manifest with checksums, the release and the migration level.</li>
+</ul>
+<p>Not included by default: the Postfix queue and the bounce spool (transient; add <code>--with-queue</code> after pausing if needed).</p>
+<h2>How</h2>
+<ul>
+<li><strong>Scheduled:</strong> <code>smarthost-backup.timer</code> runs daily at <code>BACKUP_SCHEDULE</code>, keeps the newest <code>BACKUP_KEEP</code> (14), and copies each backup to <code>BACKUP_OFFHOST_TARGET</code> with <code>rsync</code> (another server over SSH, or separately mounted storage — you choose; catto-mail assumes no provider).</li>
+<li><strong>Encrypted</strong> when <code>BACKUP_ENCRYPTION_PASSPHRASE_FILE</code> is set (AES-256). Keep the passphrase somewhere else too: without it the backup is useless.</li>
+<li><strong>Now:</strong> System setup › Backups › Back up now, or <code>smarthostctl prod backup --scheduled</code>.</li>
+<li><strong>Status:</strong> <code>smarthostctl prod backup-status</code>; the diagnostics warn when the last backup is older than 26 hours or not off-host.</li>
+</ul>
+<h2>Restore rehearsal</h2>
+<p>A backup you have never restored is a hope. <em>Rehearse a restore</em> (System setup › Backups, or <code>smarthostctl prod restore-rehearsal</code>) verifies the checksums, decrypts if needed, restores the database dump into a temporary database next to the real one, checks its tables and migration level, and deletes it again. Production data is not touched. Do it monthly.</p>
+<h2>Real restore</h2>
+<p><code>smarthostctl prod restore &lt;backup&gt; --yes</code> replaces the database and DKIM keys of this installation; for a new server see the runbook's recovery section. Mail recorded after the backup is lost, so pause first.</p>
+{% endblock %}

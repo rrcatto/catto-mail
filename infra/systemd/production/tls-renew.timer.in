@@ -1,0 +1,9 @@
+# catto-mail production: the daily certificate renewal check.
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: daily certificate renewal check
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=3600
+Unit=${SMARTHOST_INSTANCE}-tls-renew.service

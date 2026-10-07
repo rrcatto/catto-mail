@@ -56,3 +56,22 @@
 {% endmacro %}
 
 {% macro csrf() %}<input type="hidden" name="_token" value="{{ csrf_token('dashboard-action') }}">{% endmacro %}
+
+{# Specification 2.11: a check result, a link to a help page, a table of system checks. #}
+{% macro result(value) %}<span class="res res-{{ value|default('none') }}">{{ (value ?: 'none')|upper }}</span>{% endmacro %}
+
+{% macro help(topic, text = null) %}{% if is_granted('PLATFORM.HELP.VIEW') %}<a class="helplink" href="{{ path('dashboard_operator_help_topic', {topic: topic}) }}">{{ text ?? 'Help: how this works' }}</a>{% endif %}{% endmacro %}
+
+{% macro checks(checks, empty = 'No result yet: run the checks.') %}
+    {% if checks is empty %}<p class="empty">{{ empty }}</p>{% else %}
+    <div class="scroll"><table class="dense">
+        <thead><tr><th scope="col">Result</th><th scope="col">Check</th><th scope="col">Finding</th><th scope="col">What it means / what to do</th><th scope="col">Checked</th></tr></thead>
+        <tbody>{% for c in checks %}<tr>
+            <td>{{ _self.result(c.result) }}</td>
+            <td>{{ c.title }}<br><small class="muted">{{ c.component }} · {{ c.source }}</small></td>
+            <td>{{ c.summary }}</td>
+            <td>{{ c.help.what }}{% if c.result in ['warn', 'fail'] %} <strong>To fix:</strong> {{ c.help.fix }}{% endif %} {{ _self.help(c.help.topic, 'More') }}</td>
+            <td><small>{{ c.ran_at|ts }}</small></td>
+        </tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+{% endmacro %}

@@ -34,14 +34,18 @@ Contents (see `docs/PROJECT.md` for every file):
   containers on internal, ingress and egress networks, with no published ports
   (`docs/production/README.md`).
 - `systemd/production/`: the production ingress socket (443 and 25 bound by the service user's
-  systemd) and the service that starts nginx with it, so client addresses are preserved.
+  systemd) and the service that starts nginx with it, so client addresses are preserved; the
+  reputation, backup and certificate-renewal timers; the host agent (specification 2.11).
 - `bin/smarthostctl-prod` (`smarthostctl prod <command>`) operates it.
 - `lib/smarthost_preflight.py` is the production preflight, the DNS checklist and the firewall
-  ruleset; `lib/smarthost_seedtest.py` is the operator's seed test.
+  ruleset; `lib/smarthost_seedtest.py` is the operator's seed test; `lib/smarthost_agent.py` is
+  the host agent (host checks and dashboard requests, specification 2.11).
+- The installer `install-catto-mail` (repository root) prepares an Ubuntu Server 26.04 LTS host
+  and runs these commands (`docs/production/VPS-INSTALL.md`).
 - `production.env.example` is the production template.
 - Tests: `tests/phase8-test.sh` and `tests/phase8/` (no network), and `tests/phase8-rehearsal.sh`
   (the production topology locally, no Internet egress).
-- Runbook: `docs/production/runbook.md`.
+- Guides: `docs/production/VPS-INSTALL.md` (installation), `docs/production/runbook.md`.
 
 Rootless Podman with persistent containers (a pod in development) and systemd user units only.
 No Docker and no Kubernetes.

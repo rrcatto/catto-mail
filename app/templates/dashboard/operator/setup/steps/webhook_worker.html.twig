@@ -1,0 +1,12 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+<p>The webhook worker notifies client systems (for example the mailing-list application) when something happens: validation or send job finished, a hard bounce, a complaint, a re-permission answer.
+Every notification is signed with the endpoint's secret and retried for about a day if the client does not answer. It only connects to public addresses. {{ ui.help('webhooks') }}</p>
+{% if is_granted('SYSTEM.SETUP.MANAGE') %}
+<h2>Send a test webhook</h2>
+{% if endpoints is empty %}<p class="empty">No enabled webhook endpoint yet. A client admin adds one under the client's Webhooks page.</p>{% else %}
+<form method="post" action="{{ path('dashboard_operator_setup_webhook_test') }}" class="filters">{{ ui.csrf() }}
+    <label>Endpoint <select name="endpoint">{% for e in endpoints %}<option value="{{ e.id }}">{{ e.company_name }} — {{ e.url }}</option>{% endfor %}</select></label>
+    <button type="submit">Send webhook.test</button>
+</form>
+<p class="muted">Then open <a href="{{ path('dashboard_operator_webhooks') }}">Operator › Webhooks</a>: the delivery should be "delivered" within seconds (the receiver answered 2xx).</p>{% endif %}
+{% endif %}

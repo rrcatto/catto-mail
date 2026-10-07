@@ -1,0 +1,12 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>A <strong>client</strong> is an application that uses catto-mail, for example your mailing-list application. Each client has its own data, limits, sending domains, API keys and webhook endpoints; clients never see each other's data.</p>
+<ol>
+<li>Create the client (Operator › Clients). It starts <em>pending approval</em>; approve it with a reason (or create it active for your own internal application).</li>
+<li>Give it limits if you want (sends per day, recipients per job…).</li>
+<li>Create an <strong>API key</strong> (the client's admins can do it on their API keys page). The key is shown <strong>once</strong>; store it in the client application's secret configuration. Give keys a name and preferably an expiry; rotate by creating a new key, deploying it, then revoking the old one.</li>
+<li>The client adds and verifies its sending domain, and (with you) its DKIM key.</li>
+<li>The client application calls the API with <code>Authorization: Bearer &lt;key&gt;</code>. The full contract and the integration guide are public at <a href="/docs/api">/docs/api</a>.</li>
+</ol>
+<p>Client states: <em>pending approval</em> (reads only), <em>active</em>, <em>throttled</em> (works, more slowly), <em>suspended</em> (reads only; running sends stop), <em>closed</em> (keys stop working). See the onboarding guide <code>docs/production/onboarding.md</code>.</p>
+{% endblock %}

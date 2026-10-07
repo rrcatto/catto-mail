@@ -10,8 +10,32 @@ use Twig\Attribute\AsTwigFunction;
 /** Small presentation helpers for the dashboard templates. */
 final class DashboardTwigExtension
 {
-    public function __construct(private readonly SecurityHeadersSubscriber $headers)
+    /** @var array<string, mixed>|null */
+    private ?array $deliveryStatus = null;
+
+    public function __construct(
+        private readonly SecurityHeadersSubscriber $headers,
+        private readonly \App\System\DeliveryControl $delivery,
+    ) {
+    }
+
+    /**
+     * The installation's delivery mode (HELD, LIVE, PAUSED, STOPPED) for the bar every
+     * operator page shows (specification 2.11), read once per request.
+     *
+     * @return array<string, mixed>
+     */
+    #[AsTwigFunction('delivery_status')]
+    public function deliveryStatus(): array
     {
+        return $this->deliveryStatus ??= $this->delivery->status();
+    }
+
+    /** "3 min" style durations. */
+    #[AsTwigFilter('duration')]
+    public static function duration(mixed $seconds): string
+    {
+        return null === $seconds ? '—' : \App\System\DeliveryControl::duration((int) $seconds);
     }
 
     #[AsTwigFunction('csp_nonce')]

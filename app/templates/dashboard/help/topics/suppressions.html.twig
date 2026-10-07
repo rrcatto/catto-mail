@@ -1,0 +1,19 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>A <strong>suppression</strong> means "do not mail this address (or domain)". The delivery daemon checks the suppression list when it creates each message and again right before handing it to Postfix: this check is authoritative and nothing — not a batch send, not the API — can bypass it.</p>
+<h2>Kinds</h2>
+<table class="dense"><thead><tr><th scope="col">Reason</th><th scope="col">Created by</th><th scope="col">Scope</th><th scope="col">Ends</th></tr></thead><tbody>
+<tr><th scope="row">Hard bounce</th><td>The delivery daemon, when a server permanently rejects a specific mailbox (e.g. 5.1.1 unknown user).</td><td>Global: every client</td><td>Never, unless lifted</td></tr>
+<tr><th scope="row">Complaint</th><td>The delivery daemon, from a verified spam complaint (ARF) matched to an exact message.</td><td>Global</td><td>Never, unless lifted</td></tr>
+<tr><th scope="row">Repeated soft bounce</th><td>The delivery daemon, after 3 mailbox-specific temporary failures (full or disabled mailbox) within 30 days, across all clients. A later acceptance resets the count. Provider throttling, connection or DNS problems never count.</td><td>Global</td><td>Expires after 30 days</td></tr>
+<tr><th scope="row">Recipient global opt-out</th><td>A trusted client reporting the recipient's explicit request, or the recipient's own answer on a re-permission page.</td><td>Global (the reporting client is recorded)</td><td>Never, unless lifted</td></tr>
+<tr><th scope="row">Operator block, client abuse block</th><td>An operator.</td><td>Global or one client; address or whole domain</td><td>Optional expiry</td></tr>
+</tbody></table>
+<h2>What is not a suppression</h2>
+<ul>
+<li>An <strong>ordinary unsubscribe</strong> from a list. That belongs to the client application, which must stop sending that list to the person. catto-mail never stores it as a suppression (a person may leave one list and keep another).</li>
+<li>A single soft bounce, provider throttling, a sender or IP reputation rejection, DNS or TLS failures, "outcome unknown", or a validation result.</li>
+</ul>
+<h2>Lifting</h2>
+<p>Operators with the suppression permission can lift a suppression (Operator › Suppressions, or <code>smarthost:suppression:lift</code>). Lifting sets a date; nothing is deleted, and the audit log records who and why. Lift only on evidence (for example the person asks to be mailed again, or a hard bounce was a receiver's error).</p>
+{% endblock %}

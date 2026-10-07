@@ -26,6 +26,12 @@
 #      lifecycle through the console), a quota refusal through nginx (429
 #      quota-exceeded), the public API documentation, the evaluation through the timer's
 #      own command path
+#   O  operator self-service (specification 2.11): the bootstrap sign-in link redeemed
+#      through nginx (and never logged), the host agent recording host checks and
+#      carrying out a dashboard request, the web emergency stop read by the delivery
+#      daemon, scheduled encrypted backups with an off-host copy and a restore rehearsal,
+#      log shortcuts, the certificate tooling's status, the re-permission page and its
+#      token redaction
 #   B  backup and restore
 #   U  upgrade to a new image tag (recreate, migrations, health), D-35 stop/start
 #   Z  development pod untouched; cleanup
@@ -291,8 +297,11 @@ prod pause --operator "admin@$NAME" --note "rehearsal pause" >/dev/null && [[ "$
   && pass "pause: Postfix holds all outbound" || fail "pause"
 waitsql "SELECT outbound_paused FROM delivery_heartbeats WHERE stopped_at IS NULL ORDER BY last_seen_at DESC LIMIT 1" t 60 \
   && pass "the delivery daemon sees the pause (dashboard signal)" || fail "paused heartbeat"
+[[ "$(sql "SELECT emergency_stop FROM delivery_controls WHERE id = 1")" == t ]] \
+  && pass "pause also sets the database emergency stop (the dashboard's STOP SENDING EMAIL NOW)" || fail "emergency stop flag"
 prod resume --operator "admin@$NAME" --note "rehearsal resume" >/dev/null && [[ -z "$(podman exec "$I-postfix" postconf -h defer_transports)" ]] \
-  && pass "resume" || fail "resume"
+  && [[ "$(sql "SELECT emergency_stop FROM delivery_controls WHERE id = 1")" == f ]] \
+  && pass "resume (queue released, emergency stop lifted)" || fail "resume"
 [[ "$(sql "SELECT string_agg(action, ',' ORDER BY occurred_at) FROM audit_log WHERE action LIKE 'delivery.%'")" == "delivery.outbound_paused,delivery.outbound_resumed" ]] \
   && pass "pause and resume are audited (operator and note)" || fail "audit: $(sql "SELECT string_agg(action, ',') FROM audit_log WHERE action LIKE 'delivery.%'")"
 prod ops-status | grep -q "^delivery" && pass "ops-status summary" || fail "ops-status"
@@ -335,6 +344,59 @@ PY6
 out="$("$GEN/podman/smarthost-production.sh" app-exec php bin/console smarthost:reputation evaluate 2>&1)"
 [[ "$out" == evaluated* && "$(sql "SELECT count(*) > 0 FROM client_reputation_metrics WHERE client_id = '$SAAS'")" == t ]] \
   && pass "reputation evaluation through the timer's command path: $out" || fail "evaluation: $out"
+
+echo "== O operator self-service"
+https_get() {  # https_get <path>: "<status> <location>" through the ingress, without following redirects
+  python3 - "$1" "mail.$NAME" <<'PY8'
+import http.client, ssl, sys
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+c = http.client.HTTPSConnection("127.0.0.1", 18443, context=ctx, timeout=30)
+c.request("GET", sys.argv[1], headers={"Host": sys.argv[2]})
+r = c.getresponse()
+print(r.status, r.getheader("Location") or "", "cookie" if r.getheader("Set-Cookie") else "")
+PY8
+}
+out="$(prod admin-link 2>&1)"; url="$(sed -n 's/^sign_in_url: //p' <<<"$out")"
+if [[ "$url" =~ ^https://mail\.$NAME(/dashboard/login/verify\?token=([A-Za-z0-9_-]{43}))$ ]]; then
+  path="${BASH_REMATCH[1]}"; token="${BASH_REMATCH[2]}"
+  pass "admin-link prints a single-use administrator sign-in link"
+  [[ "$(https_get "$path")" == "302 /dashboard/operator/setup cookie" ]] && pass "the link signs in through nginx and opens System setup" || fail "redeem: $(https_get "$path")"
+  [[ "$(https_get "$path" | cut -d' ' -f1-2)" == "302 /dashboard/login" ]] && pass "the link works once" || fail "second use"
+  logs="$(podman logs --tail 200 "$I-nginx" 2>&1)"
+  [[ "$logs" != *"$token"* && "$logs" == *"/dashboard/login/verify?[token]"* ]] && pass "nginx never logs the sign-in token" || fail "sign-in token in the access log"
+else
+  fail "admin-link: $out"
+fi
+sql "INSERT INTO system_requests (id, action, params_json, requested_at) VALUES (gen_random_uuid(), 'diagnostics.run', '{\"section\": \"config\"}', now())" >/dev/null
+states="$(for u in host-agent.service backup.timer tls-renew.timer reputation-evaluate.timer; do prod machine systemctl is-active "$I-$u" 2>/dev/null || echo missing; done | tr '\n' ' ')"
+[[ "$states" == "active active active active " ]] && pass "the host agent and the backup, certificate and reputation timers run with the instance" || fail "instance units: $states"
+# The running agent service normally claims the request within seconds; `agent once` also processes it.
+prod agent once --no-preflight >/dev/null 2>&1
+waitsql "SELECT status FROM system_requests WHERE action = 'diagnostics.run' ORDER BY requested_at DESC LIMIT 1" succeeded 180 \
+  && pass "the host agent carried out a dashboard request (diagnostics.run)" || fail "agent request: $(sql "SELECT status, result_summary FROM system_requests ORDER BY requested_at DESC LIMIT 1")"
+[[ "$(sql "SELECT result FROM system_checks WHERE check_key = 'container.postfix'")" == pass \
+   && "$(sql "SELECT count(*) > 15 FROM system_checks WHERE source = 'agent'")" == t \
+   && "$(sql "SELECT value_json->>'rootless' FROM system_state WHERE state_key = 'host_report'")" == true ]] \
+  && pass "the host agent recorded the host facts and checks (containers, boot, backups, security)" || fail "agent checks"
+[[ "$(sql "SELECT count(*) FROM system_checks WHERE source = 'application' AND check_key IN ('app.database', 'app.web', 'app.tracking.pixel') AND result = 'pass'")" == 3 ]] \
+  && pass "the application's own diagnostics pass (database, web, tracking)" || fail "application checks: $(sql "SELECT check_key, result, summary FROM system_checks WHERE source = 'application'")"
+mkdir -p "$GEN/offhost"; head -c 48 /dev/urandom | base64 > "$GEN/backup-passphrase"; chmod 600 "$GEN/backup-passphrase"
+setv BACKUP_DIR "$GEN/scheduled"; setv BACKUP_OFFHOST_TARGET "$GEN/offhost/"; setv BACKUP_ENCRYPTION_PASSPHRASE_FILE "$GEN/backup-passphrase"
+out="$(prod backup --scheduled 2>&1)"
+enc="$(find "$GEN/scheduled" -maxdepth 1 -name '*.tar.enc' | head -n1)"
+[[ -n "$enc" && -f "$GEN/offhost/$(basename "$enc")" && "$(stat -c %a "$enc")" == 600 && ! -d "${enc%.tar.enc}" ]] \
+  && pass "scheduled backup: encrypted (one .tar.enc), copied off-host" || fail "scheduled backup: ${out: -300}"
+[[ "$(prod backup-status | grep -E '^(offhost|encrypted|last_result):' | tr '\n' ' ')" == "encrypted: True last_result: ok offhost: True " ]] \
+  && pass "backup status recorded for the diagnostics" || fail "backup-status: $(prod backup-status)"
+out="$(prod restore-rehearsal 2>&1)"
+[[ "$out" == *"restore rehearsal passed"* && "$(sql "SELECT count(*) FROM pg_database WHERE datname LIKE '%restore_rehearsal'")" == 0 ]] \
+  && pass "restore rehearsal: the encrypted backup restored into a temporary database, verified, dropped" || fail "restore rehearsal: ${out: -300}"
+[[ "$(prod logs app 5 | wc -l)" -ge 1 && "$(prod logs postgres 3 | wc -l)" -ge 1 ]] && pass "log shortcuts by component name" || fail "logs"
+[[ "$(prod tls acme status)" == *"not configured"* ]] && pass "certificate tooling reports that ACME is not configured" || fail "acme status"
+[[ "$(https_get /p/seed-test)" == "200  " ]] && pass "the re-permission page answers through nginx without a cookie" || fail "/p: $(https_get /p/seed-test)"
+ptoken="$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
+[[ "$(https_get "/p/$ptoken" | cut -d' ' -f1)" == 404 ]] && ! podman logs --tail 50 "$I-nginx" 2>&1 | grep -qF "$ptoken" \
+  && pass "an unknown re-permission token is a 404 and is never logged" || fail "re-permission token handling"
 
 echo "== B backup and restore"
 clients_before="$(sql "SELECT count(*) FROM clients")"

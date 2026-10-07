@@ -1,0 +1,11 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The <strong>PostgreSQL Database</strong> (container <code>smarthost-postgres</code>, volume <code>smarthost-postgres-data</code>) holds everything: clients, users, jobs, messages and their events, suppressions, audit log, settings and test history.</p>
+<ul>
+<li>It is reachable only on catto-mail's internal network; no port is published.</li>
+<li>Each component connects with its own role and may touch only its tables (the web application, the webhook worker, the validator, the delivery daemon). The grant matrix is checked by the diagnostics.</li>
+<li>The schema is changed only by migrations, which run automatically at every start; the diagnostics show whether every migration of this release has run.</li>
+<li>Backups (<code>pg_dump</code>) are part of every catto-mail backup.</li>
+</ul>
+<p>Logs: <code>smarthostctl prod logs postgres</code>. You should never need to change the database by hand; use the dashboard or the console commands.</p>
+{% endblock %}

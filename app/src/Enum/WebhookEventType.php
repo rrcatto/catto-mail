@@ -17,4 +17,5 @@ enum WebhookEventType: string
     case MessageHardBounced = 'message.hard_bounced';
     case MessageComplained = 'message.complained';
     case WebhookTest = 'webhook.test';
+    case RepermissionResponded = 'repermission.responded';
 }

@@ -1,0 +1,14 @@
+# catto-mail production: the scheduled backup (specification 2.11). Rendered as
+# <instance>-backup.service; run by <instance>-backup.timer at BACKUP_SCHEDULE.
+# Writes a backup (encrypted when BACKUP_ENCRYPTION_PASSPHRASE_FILE is set), keeps the
+# newest BACKUP_KEEP, copies it to BACKUP_OFFHOST_TARGET, and records the outcome for
+# the diagnostics.
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: scheduled backup
+
+[Service]
+Type=oneshot
+Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
+Environment=SMARTHOST_DOTENV=@DOTENV@
+Environment=SMARTHOST_GENERATED=@GENERATED@
+ExecStart=@REPO@/infra/bin/smarthostctl-prod backup --scheduled

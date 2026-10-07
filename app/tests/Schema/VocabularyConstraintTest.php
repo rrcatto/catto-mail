@@ -41,6 +41,16 @@ final class VocabularyConstraintTest extends TestCase
         'billing_statement_status' => ['billing_statements.status'],
         'billing_reconciliation_status' => ['billing_statements.reconciliation_status'],
         'client_alert_metric' => ['client_alerts.metric'], 'client_alert_severity' => ['client_alerts.severity'],
+        // Specification 2.11
+        'system_request_action' => ['system_requests.action'], 'system_request_status' => ['system_requests.status'],
+        'system_component' => ['system_checks.component', 'system_check_runs.component'],
+        'system_check_result' => ['system_checks.result', 'system_check_runs.result'],
+        'system_check_source' => ['system_checks.source', 'system_check_runs.source'],
+        'system_check_trigger' => ['system_check_runs.run_trigger'], 'setup_step_state' => ['setup_steps.state'],
+        'address_batch_purpose' => ['address_batches.purpose'], 'address_batch_file_format' => ['address_batches.file_format'],
+        'address_batch_entry_outcome' => ['address_batch_entries.outcome'], 'consent_state' => ['address_batch_entries.consent_state'],
+        'batch_review_decision' => ['address_batch_entries.review_decision'], 'typo_decision' => ['address_batch_entries.typo_decision'],
+        'batch_send_stage' => ['address_batch_sends.stage'],
     ];
 
     /** @return array<string, list<string>> */

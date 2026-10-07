@@ -1,0 +1,17 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>When a send job asks for it, the delivery daemon instruments each HTML message: a 1×1 tracking image <code>/t/o/&lt;token&gt;.gif</code> (open tracking) and links rewritten through <code>/t/c/&lt;token&gt;/&lt;n&gt;</code> (click tracking). Each message has its own random token (at least 192 bits); no address is ever in the URL.</p>
+<ul>
+<li><strong>Open observed</strong> — the image was fetched. Recorded at most once a minute per message.</li>
+<li><strong>Clicked</strong> — a link was followed. The redirect goes only to the link's stored original address, so the endpoint cannot be abused to send people elsewhere. The unsubscribe link is never rewritten.</li>
+<li>Unknown, expired or invalid tokens get the same answer (the image, or a plain "not found"), and nothing is recorded. Tracking stops after <code>APP_RETENTION_TRACKING_DAYS</code> if set.</li>
+<li>Tokens are never logged; no cookie is set.</li>
+</ul>
+<h2>Why opens are imperfect</h2>
+<ul>
+<li><strong>Hidden opens:</strong> many people read with images off, or in plain text; their reading is never recorded.</li>
+<li><strong>Apparent opens:</strong> privacy features (for example Apple Mail Privacy Protection) and corporate security scanners fetch images automatically, often right after delivery, whether or not anyone reads.</li>
+<li><strong>Shared proxies:</strong> some providers fetch images through their own servers, so you cannot tell who fetched it.</li>
+</ul>
+<p>Never treat an open as proof that a particular person read a message. Clicks are stronger evidence, but scanners follow links too.</p>
+{% endblock %}

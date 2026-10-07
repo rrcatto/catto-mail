@@ -110,6 +110,43 @@ final class LoginLinkService
     }
 
     /**
+     * A single-use sign-in link for an administrator, printed on the host instead of emailed
+     * (specification 2.11): the first sign-in of a new installation, before mail and DNS
+     * work, and recovery when sign-in mail cannot be delivered. Only someone with a shell
+     * on the host as the service user can run it (`smarthostctl prod admin-link`), and that
+     * person already controls every secret of the installation; it is no wider than that.
+     * The link is ADMIN-only, expires after at most 15 minutes, is shown once (only its hash
+     * is stored), redeemed through the ordinary sign-in path, and audited.
+     */
+    public function issueHostLink(string $email, int $ttlSeconds = 900): string
+    {
+        $ttlSeconds = max(60, min(900, $ttlSeconds));
+        $email = trim($email);
+        $user = $this->users->findByEmail($email);
+        $isAdmin = $this->access->isConfiguredAdmin($email)
+            || (null !== $user && \in_array('ADMIN', $this->access->roleKeys($user), true));
+        if (!$isAdmin || (null !== $user && $user->isDisabled())) {
+            throw new \InvalidArgumentException("$email is not an enabled administrator (APP_ADMIN_EMAIL or a user with the ADMIN role).");
+        }
+        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $now = Clock::now();
+        $this->connection->insert('auth_login_tokens', [
+            'id' => Uuid::v7()->toRfc4122(),
+            'email' => null === $user ? $email : $user->getEmail(),
+            'user_id' => $user?->getId()->toRfc4122(),
+            'token_hash' => hash('sha256', $token),
+            'return_path' => '/dashboard/operator/setup',
+            'requested_ip_hash' => hash_hmac('sha256', 'host-console', $this->secret),
+            'created_at' => $now->format('Y-m-d H:i:s.uP'),
+            'expires_at' => $now->modify('+'.$ttlSeconds.' seconds')->format('Y-m-d H:i:s.uP'),
+        ]);
+        $this->audit->record(AuditActor::system('host-console'), 'auth.host_login_link_issued', 'user', $user?->getId()->toRfc4122(),
+            ['email_hash' => hash('sha256', strtolower($email)), 'expires_in_seconds' => $ttlSeconds]);
+
+        return rtrim($this->publicBaseUrl, '/').'/dashboard/login/verify?token='.$token;
+    }
+
+    /**
      * Claims the token and returns the user to sign in and where to send them, or
      * null for an unknown, used, expired or malformed token or a disabled user.
      *

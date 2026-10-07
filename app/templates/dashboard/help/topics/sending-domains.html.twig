@@ -1,0 +1,11 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>A client may only send with a From address at a <strong>sending domain</strong> it has proven to control, and in production only once the domain also has an active DKIM key.</p>
+<ol>
+<li>The domain is added (client dashboard or <code>smarthost:domain:add</code>); catto-mail shows a TXT record: <code>_smarthost-verification.&lt;domain&gt;</code> with a random token.</li>
+<li>The record is created at the domain's DNS; catto-mail checks it (<code>smarthost:domain:verify</code>, or the dashboard) and marks the domain verified.</li>
+<li>A DKIM key is generated, published and activated (System setup › DKIM).</li>
+<li>Recommended: a DMARC record at the domain.</li>
+</ol>
+<p>The domain can belong to the client organisation; its DNS records then have to be created by them.</p>
+{% endblock %}

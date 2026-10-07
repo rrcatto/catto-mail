@@ -1,0 +1,22 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The <strong>Catto-mail Email Validator</strong> is a Python worker in the <code>smarthost-validator</code> container. It exists so that address checks — which wait on DNS and other mail servers for seconds at a time — never block the web application.</p>
+<h2>How jobs reach it</h2>
+<p>The web application stores a validation job with one row per address and sends a database notification. The validator wakes (or finds the work within <code>VALIDATOR_POLL_INTERVAL_SECONDS</code>), <strong>claims</strong> a chunk of 250 addresses with a 5-minute lease that it renews while working, and records each result. If it crashes, the lease expires and another run picks the chunk up again; an address is never lost or finished twice. Only active or throttled clients' work is claimed.</p>
+<h2>The stages</h2>
+<p>Normalisation, syntax, typo detection, domain/DNS (MX, null MX, address fallback), disposable domains, role accounts, the optional SMTP probe with accept-all detection, and classification — explained one by one on <a href="{{ path('dashboard_operator_help_topic', {topic: 'validation'}) }}">How validation works</a>.</p>
+<h2>SMTP probing: why it is off</h2>
+<p>A probe opens a connection to the recipient's mail server from your server and asks whether the mailbox exists, without sending. Large providers treat many such connections as abuse and may lower the reputation of the IP you send real mail from, or simply refuse to answer. So production starts with <code>VALIDATOR_SMTP_PROBE_ENABLED=false</code>: "valid" then means "the domain accepts mail and nothing contradicts the address". Enable it only deliberately.</p>
+<h2>Concurrency and fairness</h2>
+<p>At most 20 checks at once, at most 2 per recipient domain and per mail server; providers that throttle are backed off.</p>
+<h2>Retries</h2>
+<p>Temporary failures are retried up to 4 times, 5 minutes to 2 hours apart; then the result is <em>temporary failure</em>.</p>
+<h2>The results</h2>
+<ul>
+<li><strong>Valid</strong> — deliverable or probably deliverable; evidence, not proof of a reader.</li>
+<li><strong>Invalid</strong> — bad syntax, no such domain, null MX, no mail host, or the mailbox was rejected permanently.</li>
+<li><strong>Risky</strong> — accept-all domain, disposable domain or high-confidence typo.</li>
+<li><strong>Unknown</strong> — ambiguous evidence (probe blocked, odd DNS answer).</li>
+</ul>
+<p>Logs: <code>smarthostctl prod logs validator</code>.</p>
+{% endblock %}

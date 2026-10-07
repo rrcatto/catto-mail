@@ -1,0 +1,24 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Diagnostics{% endblock %}
+{% block body %}
+<h1>Diagnostics</h1>
+<p>Every check of every subsystem, with what it proves and what to do. PASS works; WARN works but needs attention; FAIL does not work or is unsafe; SKIPPED did not run (a prerequisite is missing, or it does not apply); INFO is a fact.
+    {{ ui.help('troubleshooting') }}</p>
+{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
+<form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}" class="filters">
+    {{ ui.csrf() }}
+    <span>The application checks run at once; the host agent runs its checks within a minute{% if agent_age is null %} <strong>(it has never reported: see the Host agent check)</strong>{% endif %}.
+    {% if last_run %}Last host run: {{ last_run.status }} {{ last_run.finished_at|ts }}.{% endif %}</span>
+    <button type="submit">Run all checks now</button>
+</form>
+{% endif %}
+<p><a href="{{ path('dashboard_operator_diagnostics_history') }}">Test-result history</a> · <a href="{{ path('dashboard_operator_system_requests') }}">Host requests</a></p>
+<nav aria-label="Components"><p>{% for comp, s in by_component %}<a href="#c-{{ comp }}">{{ comp }}</a> {{ ui.result(s.result) }}{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>
+{% for comp, checks in grouped %}
+    <h2 id="c-{{ comp }}">{{ comp|capitalize }}</h2>
+    {{ ui.checks(checks) }}
+{% else %}
+    <p class="empty">No check has run yet. {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}Use "Run all checks now".{% endif %}</p>
+{% endfor %}
+{% endblock %}

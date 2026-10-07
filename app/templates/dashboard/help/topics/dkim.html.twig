@@ -1,0 +1,20 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p><strong>DKIM</strong> is a signature on every message, made with the sending domain's private key. Receivers fetch the public key from DNS (<code>&lt;selector&gt;._domainkey.&lt;domain&gt;</code>) and verify that the message really comes from that domain and was not changed. It is the main basis of DMARC alignment and of a domain's reputation.</p>
+<h2>In catto-mail</h2>
+<ul>
+<li>The OpenDKIM container is the only place the private keys exist. Postfix asks it to sign each outgoing message.</li>
+<li>Each sending domain has one active <strong>selector</strong> (a key name, such as <code>s2026a</code>). A new key does not sign until you activate it.</li>
+<li>The sign-in mail sender's domain needs a key as well.</li>
+</ul>
+<h2>Procedure</h2>
+<ol>
+<li>System setup › DKIM › Generate (domain and a new selector) — or <code>smarthostctl prod dkim generate news.example.org s2026a</code>.</li>
+<li>Publish the TXT record shown at the domain's DNS provider. Long values are split into quoted strings by most providers automatically.</li>
+<li>Run the checks: the DKIM check compares the published key with the private one.</li>
+<li>Activate — and record it for the domain: <code>smarthostctl prod console smarthost:domain:dkim &lt;client-id&gt; news.example.org active --selector s2026a</code>.</li>
+<li>Send a seed test and look for <code>dkim=pass header.d=news.example.org</code> in the received message's <code>Authentication-Results</code>.</li>
+</ol>
+<h2>Rotation</h2>
+<p>Yearly, or if a key may have leaked: generate a new selector, publish it, activate it once DNS shows it, keep the old record for a week (messages in transit still verify), then remove it and <code>smarthostctl prod dkim retire &lt;domain&gt; &lt;old selector&gt;</code>. The active selector cannot be retired.</p>
+{% endblock %}

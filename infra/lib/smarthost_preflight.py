@@ -440,6 +440,11 @@ class Host:
             return 127, str(exc)
 
     def podman_remote(self) -> bool:
+        """True when the Podman engine runs elsewhere (e.g. a WSL Podman machine). The user's own API
+        socket on this host (CONTAINER_HOST of the production units) is local."""
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime and os.environ.get("CONTAINER_HOST") == f"unix://{runtime}/podman/podman.sock":
+            return False
         return self.run("podman", "info", "--format", "{{.Host.ServiceIsRemote}}")[1].strip() == "true"
 
     def systemctl(self, *args: str) -> tuple[int, str] | None:
@@ -533,6 +538,9 @@ class Preflight:
     resolver: Resolver
     activation: bool = False
     egress_probe: str = ""
+    # Before an upgrade the checkout is already the new release, whose grant matrix the upgrade
+    # applies itself; the grants are compared by the runtime preflight after the upgrade.
+    pre_upgrade: bool = False
     results: list[Check] = field(default_factory=list)
     now: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
 
@@ -594,9 +602,9 @@ class Preflight:
                 osr[k] = val.strip('"')
         except OSError:
             pass
-        supported = osr.get("ID") == "ubuntu" and osr.get("VERSION_ID") == "24.04"
+        supported = osr.get("ID") == "ubuntu" and osr.get("VERSION_ID") == "26.04"
         self.add("host", "operating system", "PASS" if supported else "WARN",
-                 f"{osr.get('PRETTY_NAME', 'unknown')}" + ("" if supported else " (supported: Ubuntu Server 24.04)"))
+                 f"{osr.get('PRETTY_NAME', 'unknown')}" + ("" if supported else " (supported and tested: Ubuntu Server 26.04 LTS)"))
         rc, out = h.run("podman", "version", "--format", "{{.Client.Version}}")
         try:
             ver = tuple(int(x) for x in re.findall(r"\d+", out)[:2])
@@ -670,7 +678,10 @@ class Preflight:
             if states.get("symfony-app") == "healthy":
                 rc, out = h.exec("symfony-app", "php", "bin/console", "doctrine:migrations:up-to-date", user="www-data")
                 self.add("runtime", "migrations current", "PASS" if rc == 0 else "FAIL", out.strip().splitlines()[-1] if out.strip() else "", True)
-            self.check_grants()
+            if self.pre_upgrade:
+                self.add("runtime", "grants current", "SKIP", "compared after the upgrade, which applies the new release's grants")
+            else:
+                self.check_grants()
             try:
                 rows = self.host.sql("SELECT COALESCE(extract(epoch FROM now() - max(computed_at))::bigint, -1) FROM client_reputation_metrics")
                 age = int(rows[0][0]) if rows else -1
@@ -1198,7 +1209,8 @@ def firewall_ruleset(values: dict[str, str], uid: int) -> str:
 # Outbound of the service user (uid {uid}): the rootless containers' traffic leaves
 # through processes of this user (rootlessport, slirp4netns/pasta), so it is limited
 # here to DNS, SMTP 25 (MX delivery, validation probes), HTTPS 443 (webhooks, image
-# pulls) and HTTP 80 (package/ACME access). Per-container egress is enforced by the
+# pulls, the ACME and DNS-provider APIs), HTTP 80 (package access) and SSH 22 (off-host
+# backups with rsync; add the port if BACKUP_OFFHOST_TARGET uses another one). Per-container egress is enforced by the
 # Podman networks (only postfix, validator, webhook-worker and symfony-app join the
 # egress network).
 table inet catto_mail
@@ -1217,7 +1229,7 @@ table inet catto_mail {{
         oif "lo" accept
         meta skuid {uid} ct state established,related accept
         meta skuid {uid} udp dport 53 accept
-        meta skuid {uid} tcp dport {{ 25, 53, 80, 443 }} accept
+        meta skuid {uid} tcp dport {{ 22, 25, 53, 80, 443 }} accept
         meta skuid {uid} counter reject
     }}
 }}
@@ -1245,6 +1257,7 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="catto-mail production preflight")
     p.add_argument("--activation", action="store_true", help="the live-delivery activation gate")
     p.add_argument("--section", action="append", choices=Preflight.SECTIONS)
+    p.add_argument("--pre-upgrade", action="store_true", help="before an upgrade: skip the grant comparison (the upgrade applies the new grants)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--quiet", action="store_true", help="print only FAIL lines and the summary")
     p.add_argument("--smtp-egress-probe", default="", metavar="DOMAIN")
@@ -1268,7 +1281,8 @@ def main(argv: list[str]) -> int:
     if a.firewall:
         print(firewall_ruleset(values, os.getuid()), end="")
         return 0
-    pf = Preflight(values, host, Resolver(a.resolver), activation=a.activation, egress_probe=a.smtp_egress_probe)
+    pf = Preflight(values, host, Resolver(a.resolver), activation=a.activation, egress_probe=a.smtp_egress_probe,
+                   pre_upgrade=a.pre_upgrade)
     return report(pf.run(tuple(a.section) if a.section else None), a.json, a.quiet)
 
 

@@ -1,0 +1,27 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> let an administrator validate (and, with approval, carefully send to) a list of up to <strong>10,000 addresses</strong> on behalf of a client. It is an operational tool — for checking or re-permissioning an old list — not a replacement for the client's mailing-list application.</p>
+<h2>Formats</h2>
+<ul>
+<li><strong>TXT</strong>: one address per line.</li>
+<li><strong>CSV</strong>: a header row; comma, semicolon or tab separated. catto-mail picks the column called <em>email</em> (or the one with the most @ signs); you can choose another before importing.</li>
+<li>UTF-8 text, at most 10 MiB and 10,000 non-blank rows. Split larger lists into several batches.</li>
+</ul>
+<h2>What the import does</h2>
+<ol>
+<li><strong>Preview</strong> — nothing is stored yet. You see the counts, the first rows, and every duplicate or malformed row.</li>
+<li><strong>Cleanup</strong> — only changes that cannot alter an address: surrounding spaces (including invisible ones), a <code>mailto:</code> prefix, the address inside <code>Name &lt;address&gt;</code>, and the domain lower-cased.</li>
+<li><strong>Duplicates</strong> — the same cleaned address on a later row is kept as a <em>duplicate</em> pointing at the first row; it is not validated or sent to twice.</li>
+<li><strong>Malformed input</strong> — a row that cannot be an address at all (no @, spaces inside, control characters, more than 320 characters) is kept as <em>malformed</em> with the reason, and not validated.</li>
+<li><strong>Provenance</strong> — the file name, its SHA-256, the column, the administrator, the time, the batch name, description and source, and each row's number are stored.</li>
+</ol>
+<p><strong>No address is ever silently lost:</strong> every non-blank row becomes an entry you can see and download.</p>
+<h2>Then</h2>
+<ol>
+<li><strong>Validate</strong> — the batch's addresses are submitted to the Email Validator as validation jobs of the chosen client (its quotas apply). The batch page shows progress and refreshes itself.</li>
+<li><strong>Review</strong> — filter by any category (valid, invalid, risky, unknown, temporary failure, typo, disposable, role, accept-all, suppressed, eligible…), see why each address got its result, decide typo suggestions, and include or exclude addresses that need review.</li>
+<li><strong>Download</strong> — every category as CSV, with the reasons.</li>
+<li><strong>Send</strong> — only after the <a href="{{ path('dashboard_operator_help_topic', {topic: 'sending'}) }}">compliance approval</a>, and in stages.</li>
+</ol>
+<p class="caveat">Validation results arrive as ordinary validation jobs of the client, so the client application may receive <code>validation.completed</code> webhooks for them (their external reference starts with <code>address-batch:</code>).</p>
+{% endblock %}

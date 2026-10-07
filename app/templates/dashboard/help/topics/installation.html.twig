@@ -1,0 +1,22 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>catto-mail runs on <strong>Ubuntu Server 26.04 LTS</strong> with a static public IPv4 address. The complete guide, from renting the server to the first sign-in, is <code>docs/production/VPS-INSTALL.md</code>.</p>
+<h2>What the installer did</h2>
+<ol>
+<li>Installed Podman, Git, Python, OpenSSL, nftables, rsync and the ACME client <code>lego</code> from Ubuntu.</li>
+<li>Created the service user <code>cattomail</code>, enabled lingering (its services run without a login and start at boot) and its Podman socket.</li>
+<li>Allowed unprivileged processes to listen on ports 25–1023 (<code>net.ipv4.ip_unprivileged_port_start=25</code>, persisted in <code>/etc/sysctl.d/60-catto-mail-ports.conf</code>) so the rootless service can hold 443 and 25. Ports below 25, including SSH, stay privileged.</li>
+<li>Checked out an exact release (a Git tag) into <code>/home/cattomail/catto-mail</code>.</li>
+<li>Created <code>infra/.env</code> with your answers and freshly generated secrets (mode 0600).</li>
+<li>Built the container images, installed the systemd units, created the networks, volumes and containers, initialised the database and ran the migrations.</li>
+<li>Started everything in <strong>HELD</strong> mode and checked its health.</li>
+</ol>
+<h2>Where things are</h2>
+<ul>
+<li>Code and tooling: <code>/home/cattomail/catto-mail</code>; every command is <code>infra/bin/smarthostctl prod &lt;command&gt;</code>, run as <code>cattomail</code>.</li>
+<li>Configuration and secrets: <code>infra/.env</code> (never in Git).</li>
+<li>Data: Podman volumes (<code>podman volume ls</code> as cattomail): database, DKIM keys and tables, Postfix queue, bounce spool, logs.</li>
+<li>Backups: <code>BACKUP_DIR</code> (default <code>infra/.generated/backups</code>) and, once configured, your off-host target.</li>
+</ul>
+<p>To change configuration: edit <code>infra/.env</code>, run <code>smarthostctl prod check</code>, then <code>smarthostctl prod recreate</code>.</p>
+{% endblock %}

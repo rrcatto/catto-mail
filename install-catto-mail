@@ -1,0 +1,384 @@
+#!/usr/bin/env bash
+# install-catto-mail — install catto-mail on a clean Ubuntu Server 26.04 LTS VPS.
+#
+# Run as root. It prepares the host (packages, the service user, lingering, the low-port
+# setting), installs an exact release (a Git tag) for the service user, writes the
+# configuration with freshly generated secrets, builds the container images, installs the
+# systemd units, creates and starts everything in HELD mode (nothing is delivered to the
+# Internet), checks the health, takes a first backup and prints how to sign in.
+#
+#   curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/vX.Y.Z/install-catto-mail
+#   sudo bash install-catto-mail --version vX.Y.Z
+#
+# or from a checkout of the release:  sudo ./install-catto-mail
+#
+# It asks for the few values it cannot know (host names, administrator address); pass
+# them as options to run unattended (--help). Re-running it is safe: finished steps are
+# checked and skipped, existing configuration and data are kept. It never enables live
+# delivery and never changes the firewall unless asked (--apply-firewall).
+# Guide: docs/production/VPS-INSTALL.md.
+set -uo pipefail
+
+TOTAL=21
+REPO_URL="https://github.com/rrcatto/catto-mail.git"
+SERVICE_USER="cattomail"
+VERSION=""
+WEB_HOST="" MTA_HOST="" BOUNCE_DOMAIN="" ADMIN_EMAIL="" MAIL_FROM="" PUBLIC_IP="" SSH_PORT=""
+ACME_EMAIL="" ACME_PROVIDER="" ACME_CREDENTIALS=""
+INTERACTIVE=true APPLY_FIREWALL=false STOP_AFTER=0 EGRESS=true
+LOG="/var/log/catto-mail-install.log"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGES=(podman git python3 openssl nftables uidmap slirp4netns passt dbus-user-session systemd-container
+          catatonit aardvark-dns netavark crun fuse-overlayfs curl ca-certificates iproute2 rsync openssh-client lego)
+
+usage() {
+  cat <<'USAGE'
+usage: sudo ./install-catto-mail [options]
+
+  --version vX.Y.Z        the release to install (default: the tag of this checkout)
+  --web-host NAME         public web/API host name, e.g. mail.example.com
+  --mta-host NAME         mail host name (EHLO and PTR), e.g. mta.example.com
+  --bounce-domain NAME    bounce domain, e.g. bounce.example.com
+  --admin-email ADDRESS   the administrator's mailbox (ADMIN sign-in)
+  --mail-from ADDRESS     sender of the sign-in mail, at a domain you will give a DKIM key
+  --public-ip ADDRESS     the server's public IPv4 (default: detected)
+  --ssh-port PORT         the SSH port the firewall keeps open (default: detected)
+  --acme-email ADDRESS    Let's Encrypt account address (optional; certificates later otherwise)
+  --acme-provider NAME    lego DNS provider (e.g. cloudflare) or "manual"
+  --acme-credentials FILE file with the DNS provider's API credentials (NAME=value lines)
+  --user NAME             the service user (default: cattomail)
+  --repo URL              where to fetch the release (default: the catto-mail GitHub repository)
+  --non-interactive       never ask; every required value must be given as an option
+  --apply-firewall        apply the generated nftables rules (keeps SSH open)
+  --stop-after N          stop after step N (diagnosis, staged installs)
+  --no-egress             local installer tests only: no container reaches the Internet
+                          (SMARTHOST_EGRESS_ENABLED=false), so reserved names such as *.test pass
+  -h, --help
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --version) VERSION="${2:-}"; shift 2 ;;
+    --web-host) WEB_HOST="${2:-}"; shift 2 ;;
+    --mta-host) MTA_HOST="${2:-}"; shift 2 ;;
+    --bounce-domain) BOUNCE_DOMAIN="${2:-}"; shift 2 ;;
+    --admin-email) ADMIN_EMAIL="${2:-}"; shift 2 ;;
+    --mail-from) MAIL_FROM="${2:-}"; shift 2 ;;
+    --public-ip) PUBLIC_IP="${2:-}"; shift 2 ;;
+    --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
+    --acme-email) ACME_EMAIL="${2:-}"; shift 2 ;;
+    --acme-provider) ACME_PROVIDER="${2:-}"; shift 2 ;;
+    --acme-credentials) ACME_CREDENTIALS="${2:-}"; shift 2 ;;
+    --user) SERVICE_USER="${2:-}"; shift 2 ;;
+    --repo) REPO_URL="${2:-}"; shift 2 ;;
+    --non-interactive) INTERACTIVE=false; shift ;;
+    --apply-firewall) APPLY_FIREWALL=true; shift ;;
+    --stop-after) STOP_AFTER="${2:-0}"; shift 2 ;;
+    --no-egress) EGRESS=false; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option $1 (--help)" >&2; exit 64 ;;
+  esac
+done
+
+# ------------------------------------------------------------------------- output
+STEP=0
+step() {  # step "Description": announce; the caller ends it with pass/warn
+  STEP=$((STEP + 1)); CURRENT="$1"
+  printf '[%02d/%02d] %s ' "$STEP" "$TOTAL" "$1"
+  local pad=$((62 - ${#1})); ((pad < 2)) && pad=2
+  printf '%.*s' "$pad" '..............................................................'
+  echo "== [$STEP/$TOTAL] $1" >>"$LOG"
+}
+pass() { echo " PASS${1:+  ($1)}"; stop_point; }
+warn() { echo " WARN  $1"; stop_point; }
+stop_point() { if [[ "$STOP_AFTER" -gt 0 && "$STEP" -ge "$STOP_AFTER" ]]; then echo "Stopped after step $STEP as requested."; exit 0; fi; }
+# fail <why> <how to fix> [safe-to-rerun: yes|no]
+fail() {
+  echo " FAIL"
+  echo
+  echo "What failed:  step $STEP, $CURRENT"
+  echo "Why:          $1"
+  echo "How to fix:   $2"
+  if [[ "${3:-yes}" == yes ]]; then
+    echo "Re-running:   safe. Fix the cause, then run the installer again with the same options; finished steps are skipped."
+  else
+    echo "Re-running:   read the guide's troubleshooting section first (docs/production/VPS-INSTALL.md)."
+  fi
+  echo "Full log:     $LOG (the last lines:)"
+  tail -n 15 "$LOG" | sed 's/^/    /'
+  exit 1
+}
+run() { "$@" >>"$LOG" 2>&1; }
+
+# Commands as the service user, in its own systemd session environment.
+as_user() {
+  local uid; uid="$(id -u "$SERVICE_USER")"
+  runuser -u "$SERVICE_USER" -- env -i HOME="/home/$SERVICE_USER" USER="$SERVICE_USER" LOGNAME="$SERVICE_USER" \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
+    XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+    bash -c "$1"
+}
+APP_DIR() { echo "/home/$SERVICE_USER/catto-mail"; }
+prod() { as_user "cd $(APP_DIR) && infra/bin/smarthostctl prod $*"; }
+
+ask() {  # ask VAR "Question" [default]
+  local var="$1" q="$2" def="${3:-}" val
+  [[ -n "${!var}" ]] && return 0
+  if [[ "$INTERACTIVE" != true ]]; then return 0; fi
+  read -r -p "$q${def:+ [$def]}: " val </dev/tty || true
+  printf -v "$var" '%s' "${val:-$def}"
+}
+valid_host() { [[ "$1" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; }
+valid_email() { [[ "$1" =~ ^[A-Za-z0-9._%+-]{1,64}@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; }
+# A globally routable IPv4 (pure bash: this runs before any package is installed).
+public_ipv4() {
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  local a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]} c=${BASH_REMATCH[3]} d=${BASH_REMATCH[4]}
+  ((a <= 255 && b <= 255 && c <= 255 && d <= 255)) || return 1
+  ((a == 0 || a == 10 || a == 127 || a >= 224)) && return 1
+  ((a == 100 && b >= 64 && b <= 127)) && return 1                         # carrier-grade NAT
+  ((a == 169 && b == 254)) && return 1                                    # link-local
+  ((a == 172 && b >= 16 && b <= 31)) && return 1                          # private
+  ((a == 192 && b == 168)) && return 1                                    # private
+  ((a == 192 && b == 0 && (c == 0 || c == 2))) && return 1                # IETF, TEST-NET-1
+  ((a == 198 && (b == 18 || b == 19))) && return 1                        # benchmarking
+  ((a == 198 && b == 51 && c == 100)) && return 1                         # TEST-NET-2
+  ((a == 203 && b == 0 && c == 113)) && return 1                          # TEST-NET-3
+  return 0
+}
+
+# ---------------------------------------------------------------------------- steps
+echo "catto-mail installer — log: $LOG"
+: >>"$LOG" 2>/dev/null || { echo "Run the installer as root (sudo)." >&2; exit 1; }
+echo "==== $(date -u +%FT%TZ) install-catto-mail $*" >>"$LOG"
+
+step "Checking that this is root on Ubuntu 26.04"
+[[ $EUID -eq 0 ]] || fail "the installer is not running as root" "run it with sudo, or as root" yes
+# Read in a subshell: os-release defines VERSION, which would overwrite --version.
+OS_ID="$(. /etc/os-release 2>/dev/null && echo "${ID:-}")"
+OS_VERSION="$(. /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}")"
+OS_NAME="$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-an unknown system}")"
+[[ "$OS_ID" == ubuntu && "$OS_VERSION" == 26.04 ]] \
+  || fail "this is $OS_NAME; catto-mail is installed and tested on Ubuntu Server 26.04 LTS" \
+          "use a fresh Ubuntu Server 26.04 LTS VPS" no
+[[ "$(uname -m)" =~ ^(x86_64|aarch64)$ ]] || fail "unsupported CPU architecture $(uname -m)" "use an x86_64 or arm64 VPS" no
+command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || fail "systemd is not running" "use a normal VPS, not a container" no
+pass "$OS_NAME, $(uname -m)"
+
+step "Checking memory, disk and the public address"
+mem_mb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
+disk_gb=$(( $(df --output=avail -B1 / | tail -n1) / 1000000000 ))
+[[ $mem_mb -ge 1800 ]] || fail "only ${mem_mb} MB of memory" "use a server with at least 2 GB (4 GB recommended; see the guide's sizing)" no
+[[ $disk_gb -ge 15 ]] || fail "only ${disk_gb} GB free on /" "use a server with at least 40 GB of disk" no
+if [[ -z "$PUBLIC_IP" ]]; then PUBLIC_IP="$(ip -4 route get 192.0.2.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"; fi
+if ! public_ipv4 "$PUBLIC_IP"; then
+  ask PUBLIC_IP "The server's public IPv4 address (the detected one, $PUBLIC_IP, is not public)" ""
+  public_ipv4 "$PUBLIC_IP" || fail "no public IPv4 address (${PUBLIC_IP:-none})" \
+    "catto-mail needs a static public IPv4 on the server itself; pass --public-ip if it is configured differently" no
+fi
+if [[ -z "$SSH_PORT" ]]; then SSH_PORT="$(ss -Htlnp 2>/dev/null | awk '/"sshd"/ {sub(/.*:/, "", $4); print $4; exit}')"; SSH_PORT="${SSH_PORT:-22}"; fi
+pass "${mem_mb} MB memory, ${disk_gb} GB free, IPv4 $PUBLIC_IP, SSH port $SSH_PORT"
+
+step "Updating the package lists"
+export DEBIAN_FRONTEND=noninteractive
+run apt-get update || fail "apt-get update failed" "check the server's network and DNS (ping archive.ubuntu.com), then re-run" yes
+pass
+
+step "Installing Podman, Git, Python, OpenSSL, nftables, lego"
+run apt-get install -y --no-install-recommends "${PACKAGES[@]}" \
+  || fail "the packages could not be installed" "see the log; usually a network or mirror problem. Re-run when it is fixed" yes
+pass "$(podman version --format '{{.Client.Version}}' 2>/dev/null | sed 's/^/Podman /')"
+
+step "Creating the service user $SERVICE_USER"
+if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+  run adduser --disabled-password --gecos 'catto-mail service' "$SERVICE_USER" || fail "adduser failed" "see the log" yes
+fi
+grep -q "^$SERVICE_USER:" /etc/subuid || run usermod --add-subuids 200000-265535 "$SERVICE_USER"
+grep -q "^$SERVICE_USER:" /etc/subgid || run usermod --add-subgids 200000-265535 "$SERVICE_USER"
+grep -q "^$SERVICE_USER:" /etc/subuid && grep -q "^$SERVICE_USER:" /etc/subgid \
+  || fail "the user has no subordinate UID/GID range (needed by rootless Podman)" "usermod --add-subuids 200000-265535 --add-subgids 200000-265535 $SERVICE_USER" yes
+pass "$(id "$SERVICE_USER" | cut -d' ' -f1)"
+
+step "Enabling lingering (start at boot without a login)"
+run loginctl enable-linger "$SERVICE_USER" || fail "loginctl enable-linger failed" "see the log" yes
+for _ in $(seq 1 30); do [[ -S "/run/user/$(id -u "$SERVICE_USER")/bus" ]] && break; sleep 1; done
+[[ -S "/run/user/$(id -u "$SERVICE_USER")/bus" ]] || fail "the user's systemd did not start" "loginctl user-status $SERVICE_USER; reboot and re-run" yes
+pass
+
+step "Allowing the service user to listen on ports 25 and 443"
+echo 'net.ipv4.ip_unprivileged_port_start=25' > /etc/sysctl.d/60-catto-mail-ports.conf
+run sysctl --system
+[[ "$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start)" -le 25 ]] \
+  || fail "the setting is not in force" "sysctl -w net.ipv4.ip_unprivileged_port_start=25; check /etc/sysctl.d" yes
+pass "persisted in /etc/sysctl.d/60-catto-mail-ports.conf"
+
+step "Starting the user's Podman socket"
+as_user "systemctl --user enable --now podman.socket" >>"$LOG" 2>&1 \
+  || fail "podman.socket could not be started for $SERVICE_USER" "see the log; check 'loginctl user-status $SERVICE_USER'" yes
+as_user "podman info --format '{{.Host.Security.Rootless}}'" 2>>"$LOG" | grep -q true \
+  || fail "rootless Podman does not work for $SERVICE_USER" "see the log (podman info as $SERVICE_USER)" yes
+pass "rootless"
+
+step "Fetching the release"
+if [[ -z "$VERSION" && -d "$SELF_DIR/.git" ]]; then VERSION="$(git -C "$SELF_DIR" describe --tags --exact-match 2>/dev/null || true)"; fi
+[[ -n "$VERSION" ]] || fail "no release given and this is not a tagged checkout" "pass --version vX.Y.Z (list: git ls-remote --tags $REPO_URL)" yes
+[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$VERSION is not a release tag (vX.Y.Z)" "install a release tag, never a branch" yes
+if [[ -d "$(APP_DIR)/.git" ]]; then
+  have="$(as_user "git -C $(APP_DIR) describe --tags --exact-match 2>/dev/null" || true)"
+  [[ "$have" == "$VERSION" ]] || fail "$(APP_DIR) already holds release ${have:-unknown}" \
+    "to change the release use the upgrade procedure (docs/production/VPS-INSTALL.md, upgrades)" no
+else
+  as_user "git clone --quiet --branch $VERSION --depth 1 $REPO_URL $(APP_DIR)" >>"$LOG" 2>&1 \
+    || fail "git clone of $VERSION failed" "check that the tag exists: git ls-remote --tags $REPO_URL" yes
+fi
+pass "$VERSION in $(APP_DIR)"
+
+step "Writing the configuration (infra/.env)"
+ENV_FILE="$(APP_DIR)/infra/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  pass "kept the existing configuration"
+else
+  ask WEB_HOST "Public web host name (dashboard and API), e.g. mail.example.com"
+  ask MTA_HOST "Mail host name (EHLO, PTR), e.g. mta.example.com" "${WEB_HOST:+mta.${WEB_HOST#*.}}"
+  ask BOUNCE_DOMAIN "Bounce domain, e.g. bounce.example.com" "${WEB_HOST:+bounce.${WEB_HOST#*.}}"
+  ask ADMIN_EMAIL "Administrator e-mail address"
+  ask MAIL_FROM "Sender of the sign-in mail" "${WEB_HOST:+no-reply@${WEB_HOST#*.}}"
+  for pair in "WEB_HOST:$WEB_HOST" "MTA_HOST:$MTA_HOST" "BOUNCE_DOMAIN:$BOUNCE_DOMAIN"; do
+    valid_host "${pair#*:}" || fail "${pair%%:*} '${pair#*:}' is not a valid host name" "give a fully qualified lower-case name, e.g. mail.example.com" yes
+  done
+  [[ "$BOUNCE_DOMAIN" != "$WEB_HOST" ]] || fail "the bounce domain must differ from the web host name" "use e.g. bounce.example.com" yes
+  valid_email "$ADMIN_EMAIL" || fail "'$ADMIN_EMAIL' is not an e-mail address" "pass --admin-email" yes
+  valid_email "$MAIL_FROM" || fail "'$MAIL_FROM' is not an e-mail address" "pass --mail-from" yes
+  [[ -z "$ACME_EMAIL" ]] || valid_email "$ACME_EMAIL" || fail "'$ACME_EMAIL' is not an e-mail address" "pass --acme-email" yes
+  [[ "$ACME_PROVIDER" =~ ^[a-z0-9._-]{0,40}$ ]] || fail "'$ACME_PROVIDER' is not a lego DNS provider name" "see: lego dnshelp" yes
+  [[ -z "$ACME_CREDENTIALS" || "$ACME_CREDENTIALS" =~ ^/[A-Za-z0-9._/-]+$ ]] \
+    || fail "the credentials path must be absolute, without spaces" "e.g. /home/$SERVICE_USER/acme-dns.env" yes
+  as_user "cd $(APP_DIR) && infra/bin/smarthostctl prod init-env" >>"$LOG" 2>&1 || fail "init-env failed" "see the log" yes
+  tag="${VERSION#v}"
+  as_user "cd $(APP_DIR) && python3 - <<'PY'
+import re
+path = 'infra/.env'
+values = {
+    'PROXY_SERVER_NAME': '$WEB_HOST', 'SMARTHOST_PUBLIC_BASE_URL': 'https://$WEB_HOST', 'POSTFIX_MYHOSTNAME': '$MTA_HOST',
+    'SMARTHOST_BOUNCE_DOMAIN': '$BOUNCE_DOMAIN', 'SMARTHOST_PUBLIC_IPV4': '$PUBLIC_IP', 'APP_ADMIN_EMAIL': '$ADMIN_EMAIL',
+    'APP_MAIL_FROM': '$MAIL_FROM', 'SMARTHOST_IMAGE_TAG': '$tag', 'SMARTHOST_SSH_PORT': '$SSH_PORT',
+    'VALIDATOR_SMTP_HELO_HOSTNAME': '$MTA_HOST', 'VALIDATOR_SMTP_MAIL_FROM': 'validator@$BOUNCE_DOMAIN',
+    'ACME_EMAIL': '$ACME_EMAIL', 'ACME_DNS_PROVIDER': '$ACME_PROVIDER', 'ACME_CREDENTIALS_FILE': '$ACME_CREDENTIALS',
+    'SMARTHOST_EGRESS_ENABLED': '$EGRESS',
+}
+text = open(path).read()
+for key, value in values.items():
+    text, n = re.subn(rf'^{key}=.*$', f'{key}={value}', text, count=1, flags=re.M)
+    if n != 1:
+        raise SystemExit(f'{key} missing from {path}')
+open(path, 'w').write(text)
+PY" >>"$LOG" 2>&1 || fail "the configuration could not be written" "see the log" yes
+  chmod 600 "$ENV_FILE"
+  pass "secrets generated; mode 0600"
+fi
+if [[ -n "$ACME_CREDENTIALS" && -f "$ACME_CREDENTIALS" ]]; then
+  chown "$SERVICE_USER": "$ACME_CREDENTIALS"; chmod 600 "$ACME_CREDENTIALS"
+fi
+
+step "Checking the configuration"
+prod check >>"$LOG" 2>&1 || fail "the configuration does not satisfy the production rules" \
+  "run: sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod check   (it names each problem); edit $ENV_FILE" yes
+pass
+
+step "Building the container images (several minutes)"
+tag="$(grep -E '^SMARTHOST_IMAGE_TAG=' "$ENV_FILE" | cut -d= -f2)"
+pg_image="$(sed -n 's/^PG_IMAGE=//p' "$(APP_DIR)/infra/podman/smarthost-production.sh.in")"
+images_present=true
+for img in localhost/smarthost-{postfix,opendkim,app,nginx,validator,delivery}:"$tag" "$pg_image"; do
+  as_user "podman image exists $img" || images_present=false
+done
+if [[ $images_present == true ]]; then
+  pass "images :$tag already built"
+else
+  prod build >>"$LOG" 2>&1 || fail "an image build failed" "see the log (network to the image registries? disk space?)" yes
+  pass "images :$tag"
+fi
+
+step "Installing the certificates"
+if as_user "podman secret exists smarthost-proxy-tls-cert"; then
+  pass "kept the installed certificates"
+elif [[ -n "$ACME_EMAIL" && -n "$ACME_PROVIDER" && "$ACME_PROVIDER" != manual ]] && prod "tls acme issue" >>"$LOG" 2>&1; then
+  pass "Let's Encrypt certificate obtained"
+else
+  prod "tls self-signed-bootstrap" >>"$LOG" 2>&1 || fail "no certificate could be installed" "see the log" yes
+  warn "a temporary self-signed certificate; replace it with Let's Encrypt (System setup › TLS)"
+fi
+
+step "Installing the systemd units and creating the containers"
+prod install >>"$LOG" 2>&1 || fail "prod install failed" "see the log; the host checks it runs first name the problem" yes
+pass "units linked into the boot target"
+
+step "Starting catto-mail in HELD mode"
+prod start >>"$LOG" 2>&1 || fail "the services did not start" "run: sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status; then prod logs <component>" yes
+grep -q '^SMARTHOST_LIVE_DELIVERY_ENABLED=false' "$ENV_FILE" || fail "live delivery is enabled in the configuration" "set SMARTHOST_LIVE_DELIVERY_ENABLED=false; live delivery is enabled later, deliberately" no
+pass "database initialised, migrations applied"
+
+step "Checking the health of every component"
+if ! as_user "cd $(APP_DIR) && infra/.generated/podman/smarthost-production.sh wait-healthy 300" >>"$LOG" 2>&1; then
+  fail "not every container became healthy" "sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status, then prod logs <component>" yes
+fi
+pass "$(as_user "podman ps --filter label=smarthost.topology=production --format '{{.Names}}'" | wc -l) containers healthy"
+
+step "Running the host checks"
+if prod "preflight --section host --section runtime --section exposure --quiet" >>"$LOG" 2>&1; then pass; else
+  warn "some host checks failed: see System setup › Diagnostics after signing in"; fi
+
+step "Taking the first backup"
+if prod "backup --scheduled" >>"$LOG" 2>&1; then pass "$(prod backup-status 2>/dev/null | sed -n 's/^last_path: //p')"; else
+  warn "backup not off-host yet (configure BACKUP_OFFHOST_TARGET; System setup › Backups)"; fi
+
+step "Preparing the firewall rules"
+FW="/home/$SERVICE_USER/catto-mail-firewall.nft"
+prod firewall >"$FW" 2>>"$LOG" || fail "the firewall rules could not be generated" "see the log" yes
+if [[ "$APPLY_FIREWALL" == true ]]; then
+  grep -q "tcp dport { $SSH_PORT, 25, 443 }" "$FW" || fail "the generated rules do not keep SSH port $SSH_PORT open" "pass --ssh-port" yes
+  run nft -f "$FW" || fail "nft could not apply the rules" "see the log" yes
+  grep -q catto_mail /etc/nftables.conf 2>/dev/null || { echo "include \"$FW\"" >> /etc/nftables.conf; }
+  run systemctl enable nftables
+  pass "applied; SSH port $SSH_PORT, 25 and 443 open"
+else
+  warn "generated $FW, not applied (review it, then: nft -f $FW)"
+fi
+
+step "Checking automatic start after a reboot"
+linger="$(loginctl show-user "$SERVICE_USER" -p Linger --value 2>/dev/null)"
+link="/home/$SERVICE_USER/.local/share/systemd/user/default.target.wants/smarthost.service"
+[[ "$linger" == yes && -L "$link" ]] || fail "catto-mail would not start at boot (linger=$linger, boot link $( [[ -L $link ]] && echo present || echo missing))" \
+  "loginctl enable-linger $SERVICE_USER; then as $SERVICE_USER: infra/bin/smarthostctl prod install" yes
+pass "lingering on, smarthost.service in the boot target"
+
+step "Creating the first sign-in link"
+LINK="$(prod "admin-link" 2>>"$LOG" | sed -n 's/^sign_in_url: //p')"
+[[ -n "$LINK" ]] && pass || warn "run later: sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod admin-link"
+
+WEB="$(grep -E '^PROXY_SERVER_NAME=' "$ENV_FILE" | cut -d= -f2)"
+ADMIN="$(grep -E '^APP_ADMIN_EMAIL=' "$ENV_FILE" | cut -d= -f2)"
+cat <<DONE
+
+Catto-mail installation completed.
+
+Web application:    https://$WEB/
+Administrator:      $ADMIN
+Release:            $VERSION
+Live bulk delivery: HELD (nothing is delivered to the Internet until you enable it)
+
+First sign-in (valid 15 minutes, one use; make a new one with
+  sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod admin-link):
+  ${LINK:-(not created; see above)}
+
+Before the link works, $WEB must resolve to $PUBLIC_IP (an A record at your DNS provider).
+Until Let's Encrypt is set up the browser warns about the temporary certificate.
+
+Next step:
+  Open https://$WEB/ and complete the Administration Setup Wizard
+  (DNS, PTR, certificates, DKIM, tests). Guide: docs/production/VPS-INSTALL.md
+DONE
+if [[ "$(grep -E '^SMARTHOST_EGRESS_ENABLED=' "$ENV_FILE" | cut -d= -f2)" == false ]]; then
+  echo "Note: installed with --no-egress (a local test installation): no container can reach the Internet."
+fi

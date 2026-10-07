@@ -1,0 +1,20 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% set b = backup.value ?? {} %}
+<p>A backup holds everything that cannot be recreated: the database, the configuration and its secrets (<code>infra/.env</code>, including the encryption keys), the DKIM keys and tables, and the TLS certificates.
+Backups run daily by default. A backup that stays on this server does not protect you from losing the server: configure an off-host copy. {{ ui.help('backups') }}</p>
+<table class="kv dense"><tbody>
+<tr><th scope="row">Last successful backup</th><td>{{ b.last_success_at ?? 'never' }}{% if b.last_path is defined %} <small class="muted">{{ b.last_path }}</small>{% endif %}</td></tr>
+<tr><th scope="row">Last attempt</th><td>{{ b.last_attempt_at ?? '—' }} {{ b.last_result ?? '' }}</td></tr>
+<tr><th scope="row">Contents</th><td>{{ (b.contents ?? [])|join(', ') ?: '—' }}</td></tr>
+<tr><th scope="row">Encrypted</th><td>{{ b.encrypted is defined ? (b.encrypted ? 'yes' : 'no (set BACKUP_ENCRYPTION_PASSPHRASE_FILE)') : '—' }}</td></tr>
+<tr><th scope="row">Off-host copy</th><td>{% if b.offhost_configured ?? false %}{{ b.offhost ? 'copied' : 'FAILED' }} to {{ b.offhost_target }}{% else %}<span class="res res-warn">WARN</span> backup is not off-host (set <code>BACKUP_OFFHOST_TARGET</code>){% endif %}</td></tr>
+<tr><th scope="row">Schedule</th><td>{{ b.schedule ?? '—' }} · keeping {{ b.keep ?? '—' }}</td></tr>
+<tr><th scope="row">Restore rehearsal</th><td>{{ b.restore_rehearsal_at ?? 'never' }} {{ b.restore_rehearsal_result ?? '' }}</td></tr>
+</tbody></table>
+{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
+<form method="post" action="{{ path('dashboard_operator_system_request') }}" class="filters">{{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ path('dashboard_operator_setup_step', {step: 'backups'}) }}">
+    <button type="submit" name="action" value="backup.run">Back up now</button>
+    <button type="submit" name="action" value="backup.restore_rehearsal" class="secondary">Rehearse a restore</button>
+</form>
+<p class="muted">The rehearsal restores the newest backup into a temporary database next to the real one, checks it and deletes it again; production data is not touched.</p>
+{% endif %}

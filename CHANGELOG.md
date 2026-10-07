@@ -2,9 +2,96 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.10.
+the *specification* version, which is 2.11.
 
 ## [Unreleased]
+
+## [0.1.9] - 2026-10-07
+
+Phase 10, operator self-service (specification 2.11, owner instruction): someone who did not
+write the software installs catto-mail on a clean Ubuntu Server 26.04 LTS VPS with one command and
+is guided through configuring, testing, understanding and operating it in the web application.
+The production safety model is unchanged; nothing is sent without a deliberate operator action.
+Software version 0.1.9 (Symfony application, Go delivery daemon, validator, production image
+tag). The first GitHub Release: the release page offers the source as zip and tar.gz archives with
+SHA-256 checksums; the installer installs the Git tag `v0.1.9`.
+
+### Added
+- **Installer** `install-catto-mail` (run as root): 21 numbered PASS/WARN/FAIL steps from the OS
+  check to a first sign-in link. It installs an exact release tag and uses Ubuntu packages only;
+  it is idempotent and safe to re-run, starts in HELD mode, and never changes the firewall unless
+  asked. `--no-egress` is for local tests only.
+- **Installer test** `smarthostctl test installer [--keep] [--with-upgrade]`
+  (`infra/tests/installer-test.sh`): the installer in a systemd container of Ubuntu Server 26.04
+  LTS with rootless Podman inside. It covers the 21 steps, a second run, sign-in on port 443,
+  the host agent, the web emergency stop, a restart, and optionally upgrade and rollback.
+- **Bootstrap sign-in:** `smarthostctl prod admin-link` and `smarthost:admin:login-link`
+  (ADMIN-only, 15 minutes, one use, audited).
+- **Host agent** (`<instance>-host-agent.service`, `infra/lib/smarthost_agent.py`):
+  - host facts and host-side checks every minute, and the production preflight hourly;
+  - carries out the dashboard's requests (`system_requests`) with the existing audited tooling;
+  - console protocol `smarthost:system:agent`.
+- **Setup wizard** (Operator › System setup, 19 steps): resumable, opened after sign-in until
+  complete, then kept available.
+- **Diagnostics** (Operator › Diagnostics) with a test-result history (`system_checks`,
+  `system_check_runs`); the **system health dashboard**; the delivery mode
+  (HELD/LIVE/PAUSED/STOPPED) on every operator page.
+- **Emergency stop:** *STOP SENDING EMAIL NOW* sets `delivery_controls`, which the delivery daemon
+  reads within seconds, and the host agent holds the Postfix queue. `prod pause/resume` set the
+  same flag. Live activation can be requested from the dashboard with typed confirmations; it
+  still runs the activation preflight.
+- **Let's Encrypt** with DNS-01 through `lego` (`prod tls acme issue|renew|ensure|status`,
+  `<instance>-tls-renew.timer`, `ACME_*` variables), plus `tls self-signed-bootstrap`.
+- **Backups:** `<instance>-backup.timer` and `prod backup --scheduled` (AES-256 encryption,
+  pruning, off-host rsync, recorded status), `prod backup-status`, `prod restore-rehearsal`;
+  `prod restore` accepts encrypted backups. New `BACKUP_*` variables.
+- **Logs:** `prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent [n|-f]`.
+- **Help and tutorials** (Operator › Help): 35 topics written from the implementation (including
+  Postfix, the delivery daemon, the validator and the web application in depth), linked from
+  every check.
+- **Address batches** (Operator › Address batches, `SYSTEM.ADDRESS_BATCH.MANAGE`):
+  - up to 10,000 addresses (TXT or CSV with column choice), with a preview and cleanup;
+  - duplicates and malformed rows are kept and reported, with provenance;
+  - validation through ordinary validation jobs, with live progress;
+  - separate state dimensions (validation result and flags, eligibility, consent, delivery,
+    engagement), typo and review decisions;
+  - CSV reports for every category;
+  - staged sends (seed, controlled, rollout, full) behind the compliance approval, with send
+    reports and per-address timelines.
+- **Re-permission:** the public page `/p/{token}` (confirm, unsubscribe from this list, global
+  opt-out), RFC 8058 one-click, and the webhook event `repermission.responded`.
+- **Documentation:** `docs/production/VPS-INSTALL.md` (primary), `components.md`,
+  `architecture.md`, `docs/integration/ctnlist.md`; the README is restructured.
+- **Permissions:** `SYSTEM.SETUP.MANAGE`, `SYSTEM.DIAGNOSTICS.RUN`, `SYSTEM.ADDRESS_BATCH.MANAGE`
+  (ADMIN); `PLATFORM.SYSTEM.VIEW`, `PLATFORM.HELP.VIEW` (OPERATOR).
+- **Schema:** migration `Version20261010000100` adds nine tables (48 in total).
+
+### Changed
+- The production host target is Ubuntu Server 26.04 LTS (the preflight warns on others).
+- The nginx access log also redacts re-permission tokens and dashboard sign-in tokens.
+- The generated host firewall allows the service user outbound SSH (off-host backups).
+- The renderer substitutes `@DOTENV@` in unit templates. The topology script starts and stops
+  the host agent and the backup and certificate timers with the containers.
+- `upload_max_filesize` is 11 MiB, for batch files.
+- OpenAPI 1.0.0-draft.9 (`repermission.responded`); status vocabulary 2.6.0.
+- A complete host-agent report (host checks and every preflight section) retires agent checks
+  it no longer contains, e.g. DNS checks of a renamed host; their history stays. The app role
+  gains DELETE on `system_checks` (schema.md §6, footnote 5).
+
+### Fixed
+- `smarthostctl prod build` now fetches the pinned PostgreSQL image. The topology creates
+  containers with `--pull never`, so on a clean host `prod install` stopped at "image not known".
+  The installer test on Ubuntu 26.04 found this.
+- `prod upgrade` no longer refuses releases that change database grants. The pre-upgrade
+  runtime check compared the live grants with the new checkout's matrix; it now skips only
+  that comparison (`preflight --pre-upgrade`). The post-upgrade check compares in full.
+  Found by an upgrade test on the simulated VPS.
+- `prod logs` also shows what containers write to stderr (PHP-FPM, nginx errors), so piping
+  it through `grep` sees every line.
+- Units that use the service user's own Podman API socket (`CONTAINER_HOST`) are now treated as
+  on a local engine (`smarthostctl-prod`, preflight `Host.podman_remote`). The host agent's
+  systemd checks and the certificate-renewal timer's nginx restart had taken the WSL path and
+  failed on a real host.
 
 ## [0.1.8] - 2026-10-07
 

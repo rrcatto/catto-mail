@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.8
-  summary: Email validation and tracked delivery API (specification 2.10 contract).
+  version: 1.0.0-draft.9
+  summary: Email validation and tracked delivery API (specification 2.11 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
     `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.10), which wins on
@@ -789,6 +789,7 @@ components:
         - message.hard_bounced
         - message.complained
         - webhook.test
+        - repermission.responded
 
     # ---- validation -------------------------------------------------------
     ValidationAddressInput:
@@ -1232,12 +1233,40 @@ components:
         data:
           description: >-
             validation.* carries a ValidationJob; send.* carries a SendJob;
-            message.* carries a MessageWebhookData; webhook.test carries an empty object.
+            message.* carries a MessageWebhookData; repermission.responded carries a
+            RepermissionWebhookData; webhook.test carries an empty object.
           oneOf:
             - {$ref: '#/components/schemas/ValidationJob'}
             - {$ref: '#/components/schemas/SendJob'}
             - {$ref: '#/components/schemas/MessageWebhookData'}
+            - {$ref: '#/components/schemas/RepermissionWebhookData'}
             - {type: object, additionalProperties: false, maxProperties: 0}
+
+    RepermissionWebhookData:
+      type: object
+      additionalProperties: false
+      description: >-
+        A recipient answered a re-permission message sent from an administrator address batch
+        (specification 2.11). The subscription itself belongs to your application: apply the
+        answer to your own subscriber record. `unsubscribed` is your list's unsubscribe and
+        creates no Smarthost suppression; `global_opt_out` means the recipient asked for no mail
+        through this Smarthost at all, and Smarthost has already recorded a global suppression.
+        Answers can change (confirmed after unsubscribed, or the reverse) until a global opt-out,
+        which is final; apply the newest `responded_at`.
+      required: [batch, entry_id, address, response, responded_at]
+      properties:
+        batch:
+          type: object
+          additionalProperties: false
+          required: [id, name, list_id]
+          properties:
+            id: {$ref: '#/components/schemas/Uuid'}
+            name: {type: string, maxLength: 200}
+            list_id: {type: string, maxLength: 100}
+        entry_id: {$ref: '#/components/schemas/Uuid'}
+        address: {type: string, maxLength: 320, description: The address as normalised by Smarthost (D-18).}
+        response: {type: string, enum: [confirmed, unsubscribed, global_opt_out]}
+        responded_at: {$ref: '#/components/schemas/Timestamp'}
 
     MessageWebhookData:
       type: object

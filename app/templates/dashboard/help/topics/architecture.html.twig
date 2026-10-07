@@ -1,0 +1,35 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<div class="flow">                    INTERNET
+                 |            |
+          HTTPS 443        SMTP 25 (bounces, complaints)
+                 |            |
+     systemd ingress socket (holds both ports; real client addresses)
+                 |            |
+               nginx Frontend --(PROXY protocol)--> Postfix :25
+                 |
+     Web Application (Symfony) ---------> PostgreSQL <--------+------------------+
+                                             ^                |                  |
+                                             |         Email Validator    Delivery Daemon --587--> Postfix --milter--> OpenDKIM
+                                     Webhook Worker           |                  ^                    |
+                                             |           DNS (and MX           reads Postfix log,     +--25--> recipients' mail servers
+                                             v            only if probing)    queue snapshots, bounce spool
+                                      client systems (HTTPS)</div>
+<p>Only nginx and Postfix are reachable from the Internet. The database, the web application's PHP processes and the workers are on an internal network with no Internet route;
+Postfix, the validator, the webhook worker and the web application (for DNS) also join an egress network to reach the Internet.</p>
+<h2>What happens, step by step</h2>
+<ol>
+<li><strong>An address list is uploaded</strong> — through the API (<code>POST /v1/validation-jobs</code>) or as an <a href="{{ path('dashboard_operator_help_topic', {topic: 'uploading-lists'}) }}">address batch</a>. The web application stores a validation job and one row per address, counts them against the client's quotas, and wakes the validator. Nothing is checked yet.</li>
+<li><strong>An address is validated</strong> — the validator claims a chunk of addresses (a lease, so a crashed worker's work returns to the pool), then for each: normalises it, checks syntax, looks for typos, looks up the domain's mail servers (MX, null MX, A/AAAA fallback), checks the disposable and role lists, optionally probes the mailbox over SMTP, and classifies the evidence. Temporary DNS or SMTP failures are retried with growing delays before a final "temporary failure" verdict. The job is completed and the client is notified by webhook.</li>
+<li><strong>A send job is created</strong> — the client creates a job (sender, class, tracking options), adds recipients with their fully rendered content in batches of up to 500, and submits it. The web application checks the sending domain, the quotas and the limits, then queues the job and wakes the delivery daemon.</li>
+<li><strong>The Go daemon picks it up</strong> — the delivery daemon claims the queued job with a lease (only for active or throttled clients, and only in LIVE mode), creates one message per recipient exactly once, and checks every recipient against the suppression list: suppressed recipients get no message.</li>
+<li><strong>Postfix accepts the message</strong> — right before each submission the daemon checks suppressions again, builds the message (VERP return path <code>bounce+&lt;token&gt;@&lt;bounce domain&gt;</code>, tracking pixel and links if requested, List-Unsubscribe headers for subscription mail) and submits it to Postfix on port 587, authenticated and encrypted, at the paced rate. Postfix answers with a queue id: the message is "submitted". The daemon's responsibility ends here.</li>
+<li><strong>OpenDKIM signs it</strong> — Postfix passes the message through OpenDKIM, which adds the <code>DKIM-Signature</code> for the sending domain with the active selector.</li>
+<li><strong>Postfix contacts the recipient's mail server</strong> — it looks up the MX and connects on port 25 (with TLS when the receiver offers it).</li>
+<li><strong>The recipient's server accepts or rejects it</strong> — Postfix logs the answer. The daemon reads the log: accepted → "remote accepted" (not "delivered to the inbox"); permanently rejected → hard bounce; temporarily refused → deferred, and Postfix retries for up to five days. A message whose fate cannot be found (its queue entry vanished without a logged outcome) becomes "outcome unknown", never "delivered".</li>
+<li><strong>A later bounce arrives</strong> — some servers accept first and send a bounce message (DSN) later, to the VERP return path. It reaches port 25, nginx passes it to Postfix, Postfix drops it into the bounce spool, and the daemon parses it, matches it to the exact message by its token, records the bounce and, for a recipient-specific permanent failure, creates a global suppression. Complaints (ARF reports from feedback loops) take the same path.</li>
+<li><strong>An open is recorded</strong> — the message's tracking image <code>/t/o/&lt;token&gt;.gif</code> is fetched. The web application records "open recorded" (at most once a minute per message, within the tracking retention) and always answers with the same tiny image.</li>
+<li><strong>A link click is recorded</strong> — the rewritten link <code>/t/c/&lt;token&gt;/&lt;n&gt;</code> is followed; the web application records the click and redirects only to the link's stored original address.</li>
+<li><strong>A webhook is sent</strong> — events the client subscribed to (job finished, hard bounce, complaint, re-permission answer) are written to an outbox in the same transaction as the event. The webhook worker sends each, signed with the endpoint's secret, and retries for about a day; the client de-duplicates by the event id.</li>
+</ol>
+{% endblock %}

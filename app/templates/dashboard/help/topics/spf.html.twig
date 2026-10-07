@@ -1,0 +1,8 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p><strong>SPF</strong> lets a domain list the servers allowed to send mail with it as the <em>envelope sender</em> (the hidden "return path", not the visible From). Receivers check the connecting IP against it.</p>
+<p>catto-mail's envelope sender is always on the <strong>bounce domain</strong> (<code>bounce+&lt;token&gt;@bounce.example.com</code>), so the SPF record that matters is the bounce domain's:</p>
+<pre class="cmd">bounce.example.com.  TXT  "v=spf1 ip4:203.0.113.10 -all"</pre>
+<p>Add the same for the mail host name (receivers also check the EHLO name). <code>-all</code> says "no other server may use this domain".</p>
+<p>For DMARC, SPF counts only if the envelope domain shares the organisational domain with the visible From. With a bounce domain under your own organisation (<code>bounce.example.org</code> for From <code>news@example.org</code>) it aligns; otherwise DKIM provides the alignment, which is why DKIM is essential.</p>
+{% endblock %}

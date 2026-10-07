@@ -24,7 +24,8 @@ FILE defaults to $SMARTHOST_DOTENV or infra/.env, DIR to $SMARTHOST_GENERATED or
 infra/.generated (smarthostctl sets both for a production rehearsal).
 
 Templates may reference only contract variables as ${VAR}, plus @REPO@ (the
-repository path), @GENERATED@ (the output directory) and @TOPOLOGY@ (the
+repository path), @GENERATED@ (the output directory), @DOTENV@ (the configuration
+file rendered from; production units pass it to the host tooling) and @TOPOLOGY@ (the
 topology script the systemd units drive: smarthost-pod.sh in development and test,
 smarthost-production.sh in production). Anything else is an error, so no
 undocumented variable can reach a service. In shell templates (*.sh.in) every
@@ -385,7 +386,7 @@ def render(path: Path, out: Path) -> None:
 
             text = placeholder.sub(substitute, text)
             text = (text.replace("@REPO@", quote(str(ROOT))).replace("@GENERATED@", quote(str(out)))
-                    .replace("@TOPOLOGY@", topology))
+                    .replace("@DOTENV@", quote(str(path.resolve()))).replace("@TOPOLOGY@", topology))
             target = out_dir / target_name
             target.write_text(text, encoding="utf-8")
             if shell:

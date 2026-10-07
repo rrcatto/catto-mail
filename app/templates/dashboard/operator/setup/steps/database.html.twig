@@ -1,0 +1,2 @@
+<p>PostgreSQL holds all of catto-mail's state: clients, jobs, messages, events, suppressions, audit. Each component connects with its own database role that may read and change only the tables it needs; nothing outside the server can reach the database.</p>
+<p>The checks below confirm the database runs, the schema matches this release (migrations), and every role has exactly the rights in the documented grant matrix.</p>

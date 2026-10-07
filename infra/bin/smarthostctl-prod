@@ -22,6 +22,7 @@ GEN="$SMARTHOST_GENERATED"
 RENDER=(python3 "$REPO/infra/lib/smarthost_render.py")
 PREFLIGHT=(python3 "$REPO/infra/lib/smarthost_preflight.py")
 SEEDTEST=(python3 "$REPO/infra/lib/smarthost_seedtest.py")
+AGENT=(python3 "$REPO/infra/lib/smarthost_agent.py")
 TOPO="$GEN/podman/smarthost-production.sh"
 HELPER="$REPO/infra/bin/smarthost-machine-helper.sh"
 # image name | build context | Containerfile | target (no Mailpit/fake SMTP in production)
@@ -37,7 +38,7 @@ SERVICES=(postgres opendkim postfix symfony-app webhook-worker nginx validator d
 
 die() { echo "smarthostctl prod: $*" >&2; exit 1; }
 say() { echo "smarthostctl prod: $*"; }
-envval() { [[ -f "$DOTENV" ]] || die "$DOTENV missing (smarthostctl prod init-env)"; grep -E "^$1=" "$DOTENV" | head -n1 | cut -d= -f2-; }
+envval() { [[ -f "$DOTENV" ]] || die "$DOTENV missing (smarthostctl prod init-env)"; grep -m1 -E "^$1=" "$DOTENV" | cut -d= -f2-; }
 I() { envval SMARTHOST_INSTANCE; }
 require_production() {
   [[ "$(envval SMARTHOST_ENV)" == production ]] || die "$DOTENV is not a production configuration (SMARTHOST_ENV=$(envval SMARTHOST_ENV)); use the development commands of smarthostctl"
@@ -45,7 +46,14 @@ require_production() {
 render() { "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" >/dev/null; }
 topo() { [[ -x "$TOPO" ]] || render; "$TOPO" "$@"; }
 default_instance() { [[ "$(I)" == smarthost && "$GEN" == "$REPO/infra/.generated" ]]; }
-local_engine() { [[ "$(podman info --format '{{.Host.ServiceIsRemote}}')" != true ]]; }
+# The engine is local when Podman runs on this host. The production units (host agent, backup,
+# certificate renewal) talk to the user's own API socket on purpose (CONTAINER_HOST, so the
+# containers they restart do not belong to the unit's cgroup); Podman then calls itself remote,
+# but that socket is this host's.
+local_engine() {
+  [[ -n "${XDG_RUNTIME_DIR:-}" && "${CONTAINER_HOST:-}" == "unix://$XDG_RUNTIME_DIR/podman/podman.sock" ]] && return 0
+  [[ "$(podman info --format '{{.Host.ServiceIsRemote}}')" != true ]]
+}
 units_installed() { default_instance && local_engine && [[ -e "$HOME/.local/share/systemd/user/smarthost.service" ]]; }
 
 # Run the machine helper in the Podman engine host's systemd namespace: directly on
@@ -55,7 +63,7 @@ machine() {
   if local_engine; then "$HELPER" "$@"; return; fi
   local wsl=/mnt/c/Windows/System32/wsl.exe uri name user
   [[ -x "$wsl" ]] || die "remote Podman engine is not a WSL Podman machine; run smarthostctl prod on the engine host"
-  uri="$(podman system connection list --format '{{if .Default}}{{.URI}}{{end}}' | grep -v '^$' | head -n1)"
+  uri="$(podman system connection list --format '{{if .Default}}{{.URI}}{{end}}' | grep -m1 -v '^$')"
   name="$(sed -E 's#.*/podman-sockets/([^/]+)/.*#\1#' <<<"$uri")"
   user="$(podman info --format '{{.Store.GraphRoot}}' | sed -E 's#^/home/([^/]+)/.*#\1#')"
   "$wsl" -d "$name" -u "$user" --cd / -- /usr/local/bin/enterns "$HELPER" "$@"
@@ -102,7 +110,7 @@ audit() { console smarthost:ops:record "$1" --operator "$OPERATOR" --note "$NOTE
 
 # ------------------------------------------------------------------- lifecycle
 cmd_build() {
-  local tag name ctx file target args
+  local tag name ctx file target args pg
   tag="$(envval SMARTHOST_IMAGE_TAG)"
   [[ -n "$tag" ]] || die "SMARTHOST_IMAGE_TAG is empty"
   for entry in "${IMAGES[@]}"; do
@@ -112,6 +120,11 @@ cmd_build() {
     [[ -n "$target" ]] && args+=(--target "$target")
     podman build "${args[@]}" "$REPO/$ctx" >/dev/null && echo "built localhost/smarthost-$name:$tag"
   done
+  # The topology runs PostgreSQL from its pinned upstream image and creates every container with
+  # --pull never, so a new host fetches it here, explicitly (the tag is the topology's own).
+  pg="$(sed -n 's/^PG_IMAGE=//p' "$REPO/infra/podman/smarthost-production.sh.in")"
+  [[ -n "$pg" ]] || die "PG_IMAGE not found in the production topology"
+  if podman image exists "$pg"; then echo "present $pg"; else podman pull -q "$pg" >/dev/null && echo "pulled $pg"; fi
 }
 
 # Live delivery may only be (re)created after the activation preflight passes.
@@ -162,7 +175,8 @@ cmd_status() {
   podman ps -a --filter "label=smarthost.instance=$i" --filter label=smarthost.topology=production \
     --format '{{.Names}}\t{{.ID}}\t{{.Status}}\t{{.Ports}}' | sort
   if [[ "$(podman container inspect --format '{{.State.Running}}' "$i-postfix" 2>/dev/null)" == true ]]; then
-    podman exec "$i-postfix" smarthost-postfix-control status | head -n 1
+    # sed reads the whole output: with `head` the command can die of SIGPIPE under pipefail
+    podman exec "$i-postfix" smarthost-postfix-control status | sed -n 1p
   fi
 }
 
@@ -205,8 +219,106 @@ cmd_tls() {
       openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=$proxy" -addext "subjectAltName=DNS:$proxy" \
         -keyout "$dir/proxy.key" -out "$dir/proxy.crt" 2>/dev/null
       cmd_tls set "$dir/proxy.crt" "$dir/proxy.key" "$dir/postfix.crt" "$dir/postfix.key" ;;
-    *) die "usage: tls set <proxy-cert> <proxy-key> <postfix-cert> <postfix-key> | tls self-signed (rehearsal only)" ;;
+    self-signed-bootstrap)
+      # The installer's temporary certificate (specification 2.11): lets nginx and Postfix start
+      # before DNS and Let's Encrypt are in place. Browsers warn; the TLS checks report it as
+      # untrusted, and the activation preflight refuses live delivery until it is replaced.
+      local dir="$GEN/tls"; mkdir -p "$dir"; chmod 700 "$dir"
+      local pf proxy; pf="$(envval POSTFIX_MYHOSTNAME)"; proxy="$(envval PROXY_SERVER_NAME)"
+      openssl req -x509 -newkey rsa:2048 -nodes -days 90 -subj "/CN=$proxy" -addext "subjectAltName=DNS:$proxy,DNS:$pf" \
+        -keyout "$dir/bootstrap.key" -out "$dir/bootstrap.crt" 2>/dev/null
+      cmd_tls set "$dir/bootstrap.crt" "$dir/bootstrap.key" "$dir/bootstrap.crt" "$dir/bootstrap.key" ;;
+    acme) shift; cmd_acme "$@" ;;
+    *) die "usage: tls set <proxy-cert> <proxy-key> <postfix-cert> <postfix-key> | tls acme issue|renew|ensure|status | tls self-signed-bootstrap | tls self-signed (rehearsal only)" ;;
   esac
+}
+
+# --------------------------------------------------------- Let's Encrypt (DNS-01)
+# lego (installed on the host by the installer) obtains one certificate for the web and
+# the mail host names with the DNS-01 challenge through ACME_DNS_PROVIDER, using the
+# credentials in ACME_CREDENTIALS_FILE (NAME=value lines, mode 0600, outside the
+# repository). Port 80 is never opened. The certificate is installed into nginx and
+# Postfix with `tls set`. The state is in $GEN/acme (0700); the outcome is recorded for
+# the host agent in $GEN/acme/status.json.
+acme_status_set() {
+  python3 - "$GEN/acme/status.json" "$@" <<'PY'
+import json, sys
+path, pairs = sys.argv[1], sys.argv[2:]
+try:
+    data = json.load(open(path))
+except (OSError, ValueError):
+    data = {}
+for pair in pairs:
+    k, _, v = pair.partition("=")
+    data[k] = v
+with open(path, "w") as f:
+    json.dump(data, f, indent=1)
+PY
+}
+
+cmd_acme() {
+  require_production
+  local action="${1:-status}" email provider creds server days web mta dir cert key before after rc out
+  email="$(envval ACME_EMAIL)"; provider="$(envval ACME_DNS_PROVIDER)"; creds="$(envval ACME_CREDENTIALS_FILE)"
+  server="$(envval ACME_SERVER)"; days="$(envval ACME_RENEW_DAYS)"; web="$(envval PROXY_SERVER_NAME)"; mta="$(envval POSTFIX_MYHOSTNAME)"
+  dir="$GEN/acme"; mkdir -p "$dir"; chmod 700 "$dir"
+  cert="$dir/certificates/$web.crt"; key="$dir/certificates/$web.key"
+  if [[ "$action" == status ]]; then
+    if [[ -z "$email" || -z "$provider" ]]; then echo "ACME is not configured (ACME_EMAIL, ACME_DNS_PROVIDER)"; return 0; fi
+    echo "provider: $provider; server: ${server:-default}"
+    if [[ -f "$cert" ]]; then openssl x509 -in "$cert" -noout -subject -enddate -ext subjectAltName 2>/dev/null; else echo "no certificate obtained yet"; fi
+    [[ -f "$dir/status.json" ]] && cat "$dir/status.json"
+    return 0
+  fi
+  if [[ -z "$email" || -z "$provider" ]]; then
+    [[ "$action" == renew ]] && { say "ACME is not configured: nothing to renew"; return 0; }
+    die "set ACME_EMAIL and ACME_DNS_PROVIDER (and ACME_CREDENTIALS_FILE) in $DOTENV first"
+  fi
+  command -v lego >/dev/null || die "the ACME client lego is not installed (sudo apt-get install lego)"
+  if [[ "$provider" != manual ]]; then
+    [[ -n "$creds" && -r "$creds" ]] || die "ACME_CREDENTIALS_FILE must name a readable file of NAME=value lines for the $provider provider (lego dnshelp -c $provider)"
+    [[ $(( $(stat -c '%a' "$creds") % 100 )) == 0 ]] || die "$creds must not be readable by others (chmod 600 $creds)"
+  fi
+  case "$action" in
+    ensure) [[ -f "$cert" ]] && action=renew || action=issue ;;
+    issue|renew) ;;
+    *) die "usage: tls acme issue|renew|ensure|status" ;;
+  esac
+  local args=(--accept-tos --email "$email" --dns "$provider" --domains "$web" --path "$dir")
+  [[ "$mta" != "$web" ]] && args+=(--domains "$mta")
+  [[ -n "$server" ]] && args+=(--server "$server")
+  before="$(sha256sum "$cert" 2>/dev/null | cut -d' ' -f1)"
+  acme_status_set "last_attempt_at=$(now_iso)"
+  # The provider credentials are given to lego only, through its environment. The file is
+  # read as plain NAME=value lines, never executed.
+  local -a credenv=()
+  if [[ "$provider" != manual ]]; then
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+      [[ "$line" =~ ^[A-Z][A-Z0-9_]*= ]] || die "$creds: not a NAME=value line: ${line%%=*}"
+      credenv+=("$line")
+    done < "$creds"
+  fi
+  local verb=(run)
+  [[ "$action" == renew ]] && verb=(renew --days "${days:-30}")
+  set +e
+  out="$(env "${credenv[@]}" lego "${args[@]}" "${verb[@]}" 2>&1 | tee /dev/stderr; exit "${PIPESTATUS[0]}")"; rc=$?
+  set -e
+  if [[ $rc -ne 0 || ! -f "$cert" ]]; then
+    acme_status_set "last_result=failed: $(tail -n 1 <<<"$out" | cut -c1-200)"
+    die "lego failed (see above); the installed certificate is unchanged"
+  fi
+  after="$(sha256sum "$cert" | cut -d' ' -f1)"
+  acme_status_set "expires_at=$(openssl x509 -in "$cert" -noout -enddate | cut -d= -f2)"
+  if [[ "$before" != "$after" ]]; then
+    cmd_tls set "$cert" "$key" "$cert" "$key"
+    acme_status_set "last_result=ok: certificate $([[ $action == issue ]] && echo obtained || echo renewed) and installed"
+    say "certificate for $web${mta:+ and $mta} installed into nginx and Postfix"
+  else
+    acme_status_set "last_result=ok: not due for renewal"
+    say "certificate not due for renewal (renews ${days:-30} days before expiry)"
+  fi
 }
 
 # ------------------------------------------------------------------------- DKIM
@@ -241,23 +353,186 @@ cmd_live() {
   say "SMARTHOST_LIVE_DELIVERY_ENABLED=$want: Postfix and the delivery daemon were recreated"
 }
 
+# The emergency stop (specification 2.11): the database flag the delivery daemon reads within
+# seconds (audited by the console command with the operator) plus the Postfix queue hold.
 cmd_pause() {
   local action="$1"; shift
   parse_operator "$@"
   require_production
   if [[ "$action" == pause ]]; then
-    audit delivery.outbound_paused
+    console smarthost:delivery:emergency-stop on --operator "$OPERATOR" --note "$NOTE" || die "not audited; nothing was changed"
     podman exec "$(I)-postfix" smarthost-postfix-control pause "$NOTE ($OPERATOR)"
   else
-    audit delivery.outbound_resumed
+    console smarthost:delivery:emergency-stop off --operator "$OPERATOR" --note "$NOTE" || die "not audited; nothing was changed"
     podman exec "$(I)-postfix" smarthost-postfix-control resume
   fi
 }
 
+# Component names for logs: the component, not the container (prod logs app|webhook|...).
+cmd_logs() {
+  local what="${1:?usage: logs <app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent> [lines|-f]}" n="${2:-100}" svc
+  case "$what" in
+    app|web|symfony|symfony-app) svc=symfony-app ;;
+    webhook|webhooks|webhook-worker) svc=webhook-worker ;;
+    validator|delivery|postfix|opendkim|nginx|postgres) svc="$what" ;;
+    agent|host-agent)
+      if [[ "$n" == -f ]]; then exec journalctl --user -u "$(I)-host-agent.service" -f; fi
+      exec journalctl --user -u "$(I)-host-agent.service" -n "$n" --no-pager ;;
+    *) die "unknown component $what (app, webhook, validator, delivery, postfix, opendkim, nginx, postgres, agent)" ;;
+  esac
+  # Containers log to stdout and stderr (PHP-FPM, nginx errors); both go to stdout so that
+  # `prod logs app | grep …` sees every line.
+  if [[ "$n" == -f ]]; then exec podman logs -f --tail 50 "$(I)-$svc" 2>&1; fi
+  [[ "$n" =~ ^[0-9]+$ ]] || die "lines must be a number (or -f to follow)"
+  podman logs --tail "$n" "$(I)-$svc" 2>&1
+}
+
 # --------------------------------------------------------------- backup/restore
+backup_root() { local d; d="$(envval BACKUP_DIR)"; echo "${d:-$GEN/backups}"; }
+STAMP_RE='^[0-9]{8}T[0-9]{6}Z(\.tar\.enc)?$'
+
+# Removes only what the backup tooling itself created: a scheduled backup (a timestamp name
+# directly inside the backup root) or a private restore directory (restore.XXXXXX directly
+# inside $GEN). Anything else is refused, so no computed path can widen a removal.
+remove_owned() {
+  local path="$1" parent base
+  parent="$(cd "$(dirname -- "$path")" 2>/dev/null && pwd -P)" || return 0
+  base="$(basename -- "$path")"
+  if { [[ "$parent" == "$(cd "$(backup_root)" 2>/dev/null && pwd -P)" && "$base" =~ $STAMP_RE ]]; } \
+     || { [[ "$parent" == "$(cd "$GEN" && pwd -P)" && "$base" =~ ^restore\.[A-Za-z0-9]{6}$ ]]; }; then
+    rm -r -- "${parent:?}/${base:?}"
+  else
+    echo "smarthostctl prod: refusing to remove $path (not created by the backup tooling)" >&2
+    return 1
+  fi
+}
+
+# Record the outcome of a backup or restore rehearsal for the host agent (merged JSON).
+backup_status_set() {
+  mkdir -p "$GEN"
+  python3 - "$GEN/backup-status.json" "$@" <<'PY'
+import json, sys
+path, pairs = sys.argv[1], sys.argv[2:]
+try:
+    data = json.load(open(path))
+except (OSError, ValueError):
+    data = {}
+for pair in pairs:
+    k, _, v = pair.partition("=")
+    data[k] = {"true": True, "false": False}.get(v, v)
+with open(path, "w") as f:
+    json.dump(data, f, indent=1)
+PY
+}
+
+cmd_backup_status() {
+  local f="$GEN/backup-status.json"
+  [[ -f "$f" ]] || { echo "no backup recorded yet (smarthostctl prod backup --scheduled)"; return 0; }
+  python3 -c 'import json,sys; [print(f"{k}: {v}") for k, v in sorted(json.load(open(sys.argv[1])).items())]' "$f"
+}
+
+now_iso() { date -u +%Y-%m-%dT%H:%M:%S+00:00; }
+
+# A scheduled backup (specification 2.11): back up into BACKUP_DIR, encrypt when a passphrase
+# file is configured, keep the newest BACKUP_KEEP, copy off the host, record the outcome.
+cmd_backup_scheduled() {
+  require_production
+  local root stamp dir out keep target pf key encrypted=false offhost=false offhost_err="" old
+  root="$(backup_root)"; mkdir -p "$root"; chmod 700 "$root"
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"; dir="$root/$stamp"
+  backup_status_set "last_attempt_at=$(now_iso)" "schedule=$(envval BACKUP_SCHEDULE)" "keep=$(envval BACKUP_KEEP)"
+  if ! (cmd_backup "$dir"); then
+    backup_status_set "last_result=failed: the backup command failed (see the backup timer's journal)"
+    die "backup failed"
+  fi
+  out="$dir"
+  pf="$(envval BACKUP_ENCRYPTION_PASSPHRASE_FILE)"
+  if [[ -n "$pf" ]]; then
+    [[ -r "$pf" ]] || { backup_status_set "last_result=failed: cannot read BACKUP_ENCRYPTION_PASSPHRASE_FILE"; die "cannot read $pf"; }
+    (umask 077; tar -C "$root" -cf - "$stamp" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:$pf" -out "$dir.tar.enc") \
+      || { backup_status_set "last_result=failed: encryption failed"; die "encryption failed"; }
+    remove_owned "$dir"; out="$dir.tar.enc"; encrypted=true
+  fi
+  keep="$(envval BACKUP_KEEP)"; keep="${keep:-14}"
+  # Only scheduled backups (timestamp names) are pruned; explicit backup directories are never touched.
+  while read -r old; do
+    [[ -n "$old" ]] && remove_owned "$root/$old"
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -printf '%f\n' | grep -E "$STAMP_RE" | sort -r | tail -n +"$((keep + 1))")
+  target="$(envval BACKUP_OFFHOST_TARGET)"
+  if [[ -n "$target" ]]; then
+    local rsh="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    key="$(envval BACKUP_OFFHOST_SSH_KEY)"; [[ -n "$key" ]] && rsh+=" -i $key"
+    if offhost_err="$(rsync -a -e "$rsh" "$out" "$target" 2>&1)"; then offhost=true; offhost_err=""; fi
+  fi
+  backup_status_set "last_success_at=$(now_iso)" "last_result=ok" "last_path=$out" \
+    "encrypted=$encrypted" "offhost_configured=$([[ -n "$target" ]] && echo true || echo false)" "offhost=$offhost" \
+    "offhost_target=$target" "offhost_error=${offhost_err:0:300}" \
+    "contents=database, infra/.env (secrets), DKIM keys and tables, TLS certificates, manifest"
+  say "scheduled backup: $out ($([[ $encrypted == true ]] && echo encrypted || echo 'not encrypted')); off-host: $([[ -z $target ]] && echo 'not configured' || { [[ $offhost == true ]] && echo "copied to $target" || echo "FAILED: ${offhost_err:0:200}"; })"
+  [[ -z "$target" || "$offhost" == true ]]
+}
+
+# Unpack a backup for restore: a directory as is, or an encrypted archive into a private
+# restore.XXXXXX directory under $GEN (the caller removes it with remove_owned).
+backup_open() {
+  local src="$1" pf tmp
+  if [[ -d "$src" ]]; then echo "$src"; return 0; fi
+  [[ -f "$src" && "$src" == *.tar.enc ]] || die "$src is not a backup directory or an encrypted backup (.tar.enc)"
+  pf="$(envval BACKUP_ENCRYPTION_PASSPHRASE_FILE)"
+  [[ -n "$pf" && -r "$pf" ]] || die "an encrypted backup needs BACKUP_ENCRYPTION_PASSPHRASE_FILE"
+  tmp="$(mktemp -d "$GEN/restore.XXXXXX")"; chmod 700 "$tmp"
+  if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$pf" -in "$src" | tar -C "$tmp" -xf -; then
+    remove_owned "$tmp"; die "cannot decrypt $src (wrong passphrase?)"
+  fi
+  echo "$tmp/$(find "$tmp" -mindepth 1 -maxdepth 1 -printf '%f\n' -quit)"
+}
+
+newest_backup() {
+  local root; root="$(backup_root)"
+  find "$root" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | grep -E "$STAMP_RE" | sort | tail -n 1 | sed "s#^#$root/#"
+}
+
+# Restore rehearsal (specification 2.11): the newest (or a given) backup is verified, its
+# database restored into a temporary database next to the real one, checked, and dropped.
+# The production database is never touched.
+cmd_restore_rehearsal() {
+  require_production
+  local src="${1:-$(newest_backup)}" dir tables="" migs="" expected db rdb user unpacked="" fail=""
+  if [[ -z "$src" ]]; then
+    backup_status_set "restore_rehearsal_at=$(now_iso)" "restore_rehearsal_result=failed: no backup to rehearse"
+    die "no backup found in $(backup_root)"
+  fi
+  dir="$(backup_open "$src")"; [[ "$dir" == "$src" ]] || unpacked="$(dirname "$dir")"
+  (cd "$dir" && sed -n 's/^  \([0-9a-f]\{64\}\)  /\1  /p' MANIFEST | sha256sum -c --quiet) || fail="checksum mismatch"
+  for f in db.dump opendkim-keys.tar opendkim-tables.tar env; do [[ -n "$fail" || -s "$dir/$f" ]] || fail="$f missing"; done
+  user="$(envval POSTGRES_USER)"; db="$(envval SMARTHOST_DB_NAME)"; rdb="${db}_restore_rehearsal"
+  if [[ -z "$fail" ]]; then
+    podman exec "$(I)-postgres" dropdb -U "$user" --if-exists "$rdb" >/dev/null 2>&1 || true
+    podman exec "$(I)-postgres" createdb -U "$user" "$rdb" || fail="cannot create the temporary database"
+  fi
+  if [[ -z "$fail" ]] && ! podman exec -i "$(I)-postgres" pg_restore -U "$user" -d "$rdb" --no-owner --exit-on-error < "$dir/db.dump" >/dev/null 2>&1; then
+    fail="pg_restore failed"
+  fi
+  if [[ -z "$fail" ]]; then
+    tables="$(podman exec "$(I)-postgres" psql -X -At -U "$user" -d "$rdb" -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")"
+    migs="$(podman exec "$(I)-postgres" psql -X -At -U "$user" -d "$rdb" -c "SELECT count(*) FROM doctrine_migration_versions")"
+    expected="$(sed -n '/^migrations:/,/^sha256:/p' "$dir/MANIFEST" | grep -c '^  ' || true)"
+    [[ "$migs" == "$expected" ]] || fail="the restored database has $migs migrations, the manifest $expected"
+  fi
+  podman exec "$(I)-postgres" dropdb -U "$user" --if-exists "$rdb" >/dev/null 2>&1 || true
+  [[ -z "$unpacked" ]] || remove_owned "$unpacked"
+  if [[ -n "$fail" ]]; then
+    backup_status_set "restore_rehearsal_at=$(now_iso)" "restore_rehearsal_result=failed: $fail ($(basename "$src"))"
+    die "restore rehearsal FAILED: $fail"
+  fi
+  backup_status_set "restore_rehearsal_at=$(now_iso)" "restore_rehearsal_result=ok: $tables tables, $migs migrations from $(basename "$src")"
+  say "restore rehearsal passed: $(basename "$src") restored into a temporary database ($tables tables, $migs migrations), then removed"
+}
+
 cmd_backup() {
   require_production
   local i dir with_queue=false; i="$(I)"
+  if [[ "${1:-}" == --scheduled ]]; then shift; cmd_backup_scheduled "$@"; return; fi
   dir="$GEN/backups/$(date -u +%Y%m%dT%H%M%SZ)"
   while (($#)); do
     case "$1" in --with-queue) with_queue=true; shift ;; *) dir="$1"; shift ;; esac
@@ -298,8 +573,9 @@ cmd_backup() {
 cmd_restore() {
   require_production
   local dir="${1:-}" yes="${2:-}" i; i="$(I)"
-  [[ -n "$dir" && -f "$dir/db.dump" && -f "$dir/MANIFEST" ]] || die "usage: restore <backup-dir> --yes (a directory written by 'backup')"
   [[ "$yes" == --yes ]] || die "restore replaces the database and the DKIM keys: add --yes"
+  if [[ -f "$dir" ]]; then dir="$(backup_open "$dir")"; fi   # an encrypted scheduled backup (.tar.enc)
+  [[ -n "$dir" && -f "$dir/db.dump" && -f "$dir/MANIFEST" ]] || die "usage: restore <backup-dir or .tar.enc> --yes (written by 'backup')"
   topo exists || die "create the topology first (prod install), then restore into it"
   (cd "$dir" && sed -n 's/^  \([0-9a-f]\{64\}\)  /\1  /p' MANIFEST | sha256sum -c --quiet) || die "checksum mismatch in $dir"
   cmd_stop
@@ -325,7 +601,7 @@ cmd_upgrade() {
   [[ -n "$tag" ]] || die "usage: upgrade <new-image-tag> [--no-backup] (check out the new release first)"
   [[ "${2:-}" == --no-backup ]] && backup=false
   [[ "$tag" != "$old" ]] || die "already on $tag"
-  "${PREFLIGHT[@]}" --section runtime --quiet || die "the runtime preflight failed; fix it before upgrading"
+  "${PREFLIGHT[@]}" --section runtime --pre-upgrade --quiet || die "the runtime preflight failed; fix it before upgrading"
   [[ "$backup" == true ]] && cmd_backup
   set_env SMARTHOST_IMAGE_TAG "$tag"
   cmd_build
@@ -356,15 +632,19 @@ usage: smarthostctl prod <command>     (catto-mail production; runbook: docs/pro
   check                 validate infra/.env against the contract and the production safety rules
   render                check, then render env files, the production topology and the systemd units
  install and lifecycle
-  build                 build the production images, tagged SMARTHOST_IMAGE_TAG
+  build                 build the production images, tagged SMARTHOST_IMAGE_TAG; fetch the pinned PostgreSQL image
   tls set <proxy-crt> <proxy-key> <postfix-crt> <postfix-key>   install/renew the TLS certificates
+  tls acme issue|renew|ensure|status   Let's Encrypt with DNS-01 (lego; ACME_* in infra/.env); renew runs daily
+  tls self-signed-bootstrap   a temporary certificate so the services start before DNS/Let's Encrypt
   tls self-signed       disposable certificates for a rehearsal (SMARTHOST_EGRESS_ENABLED=false only)
   install               render, install the systemd units (start at boot), create the containers
   start | stop | restart | status
   recreate              replace the containers from the current images/configuration (volumes kept)
   replace <svc...>      replace single containers (${SERVICES[*]})
   migrate               run the Doctrine migrations and the grants
-  logs <svc> [n]        container log
+  logs <component> [n|-f]   app, webhook, validator, delivery, postfix, opendkim, nginx, postgres, agent
+  admin-link [--email E]    print a single-use ADMIN sign-in link (15 minutes; first sign-in, recovery)
+  agent run|once|facts      the host agent (normally the <instance>-host-agent service)
   console <args...>     Symfony console in the application container
  checks
   preflight [--activation] [--section S] [--json] [--smtp-egress-probe DOMAIN]
@@ -380,7 +660,8 @@ usage: smarthostctl prod <command>     (catto-mail production; runbook: docs/pro
  delivery controls (audited: --operator EMAIL --note TEXT, permission SYSTEM.DELIVERY.CONTROL)
   live-enable           activation preflight, then live delivery (Postfix and the delivery daemon recreated)
   live-disable          back to held mode
-  pause | resume        emergency stop / resume of ALL outbound mail (Postfix queue held; daemon stops submitting)
+  pause | resume        emergency stop / resume of ALL outbound mail (the database stop the daemon reads within
+                        seconds, and the Postfix queue hold; also the dashboard's STOP SENDING EMAIL NOW)
   pause-status          pause flag, transports and Postfix queue depth
   client-status <client-id> <status> --operator <email> --note <reason>
                         audited client lifecycle change (approve, throttle, suspend, reactivate, close)
@@ -388,7 +669,10 @@ usage: smarthostctl prod <command>     (catto-mail production; runbook: docs/pro
   queue                 the Postfix queue (postqueue -p)
  backup and upgrade
   backup [dir] [--with-queue]    database, DKIM keys and tables, configuration and TLS secrets
-  restore <dir> --yes            restore a backup into the existing topology
+  backup --scheduled             into BACKUP_DIR, encrypted if configured, pruned, copied off-host (the timer)
+  backup-status                  the last backup, off-host copy and restore rehearsal
+  restore-rehearsal [backup]     restore the newest backup into a temporary database, verify, drop it
+  restore <dir|.tar.enc> --yes   restore a backup into the existing topology
   upgrade <tag> [--no-backup]    backup, build <tag>, recreate (migrations, grants), verify
   rollback <tag> <backup-dir>    previous images plus the database taken before the upgrade
  seed testing (operator-chosen addresses only)
@@ -413,7 +697,11 @@ case "$cmd" in
   replace) require_production; render; host_gate; topo replace "$@" ;;
   remove) require_production; cmd_stop; topo remove ;;
   migrate) require_production; topo tasks db-migrate db-grants ;;
-  logs) require_production; podman logs --tail "${2:-100}" "$(I)-${1:?service}" ;;
+  logs) require_production; cmd_logs "$@" ;;
+  admin-link) require_production; console smarthost:admin:login-link "$@" ;;
+  agent) require_production; exec "${AGENT[@]}" "$@" ;;
+  backup-status) require_production; cmd_backup_status ;;
+  restore-rehearsal) cmd_restore_rehearsal "$@" ;;
   console) require_production; console "$@" ;;
   preflight) require_production; exec "${PREFLIGHT[@]}" "$@" ;;
   ingress-check) require_production; exec "${PREFLIGHT[@]}" --section ingress "$@" ;;

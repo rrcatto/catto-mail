@@ -1,0 +1,29 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Setup {{ step.n }}: {{ title }}{% endblock %}
+{% block body %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_setup') }}">System setup</a> › Step {{ step.n }} of {{ steps|length }}</p>
+<h1>{{ step.n }}. {{ title }}</h1>
+<p>{{ purpose }}</p>
+<p>{% for t in topics %}{{ ui.help(t, 'Help: ' ~ t|replace({'-': ' '})) }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+{% include 'dashboard/operator/setup/steps/' ~ step.key ~ '.html.twig' %}
+{% if checks is not empty or step.key not in ['welcome', 'seed_test', 'bounce_test', 'readiness'] %}
+<h2>Checks</h2>
+{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}<form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}" class="inline">{{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ path('dashboard_operator_setup_step', {step: step.key}) }}"><button type="submit" class="secondary">Run the checks again</button></form>
+    <small class="muted">The host agent's results arrive within a minute; reload the page.</small>{% endif %}
+{{ ui.checks(checks) }}
+{% endif %}
+<h2>This step</h2>
+<p>State: {% if step.state == 'done' %}{{ ui.result('pass') }} done {{ step.updated_at|ts }}{% elseif step.state == 'skipped' %}{{ ui.result('skipped') }} skipped — come back to it{% else %}{{ ui.result('waiting') }} not done yet{% endif %}{% if step.note %} — {{ step.note }}{% endif %}</p>
+<form method="post" action="{{ path('dashboard_operator_setup_state', {step: step.key}) }}" class="stack">
+    {{ ui.csrf() }}
+    <label>Note (optional, kept with the step) <input name="note" maxlength="1000" value="{{ step.note }}"></label>
+    <p class="row">
+        <button type="submit" name="state" value="done">Mark done and continue</button>
+        <button type="submit" name="state" value="skipped" class="secondary">Skip for now</button>
+        {% if step.state %}<button type="submit" name="state" value="" class="secondary">Mark not done</button>{% endif %}
+    </p>
+</form>
+<p>{% if prev %}<a href="{{ path('dashboard_operator_setup_step', {step: prev}) }}">« {{ steps[prev].title }}</a>{% endif %}
+   {% if next %} · <a href="{{ path('dashboard_operator_setup_step', {step: next}) }}">{{ steps[next].title }} »</a>{% endif %}</p>
+{% endblock %}

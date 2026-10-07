@@ -92,6 +92,18 @@ Migration `Version20261007000100`.
 - Public API documentation at `/docs/api`.
 - Migration `Version20261009000100`. Operator procedures: `docs/production/onboarding.md`.
 
+**Phase 10 (operator self-service, v0.1.9, specification 2.11):**
+- `App\System`: the setup wizard (Operator › System setup), diagnostics with history
+  (Operator › Diagnostics), the health dashboard with the delivery mode, the emergency stop
+  (`delivery_controls`), and the host-agent request queue (`system_requests`; the web
+  application never runs host commands).
+- `App\AddressBatch`: administrator address batches (up to 10,000 addresses), separate state
+  dimensions, staged sends, and the public re-permission page `/p/{token}` with the webhook
+  event `repermission.responded`.
+- `App\Help`: Operator › Help.
+- Console: `smarthost:system:agent`, `smarthost:admin:login-link`,
+  `smarthost:delivery:emergency-stop`. Migration `Version20261010000100`.
+
 **Later phases:** retention commands; a public registration workflow (owner decision).
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no

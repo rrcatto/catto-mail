@@ -1,0 +1,11 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>A <strong>complaint</strong> is a recipient pressing "This is spam". Some mailbox providers report complaints to the sender through a <strong>feedback loop</strong> (an ARF report e-mail), if the sender registered for it.</p>
+<ul>
+<li>Register the sending IP and domains at the providers' feedback-loop programmes, with the address <code>bounce@&lt;bounce domain&gt;</code> (it arrives through the same path as bounces).</li>
+<li>Gmail does not send per-message complaints; its Postmaster Tools show the overall spam rate instead.</li>
+<li>A complaint matched to an exact message records <strong>complained</strong> and creates a global complaint suppression. An uncorrelated report is kept as an unmatched DSN.</li>
+<li>Keep complaints under 0.1 % (one in a thousand). Above 0.3 % providers start blocking. Operator › Abuse &amp; reputation alerts at these thresholds.</li>
+</ul>
+<p>Complaints cannot be produced on demand for a test: the path is proven with the bounce test, and the first real reports confirm the registration.</p>
+{% endblock %}

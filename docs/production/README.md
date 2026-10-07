@@ -1,6 +1,6 @@
 # catto-mail production topology
 
-**Status:** specification 2.10 (Phase 8 repository-side production readiness; Phase 9 SaaS operations, see [onboarding.md](onboarding.md)). The operator's
+**Status:** specification 2.11 (Phase 8 repository-side production readiness; Phase 9 SaaS operations, see [onboarding.md](onboarding.md); Phase 10 operator self-service). **To install, start with [VPS-INSTALL.md](VPS-INSTALL.md)**; the components are described in [components.md](components.md). The operator's
 procedures are in [runbook.md](runbook.md); the configuration contract is
 [`docs/contracts/environment.md`](../contracts/environment.md) (sections *Production deployment*,
 *Production profile* and *Retention settings in production*).

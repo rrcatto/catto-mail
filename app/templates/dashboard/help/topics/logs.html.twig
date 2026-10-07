@@ -1,0 +1,17 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>Each component logs to its container. On the server, as <code>cattomail</code>, in <code>~/catto-mail</code>:</p>
+<pre class="cmd">infra/bin/smarthostctl prod logs app         # Web Application
+infra/bin/smarthostctl prod logs webhook     # Webhook Worker
+infra/bin/smarthostctl prod logs validator   # Email Validator
+infra/bin/smarthostctl prod logs delivery    # Delivery Daemon
+infra/bin/smarthostctl prod logs postfix     # Postfix
+infra/bin/smarthostctl prod logs opendkim    # OpenDKIM
+infra/bin/smarthostctl prod logs nginx       # nginx Frontend
+infra/bin/smarthostctl prod logs postgres    # PostgreSQL
+infra/bin/smarthostctl prod logs agent       # host agent (systemd journal)
+infra/bin/smarthostctl prod logs delivery 500   # more lines
+infra/bin/smarthostctl prod logs delivery -f    # follow</pre>
+<p>The application components log JSON lines (time, level, message, context). Logs never contain API keys, sign-in or tracking tokens, or message contents. The systemd units' own logs: <code>journalctl --user -u smarthost.service</code>.</p>
+<p>The dashboard does not show raw logs: the web application has no access to the host. The diagnostics and Health page summarise what matters.</p>
+{% endblock %}

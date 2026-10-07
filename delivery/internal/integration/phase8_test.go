@@ -88,6 +88,35 @@ func TestEmergencyPauseFlagStopsAndResumes(t *testing.T) {
 	}
 }
 
+// The web emergency stop (delivery_controls, specification 2.11) holds send work like
+// the pause flag, read by the delivery role, and lifting it resumes submissions.
+func TestWebEmergencyStopHoldsAndResumes(t *testing.T) {
+	e := newEnv(t)
+	e.exec(`INSERT INTO delivery_controls (id, emergency_stop, changed_at) VALUES (1, true, now())
+	        ON CONFLICT (id) DO UPDATE SET emergency_stop = true, changed_at = now()`)
+	t.Cleanup(func() { e.exec(`UPDATE delivery_controls SET emergency_stop = false, changed_at = now() WHERE id = 1`) })
+	job := e.newJob(jobOpts{}, e.rcpts(2, "web-stop.test"))
+	e.onlyThisJobIsClaimable(job)
+	w := e.worker("web-stop")
+	runFor(w, e.ctx, 2500*time.Millisecond)
+	if !w.Paused() || e.jobStatus(job) != "queued" {
+		t.Fatalf("stopped worker: paused=%v job=%s", w.Paused(), e.jobStatus(job))
+	}
+	e.exec(`UPDATE delivery_controls SET emergency_stop = false, changed_at = now() WHERE id = 1`)
+	ctx, cancel := context.WithTimeout(e.ctx, 60*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { w.Run(ctx); close(done) }()
+	for e.jobStatus(job) != "dispatched" && ctx.Err() == nil {
+		time.Sleep(200 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if w.Paused() || e.jobStatus(job) != "dispatched" {
+		t.Fatalf("after the stop was lifted: paused=%v job=%s", w.Paused(), e.jobStatus(job))
+	}
+}
+
 // A throttled client is paced by DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE across
 // all its recipients and domains; the installation-wide ceiling applies to all.
 func TestThrottledClientAndGlobalCeiling(t *testing.T) {

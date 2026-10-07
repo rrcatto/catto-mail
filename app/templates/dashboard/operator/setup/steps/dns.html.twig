@@ -1,0 +1,14 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% set records = host.value.dns_records ?? [] %}
+<p>Create these records where your domains' DNS is hosted (and the PTR at your VPS provider). catto-mail only reads DNS; it never changes it, and it does not need its own DNS server.
+DNS changes can take from minutes to hours to be visible everywhere.</p>
+{% if records is empty %}<p class="empty">The host agent has not reported the records yet.</p>{% else %}
+<div class="scroll"><table class="dense">
+<thead><tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Where</th><th scope="col">Status</th></tr></thead>
+<tbody>{% for r in records %}{% set st = checks|filter(c => r.check is defined and c.check_key starts with r.check)|first %}
+<tr><td>{{ r.type }}</td><td><code>{{ r.name }}</code></td><td class="url"><code>{{ r.value }}</code></td><td>{{ r.where }}</td>
+    <td>{% if st %}{{ ui.result(st.result) }}<br><small>{{ st.summary }}</small>{% else %}{{ ui.result('none') }}{% endif %}</td></tr>
+{% endfor %}</tbody></table></div>{% endif %}
+{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
+<form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}">{{ ui.csrf() }}<input type="hidden" name="section" value="dns"><input type="hidden" name="return_to" value="{{ path('dashboard_operator_setup_step', {step: 'dns'}) }}"><button type="submit">Test DNS</button></form>
+{% endif %}

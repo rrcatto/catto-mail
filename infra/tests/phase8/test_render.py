@@ -129,7 +129,7 @@ class ProductionRenderingTest(unittest.TestCase):
     def test_the_script_is_valid_bash_with_rendered_values(self) -> None:
         self.assertEqual(0, subprocess.run(["bash", "-n", str(self.out / "podman/smarthost-production.sh")]).returncode)
         self.assertIn("I=smarthost\n", self.script)
-        self.assertIn("TAG=0.1.8\n", self.script)
+        self.assertIn("TAG=0.1.9\n", self.script)
         self.assertIn("EGRESS_ENABLED=true\n", self.script)
         self.assertNotRegex(self.script, r"\$\{[A-Z][A-Z0-9_]*\}", "every contract placeholder is rendered")
 
@@ -159,7 +159,20 @@ class ProductionRenderingTest(unittest.TestCase):
         service = (self.out / "systemd/smarthost-reputation-evaluate.service").read_text()
         self.assertRegex(service, r"(?m)^ExecStart=.*/podman/smarthost-production.sh app-exec php bin/console smarthost:reputation evaluate$")
         self.assertIn('cmd_app_exec "$@"', self.script)
-        self.assertIn('hostctl start "$UNIT_REPUTATION_TIMER"', self.script)
+        self.assertIn('INSTANCE_EXTRAS=("$UNIT_REPUTATION_TIMER" "$I-backup.timer" "$I-tls-renew.timer" "$I-host-agent.service")', self.script)
+        self.assertIn('hostctl start "$u"', self.script)
+
+    def test_host_agent_and_maintenance_timers(self) -> None:
+        agent = (self.out / "systemd/smarthost-host-agent.service").read_text()
+        self.assertRegex(agent, r"(?m)^ExecStart=.*/infra/bin/smarthostctl-prod agent run$")
+        self.assertRegex(agent, r"(?m)^Restart=always$")
+        self.assertRegex(agent, r"(?m)^Environment=SMARTHOST_DOTENV=/")
+        backup = (self.out / "systemd/smarthost-backup.timer").read_text()
+        self.assertRegex(backup, r"(?m)^OnCalendar=\*-\*-\* 03:15:00$")
+        self.assertRegex(backup, r"(?m)^Persistent=true$")
+        self.assertRegex((self.out / "systemd/smarthost-backup.service").read_text(), r"(?m)^ExecStart=.*smarthostctl-prod backup --scheduled$")
+        self.assertRegex((self.out / "systemd/smarthost-tls-renew.service").read_text(), r"(?m)^ExecStart=.*smarthostctl-prod tls acme renew$")
+        self.assertRegex((self.out / "systemd/smarthost-tls-renew.timer").read_text(), r"(?m)^OnCalendar=daily$")
 
     def test_nginx_inherits_the_sockets_and_restarts_only_through_systemd(self) -> None:
         nginx = self.create_block("nginx")

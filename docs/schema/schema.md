@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.10 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.11 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -29,6 +29,8 @@ Enum values come from [`../contracts/status-vocabulary.yaml`](../contracts/statu
 | Client status changes follow the lifecycle transitions (Phase 9); `closed` is final and records `closed_at`. | `saas_operations.client_lifecycle` |
 | Admitted work is counted per client in `client_quota_usage` in the transaction that admits it; per-client limits (`client_limits`) can only lower installation ceilings. | `saas_operations.client_limits` |
 | Usage records are append-only; a message is metered at most once (`usage_records_message_once_uq`). Billing statements hold quantities only, never prices. | `saas_operations.usage_and_billing` |
+| A system request follows its lifecycle (pending → running → succeeded/failed, or cancelled) and is carried out only by the host agent; check results and request results never hold secrets. | `operator_self_service.host_agent` |
+| An address batch keeps every non-blank input row (`imported + duplicate + malformed = data_rows`); a duplicate points at the imported row; only imported entries are validated, reviewed or sent to; a response token exists with its expiry. | `operator_self_service.address_batches` |
 
 ## 2. Entity-relationship diagram
 
@@ -275,6 +277,8 @@ erDiagram
 | `webhook_worker_heartbeats` | internal (webhook worker) | none |
 | `delivery_heartbeats` | internal (Go delivery daemon) | none |
 | `audit_log` | operator | none |
+| `system_requests`, `system_checks`, `system_check_runs`, `system_state`, `setup_steps`, `delivery_controls` | operator only (2.11; installation-wide) | none |
+| `address_batches`, `address_batch_entries`, `address_batch_sends` | operator only (2.11) | `client_id` of the batch (the client on whose behalf it is validated and sent), but administered by ADMIN, never shown in client dashboards |
 
 Another client's resource returns **404**. Dashboard access is checked by Symfony voters: client
 pages over `client_memberships` (viewer, member, admin) or the installation-wide `PLATFORM.CLIENT.VIEW`
@@ -404,6 +408,12 @@ grants below. No runtime role has DDL rights.
 | webhook_worker_heartbeats | S | S I U | – | – |
 | delivery_heartbeats | S | – | – | S I U |
 | audit_log | S I D¹ | I | I | I |
+| system_requests, system_state, setup_steps | S I U | – | – | – |
+| system_checks | S I U D⁵ | – | – | – |
+| system_check_runs | S I | – | – | – |
+| delivery_controls | S I U | – | – | S |
+| address_batches, address_batch_entries | S I U | S | – | – |
+| address_batch_sends | S I | – | – | – |
 
 ¹ `DELETE` is used only by the configured retention commands, and only when a retention period
 is set.
@@ -415,6 +425,10 @@ is set.
 
 ⁴ Read-only: the operator dashboard shows how recently Go advanced the Postfix-log ingest cursor
 (Phase 6).
+
+⁵ `DELETE` only removes host-agent checks that a complete agent report (host checks and every
+preflight section) no longer contains, e.g. after a host name changed; their history stays in
+`system_check_runs` (2.11).
 
 Suppressions (D-30): Symfony creates only client-reported `recipient_global_opt_out` rows (API)
 and operator blocks (console), and lifts by setting `lifted_at`. Go creates the system

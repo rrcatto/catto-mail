@@ -50,6 +50,7 @@ final class WebhookPayloadFactory
             'message.hard_bounced' => $this->message($event, MessageEventType::HardBounce),
             'message.complained' => $this->message($event, MessageEventType::Complaint),
             'webhook.test' => new \stdClass(),
+            'repermission.responded' => $this->repermission($event),
             default => null,
         };
         $this->em->clear();
@@ -85,6 +86,34 @@ final class WebhookPayloadFactory
         $job = $this->em->find(SendJob::class, Uuid::fromString($event['subject_id']));
 
         return null !== $job && $job->getClient()->getId()->toRfc4122() === $event['client_id'] ? Presenter::sendJob($job) : null;
+    }
+
+    /**
+     * A recipient's answer to a re-permission message (specification 2.11), read as it is
+     * at fan-out time: the payload carries the current answer and when it was given.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function repermission(array $event): ?array
+    {
+        $row = $this->em->getConnection()->fetchAssociative(<<<'SQL'
+            SELECT e.id::text AS entry_id, e.normalized_address, e.consent_state, e.consent_changed_at,
+                   b.id::text AS batch_id, b.name, b.list_id, b.client_id::text AS client_id
+              FROM address_batch_entries e JOIN address_batches b ON b.id = e.batch_id
+             WHERE e.id = ?
+            SQL, [$event['subject_id']]);
+        if (false === $row || $row['client_id'] !== $event['client_id']
+            || !\in_array($row['consent_state'], ['confirmed', 'unsubscribed', 'global_opt_out'], true) || null === $row['consent_changed_at']) {
+            return null;
+        }
+
+        return [
+            'batch' => ['id' => $row['batch_id'], 'name' => (string) $row['name'], 'list_id' => (string) $row['list_id']],
+            'entry_id' => $row['entry_id'],
+            'address' => (string) $row['normalized_address'],
+            'response' => $row['consent_state'],
+            'responded_at' => Clock::rfc3339(new \DateTimeImmutable((string) $row['consent_changed_at'])),
+        ];
     }
 
     /** @return array<string, mixed>|null */

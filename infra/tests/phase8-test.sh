@@ -8,7 +8,7 @@
 #      ingress units, keys), DNS wire client, SPF/DKIM/DMARC/TLS logic, preflight checks
 #      with fixtures (host prerequisites, the ingress proof with preserving and collapsing
 #      fakes)
-#   S  shellcheck of the rendered production topology and the prod tooling
+#   S  shellcheck of the rendered production topology, the prod tooling and the installer
 #   P  Postfix: production held mode (only APP_MAIL_FROM delivered), live mode,
 #      development capture unchanged, relayhost refused in production, the
 #      emergency pause flag (at start and at runtime), submission sender ownership,
@@ -45,8 +45,8 @@ render.render(env, Path(sys.argv[2]) / "generated")
 PY
 if podman run --rm --name smarthost-phase8-shellcheck --label project=smarthost --network none -v "$REPO:/repo:ro,Z" -v "$TMP:/t:ro,Z" -w /repo docker.io/koalaman/shellcheck:stable -S warning \
     /t/generated/podman/smarthost-production.sh infra/bin/smarthostctl infra/bin/smarthostctl-prod infra/tests/phase8-test.sh \
-    infra/tests/phase8-rehearsal.sh; then
-  pass "rendered production topology and prod tooling are shellcheck-clean"
+    infra/tests/phase8-rehearsal.sh install-catto-mail infra/tests/installer-test.sh; then
+  pass "rendered production topology, prod tooling and the installer are shellcheck-clean"
 else
   fail "shellcheck"
 fi

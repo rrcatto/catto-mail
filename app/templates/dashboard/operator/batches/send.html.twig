@@ -1,0 +1,51 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Send from {{ batch.name }}{% endblock %}
+{% block body %}
+{% set s = summary %}
+<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Send</p>
+<h1>Send from “{{ batch.name }}”</h1>
+<p>Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>{% if delivery.mode != 'LIVE' %}: a send job is created and waits; nothing leaves the server until delivery is LIVE{% endif %}.
+The installation-wide ceiling is {{ delivery.global_rate_per_minute ?? '—' }} messages per minute; the delivery daemon also limits each receiving domain. {{ ui.help('sending', 'Stages and limits') }}</p>
+<table class="dense narrow"><tbody>
+<tr><th scope="row">Batch total (rows)</th><td class="num">{{ batch.data_rows|number_format }}</td></tr>
+<tr><th scope="row">Eligible</th><td class="num">{{ s.eligible|number_format }}</td></tr>
+<tr><th scope="row">… of which not sent yet</th><td class="num">{{ s.unsent_eligible|number_format }}</td></tr>
+<tr><th scope="row">Excluded: invalid or malformed</th><td class="num">{{ (s.invalid + s.malformed)|number_format }}</td></tr>
+<tr><th scope="row">Excluded: suppressed</th><td class="num">{{ s.suppressed|number_format }}</td></tr>
+<tr><th scope="row">Pending / needs review</th><td class="num">{{ s.pending_review|number_format }}</td></tr>
+<tr><th scope="row">Other excluded (duplicates, unsubscribed, your exclusions)</th><td class="num">{{ (s.entries - s.eligible - s.invalid - s.malformed - s.suppressed - s.pending_review)|number_format }}</td></tr>
+</tbody></table>
+<form method="post" action="{{ path('dashboard_operator_batch_send', {id: batch.id}) }}" class="stack">
+    {{ ui.csrf() }}
+    <fieldset><legend>Stage</legend>
+        {% for st, label in {seed: 'Seed test — a handful of addresses you own (typed below; never taken from the list)', controlled: 'Controlled test — a small sample of eligible addresses', rollout: 'Rollout — a further portion, while you watch bounces, complaints and deferrals', full: 'Full — every remaining eligible address'} %}
+        <label class="check"><input type="radio" name="stage" value="{{ st }}"{% if form.stage == st %} checked{% endif %}> {{ label }}</label>{% endfor %}
+    </fieldset>
+    <label>Seed addresses you own (seed stage; at most {{ max_seed }}) <textarea name="seed_addresses" rows="2">{{ form.seed_addresses }}</textarea></label>
+    <label class="check"><input type="checkbox" name="i_own_these" value="1"{% if form.i_own_these %} checked{% endif %}> I own every seed address</label>
+    <label>Number of addresses (controlled and rollout stages) <input type="number" name="count" min="1" value="{{ form.count ?: '' }}"></label>
+    <label>From address (a verified sending domain of {{ batch.company_name }}: {{ domains|join(', ') ?: 'none yet' }}) <input type="email" name="sender_email" required value="{{ form.sender_email }}"></label>
+    <label>From name (optional) <input name="sender_name" maxlength="200" value="{{ form.sender_name }}"></label>
+    <label>Subject <input name="subject" required maxlength="998" value="{{ form.subject }}"></label>
+    <label>Plain-text body (required). Placeholders: <code>{{ '{{response_url}}' }}</code> (the recipient's answer page), <code>{{ '{{confirm_url}}' }}</code>, <code>{{ '{{unsubscribe_url}}' }}</code>, <code>{{ '{{global_opt_out_url}}' }}</code>, <code>{{ '{{address}}' }}</code>
+        <textarea name="text_body" rows="10" required>{{ form.text_body }}</textarea></label>
+    <label>HTML body (optional; no scripts) <textarea name="html_body" rows="6">{{ form.html_body }}</textarea></label>
+    <label class="check"><input type="checkbox" name="track_opens" value="1"{% if form.track_opens %} checked{% endif %}> Record opens (HTML only; an imperfect signal)</label>
+    <label class="check"><input type="checkbox" name="track_clicks" value="1"{% if form.track_clicks %} checked{% endif %}> Record clicks</label>
+    <p class="muted">Every message carries the List-Unsubscribe header pointing at the recipient's own answer page. {% if batch.purpose == 'repermission' %}A re-permission message must contain <code>{{ '{{response_url}}' }}</code> or <code>{{ '{{confirm_url}}' }}</code>.{% endif %}</p>
+    <button type="submit" name="do" value="preview">Preview</button>
+{% if preview %}
+    <h2>Preview: {{ preview.stage }} stage, {{ preview.recipients|length|number_format }} recipient(s)</h2>
+    {% if preview.blockers is not empty %}<div class="warn"><strong>Cannot send yet:</strong><ul class="plain">{% for b in preview.blockers %}<li>{{ b }}</li>{% endfor %}</ul></div>
+    {% else %}
+    <p>First recipients: {% for r in preview.recipients|slice(0, 10) %}{{ r.address }}{% if not loop.last %}, {% endif %}{% endfor %}{% if preview.recipients|length > 10 %} …{% endif %}</p>
+    {% if sample %}<h3>The first message</h3><dl><dt>Subject</dt><dd>{{ sample.subject }}</dd><dt>Text</dt><dd><pre class="raw">{{ sample.text }}</pre></dd>
+        {% if sample.html %}<dt>HTML (source)</dt><dd><pre class="raw">{{ sample.html }}</pre></dd>{% endif %}</dl>{% endif %}
+    <p class="warn">Sending creates the send job now. {% if delivery.mode == 'LIVE' %}Mail starts going out within the rate limits.{% else %}It waits until delivery is LIVE.{% endif %}
+        Every suppression is checked again by the delivery daemon right before each message.</p>
+    <button type="submit" name="do" value="send" class="danger">Send to {{ preview.recipients|length|number_format }} recipient(s)</button>
+    {% endif %}
+{% endif %}
+</form>
+{% endblock %}

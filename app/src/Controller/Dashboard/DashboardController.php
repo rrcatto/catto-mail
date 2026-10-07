@@ -92,10 +92,14 @@ final class DashboardController extends AbstractController
      * a user with one client lands on it; anyone else gets the chooser.
      */
     #[Route('', name: 'dashboard_home', methods: ['GET'])]
-    public function home(ClientAccess $access): Response
+    public function home(ClientAccess $access, \App\System\SetupWizard $wizard): Response
     {
         $user = $access->user();
         $memberships = $access->memberships();
+        // A new installation: the administrator is taken to the setup wizard until it is complete.
+        if ($user->hasPermission('SYSTEM.SETUP.MANAGE') && !$wizard->isComplete()) {
+            return $this->redirectToRoute('dashboard_operator_setup');
+        }
         if ($user->hasPermission('PLATFORM.OVERVIEW.VIEW') && [] === $memberships) {
             return $this->redirectToRoute('dashboard_operator_overview');
         }

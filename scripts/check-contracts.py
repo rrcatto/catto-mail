@@ -49,7 +49,7 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.10"
+EXPECTED_SPEC_VERSION = "2.11"
 EXPECTED_SPEC_DATE = "2026-10-07"
 # Decisions that must be incorporated across the revision history (all of D-01..D-38).
 EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
@@ -140,6 +140,24 @@ DDL_ENUMS = {
     ("billing_statement_lines", "usage_type"): "usage_type",
     ("client_alerts", "metric"): "client_alert_metric",
     ("client_alerts", "severity"): "client_alert_severity",
+    # Specification 2.11
+    ("system_requests", "action"): "system_request_action",
+    ("system_requests", "status"): "system_request_status",
+    ("system_checks", "component"): "system_component",
+    ("system_checks", "result"): "system_check_result",
+    ("system_checks", "source"): "system_check_source",
+    ("system_check_runs", "component"): "system_component",
+    ("system_check_runs", "result"): "system_check_result",
+    ("system_check_runs", "source"): "system_check_source",
+    ("system_check_runs", "run_trigger"): "system_check_trigger",
+    ("setup_steps", "state"): "setup_step_state",
+    ("address_batches", "purpose"): "address_batch_purpose",
+    ("address_batches", "file_format"): "address_batch_file_format",
+    ("address_batch_entries", "outcome"): "address_batch_entry_outcome",
+    ("address_batch_entries", "consent_state"): "consent_state",
+    ("address_batch_entries", "review_decision"): "batch_review_decision",
+    ("address_batch_entries", "typo_decision"): "typo_decision",
+    ("address_batch_sends", "stage"): "batch_send_stage",
 }
 
 ENV_CONSUMERS = {"app", "webhook-worker", "validator", "delivery", "postfix", "opendkim", "deployment",
@@ -306,7 +324,7 @@ def check_webhook_test_contract(spec: dict, vocab: dict, api: dict) -> None:
           "openapi: WebhookTestRequest must be exactly {webhook_endpoint_id} (required) - no client-wide test")
     check("409" in op.get("responses", {}) and "404" in op.get("responses", {}),
           "openapi: POST /webhooks/test must document 404 (foreign endpoint) and 409 (disabled endpoint)")
-    check(set(vocab["webhook_subject_type"]["values"]) == {"validation_job", "send_job", "message", "webhook_endpoint"},
+    check(set(vocab["webhook_subject_type"]["values"]) == {"validation_job", "send_job", "message", "webhook_endpoint", "address_batch_entry"},
           "vocabulary: webhook_subject_type must not offer a client-wide webhook.test subject")
     endpoint_paths = [p for p in api["paths"] if "webhook" in p and p != "/webhooks/test"]
     check(not endpoint_paths, f"openapi: no public webhook-endpoint management API (spec 2.8), found {endpoint_paths}")

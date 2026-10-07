@@ -1,0 +1,11 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p><strong>DMARC</strong> tells receivers what to do with mail that claims to be from your domain (the visible From) but fails authentication, and where to send reports. A message passes DMARC when SPF or DKIM passes <em>and</em> is aligned with the From domain. In catto-mail, DKIM provides the alignment (<code>d=</code> is the sending domain).</p>
+<pre class="cmd">_dmarc.news.example.org.  TXT  "v=DMARC1; p=none; rua=mailto:dmarc@news.example.org"</pre>
+<ul>
+<li>Start with <code>p=none</code> (report only) and read the aggregate reports sent to the <code>rua</code> address for a few weeks.</li>
+<li>When everything legitimate passes, move to <code>p=quarantine</code>, then <code>p=reject</code>.</li>
+<li>Large providers require a DMARC record from bulk senders.</li>
+</ul>
+<p>The DMARC record lives at the sending domain's DNS, which may belong to your client; catto-mail checks that one exists.</p>
+{% endblock %}

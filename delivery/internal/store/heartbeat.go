@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Heartbeat is one delivery daemon's durable status row (delivery_heartbeats,
@@ -47,4 +50,15 @@ ON CONFLICT (worker_id) DO UPDATE SET last_seen_at = now(), stopped_at = NULL, l
 func (s *Store) Stopped(ctx context.Context, workerID string) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE delivery_heartbeats SET stopped_at = now(), last_seen_at = now() WHERE worker_id = $1`, workerID)
 	return err
+}
+
+// EmergencyStop reports the installation-wide emergency stop set from the web
+// application (delivery_controls, specification 2.11). No row means not stopped.
+func (s *Store) EmergencyStop(ctx context.Context) (bool, error) {
+	var stopped bool
+	err := s.Pool.QueryRow(ctx, `SELECT emergency_stop FROM delivery_controls WHERE id = 1`).Scan(&stopped)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return stopped, err
 }

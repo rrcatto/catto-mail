@@ -1,0 +1,15 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>catto-mail needs certificates for two names: the web host name (HTTPS for the dashboard, API, tracking and re-permission links) and the mail host name (STARTTLS on port 25). One certificate covering both names is fine.</p>
+<h2>Let's Encrypt with DNS-01</h2>
+<p>catto-mail never opens port 80, so it proves control of the names with the <strong>DNS-01</strong> challenge: the ACME client <code>lego</code> (installed on the server by the installer) asks Let's Encrypt for a certificate, creates a temporary TXT record <code>_acme-challenge.&lt;name&gt;</code> through your DNS provider's API, Let's Encrypt checks it, the record is removed and the certificate is issued.</p>
+<ol>
+<li>In <code>infra/.env</code>: <code>ACME_EMAIL</code> (your address), <code>ACME_DNS_PROVIDER</code> (lego's name for your DNS provider, e.g. <code>cloudflare</code>, <code>hetzner</code>, <code>ovh</code>, <code>route53</code>; list: <code>lego dnshelp</code>), and <code>ACME_CREDENTIALS_FILE</code> — a file of mode 0600 outside the repository with the provider's API credentials as <code>NAME=value</code> lines (exactly the variables <code>lego dnshelp -c &lt;provider&gt;</code> names; create an API token limited to DNS edits of your zone).</li>
+<li><code>smarthostctl prod tls acme issue</code> obtains the certificate and installs it into nginx and Postfix with <code>smarthostctl prod tls set</code>.</li>
+<li>The timer <code>smarthost-tls-renew.timer</code> runs <code>smarthostctl prod tls acme renew</code> daily; it renews <code>ACME_RENEW_DAYS</code> (30) days before expiry and installs the new certificate. Failures show in the timer's state, the host agent's TLS checks and the diagnostics.</li>
+</ol>
+<h2>No API at your DNS provider?</h2>
+<p>Set <code>ACME_DNS_PROVIDER=manual</code>: <code>smarthostctl prod tls acme issue</code> then prints the TXT record, waits for you to create it, and continues. Renewals need you every two to three months; the expiry warning (14 days) reminds you. You can also obtain a certificate any other way and install it with <code>smarthostctl prod tls set &lt;proxy.crt&gt; &lt;proxy.key&gt; &lt;mta.crt&gt; &lt;mta.key&gt;</code>.</p>
+<h2>Expiry</h2>
+<p>The diagnostics check the certificate actually served on 443 and on 25: validity, names, trust, and a warning 14 days before expiry.</p>
+{% endblock %}

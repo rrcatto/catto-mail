@@ -1,0 +1,33 @@
+{% import 'dashboard/_macros.html.twig' as ui %}
+<div class="help-body">
+<h2>What catto-mail is</h2>
+<p>catto-mail is your own mail infrastructure for client applications (such as a mailing-list application): it <strong>validates</strong> e-mail addresses,
+<strong>sends</strong> fully prepared messages through its own mail server, keeps <strong>suppression lists</strong> (addresses that must not be mailed),
+records <strong>bounces, complaints, opens and clicks</strong>, and tells the client application what happened through <strong>webhooks</strong> and its API.</p>
+<h2>What it is not</h2>
+<ul class="plain">
+    <li>It is not a mailing-list manager: subscribers, lists, campaigns and ordinary unsubscribes belong to the client application.</li>
+    <li>It cannot guarantee inbox delivery, and it cannot prove that a person read a message.</li>
+    <li>Validation is evidence about an address, never consent to mail it.</li>
+</ul>
+<h2>The components</h2>
+<table class="dense"><tbody>
+<tr><th scope="row">Catto-mail Web Application</th><td>The dashboard you are using, the client API, the tracking links, sign-in. Records work in the database; never sends mail itself.</td></tr>
+<tr><th scope="row">Catto-mail Email Validator</th><td>A background worker that checks addresses (syntax, domain, mail servers, typos, disposable and role addresses).</td></tr>
+<tr><th scope="row">Catto-mail Delivery Daemon</th><td>A background worker that takes queued send jobs, builds each message, checks suppressions again and hands the message to Postfix. It also reads Postfix's logs and incoming bounces.</td></tr>
+<tr><th scope="row">Postfix Mail Transfer Agent</th><td>The mail server: delivers to recipients' mail servers on port 25 and receives bounces and complaints.</td></tr>
+<tr><th scope="row">OpenDKIM Signing Service</th><td>Adds the DKIM signature to every outgoing message; the only holder of the signing keys.</td></tr>
+<tr><th scope="row">Catto-mail Webhook Worker</th><td>Sends signed notifications to client systems.</td></tr>
+<tr><th scope="row">PostgreSQL Database</th><td>Holds all state.</td></tr>
+<tr><th scope="row">nginx Frontend</th><td>Receives HTTPS (and SMTP on port 25) from the Internet and passes it on, preserving each visitor's real address.</td></tr>
+</tbody></table>
+<p>{{ ui.help('components', 'Each component in detail') }} · {{ ui.help('architecture', 'What happens to an address and a message, step by step') }}</p>
+<h2>In one minute</h2>
+<ul class="plain">
+    <li><strong>Validating:</strong> an address list arrives (API or upload) → the validator checks each address → you see valid, invalid, risky, unknown or temporary failure, with the reason.</li>
+    <li><strong>Sending:</strong> a send job arrives → the delivery daemon claims it, skips suppressed addresses, builds each message and submits it to Postfix → OpenDKIM signs it → Postfix delivers it to the recipient's mail server, which accepts or rejects it.</li>
+    <li><strong>Tracking:</strong> a tiny image and rewritten links record opens and clicks — imperfect signals, never proof of reading.</li>
+    <li><strong>Bounces:</strong> rejections come back to the bounce domain → Postfix → the delivery daemon matches them to the message → hard bounces suppress the address everywhere.</li>
+</ul>
+<p>Every installation starts in <strong>HELD</strong> mode: nothing is delivered to the Internet until you deliberately enable live delivery at the end.</p>
+</div>

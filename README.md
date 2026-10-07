@@ -1,14 +1,24 @@
-# Smarthost
+# catto-mail (Smarthost)
 
 A self-hosted platform for **email validation**, **tracked outbound SMTP delivery**,
-**bounce and event tracking**, and **reputation control**. The data model is multi-tenant from the
-start, so it can later serve third-party clients as a SaaS.
+**bounce and event tracking**, and **reputation control**, for client applications such as a
+mailing-list application. The data model is multi-tenant from the start, so it can later serve
+third-party clients as a SaaS.
 
-**Version:** 0.1.8 · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phase 8 repository-side production readiness and Phase 9 repository-side public SaaS hardening implemented (v0.1.8, specification 2.10; public onboarding disabled); live production steps and real first-client integration outstanding
+**Version:** 0.1.9 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); live production steps and the ctnlist side of re-permission outstanding
+
+**Install it:** [docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md) — one command on a clean Ubuntu Server 26.04 LTS VPS.
+
+Contents: [What is catto-mail?](#what-is-catto-mail) · [Architecture](#architecture) ·
+[Install on an Ubuntu VPS](#install-on-an-ubuntu-vps) · [Administrator setup](#administrator-setup) ·
+[How validation works](#how-validation-works) · [How sending works](#how-sending-works) ·
+[How tracking works](#how-tracking-works) · [Production operations](#production-operations) ·
+[API integration](#api-integration) · [Troubleshooting](#troubleshooting) ·
+[Development](#development) · [Project status](#project-status)
 
 ---
 
-## What it does
+## What is catto-mail?
 
 | Function | How |
 |---|---|
@@ -26,7 +36,7 @@ merge and unsubscribe state all belong to client applications. The one exception
 explicit request not to receive email from any source using the installation, which an authorised
 client may report as a global opt-out.
 
-## Architecture at a glance
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -46,11 +56,97 @@ flowchart LR
     pf -- "log · queue snapshots · DSN Maildir" --> del
 ```
 
-Everything runs under **rootless Podman** in a single, persistent pod named `smarthost` on an
-internal network with no Internet route. The pod and its containers are ordinary Podman objects:
-they are created once and then started and stopped (also from Podman Desktop) without being
-removed; a systemd user service starts the pod when the Podman machine boots. There is no Docker, no
-Kubernetes and no message broker: PostgreSQL is the only coordination medium.
+Everything runs under **rootless Podman** as an unprivileged user; there is no Docker, no
+Kubernetes and no message broker: PostgreSQL is the only coordination medium. In production the
+eight services run as standalone containers on internal, ingress and egress networks; only nginx
+receives traffic from the Internet, through a systemd socket that preserves client addresses. In
+development they share one persistent pod. The components, one by one:
+[docs/production/components.md](docs/production/components.md); what happens to an address and a
+message, step by step: [docs/production/architecture.md](docs/production/architecture.md).
+
+## Install on an Ubuntu VPS
+
+You need an Ubuntu Server 26.04 LTS VPS with a static public IPv4, ports 25 and 443 open, outbound
+port 25 allowed, and control of the IP's PTR. Releases (notes and zip downloads) are on the
+[releases page](https://github.com/rrcatto/catto-mail/releases); `v0.1.9` is the first with the
+installer. As root:
+
+```sh
+apt-get update && apt-get install -y git
+git clone --branch vX.Y.Z --depth 1 https://github.com/rrcatto/catto-mail.git /root/catto-mail-installer
+/root/catto-mail-installer/install-catto-mail
+```
+
+It installs Podman and its helpers from Ubuntu, creates the `cattomail` service user, installs the
+release, generates the configuration and secrets, builds the images, starts everything in **HELD**
+mode (nothing is delivered to the Internet) and prints the address and a sign-in link. No DNS
+server (BIND), PHP, PostgreSQL or Postfix is installed on the host. Everything — sizing, DNS, PTR,
+Let's Encrypt, DKIM, firewall, backups, going live, upgrades — is in
+**[docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md)**.
+
+## Administrator setup
+
+After the first sign-in, the web application opens **System setup**: a resumable wizard through
+the host, web and SMTP identity, DNS (each record with a live test), TLS, DKIM, the database, each
+component, backups, a seed delivery test, a bounce test, a reboot test and a production-readiness
+summary. Every check says PASS, WARN, FAIL or SKIPPED with an explanation and a fix, and keeps a
+history (System › Diagnostics). **Help** explains every subject from the implementation. Live
+delivery stays a separate, deliberate, audited action.
+
+## How validation works
+
+The Python validator checks each address: normalisation, syntax, typo suggestions (never applied
+automatically), DNS (MX, null MX, address fallback), disposable and role flags, and — only if
+enabled — an SMTP mailbox probe with accept-all detection. Temporary failures are retried before a
+final verdict: valid, invalid, risky, unknown or temporary failure, each with its evidence. A valid
+address is evidence, never proof of a reader and never consent. Administrators can validate lists
+of up to 10,000 addresses as **address batches** and review them by separate dimensions
+(validation result, eligibility, consent, delivery, engagement).
+
+## How sending works
+
+Clients submit fully rendered messages in send jobs. The Go delivery daemon claims the job, skips
+suppressed recipients (checked again right before each message), builds each message (VERP return
+path, tracking, List-Unsubscribe) and submits it to Postfix at a controlled pace; OpenDKIM signs
+it and Postfix delivers it. Results come from Postfix's log, queue snapshots, and bounces and
+complaints received on port 25. catto-mail reports **remote accepted**, never "delivered to the
+inbox". New installations send in stages: a seed test, a controlled sample, a gradual rollout.
+
+## How tracking works
+
+When a job asks for it, each HTML message gets a tracking image and rewritten links with an opaque
+per-message token. An **open observed** means the image was fetched — by the person, a mail
+client, a privacy proxy or a scanner — so it is never proof of reading. Clicks redirect only to
+the link's stored original address. Tokens are never logged, and no cookie is set.
+
+## Production operations
+
+| Need | Where |
+|---|---|
+| Health, delivery mode, **STOP SENDING EMAIL NOW** | Operator › System › Health & delivery |
+| Every check and its history | Operator › Diagnostics |
+| Commands (`smarthostctl prod …`): logs, backups, restore, upgrade, rollback, DKIM, TLS | [docs/production/runbook.md](docs/production/runbook.md) |
+| Topology, networks, launch decisions | [docs/production/README.md](docs/production/README.md) |
+| Clients: onboarding, limits, keys, reputation, usage and billing | [docs/production/onboarding.md](docs/production/onboarding.md) |
+| Address batches and re-permission | Operator › Address batches; Help |
+
+## API integration
+
+Clients use the versioned HTTPS API (`/v1`) with an API key and receive signed webhooks; they never
+touch catto-mail's database. The contract and the integration guide are served publicly at
+`/docs/api` ([docs/api/integration-guide.md](docs/api/integration-guide.md),
+[docs/api/openapi.v1.yaml](docs/api/openapi.v1.yaml)). The ctnlist mailing-list application's
+integration, including the outstanding re-permission handling:
+[docs/integration/ctnlist.md](docs/integration/ctnlist.md).
+
+## Troubleshooting
+
+Start with Operator › Diagnostics: each FAIL or WARN says what it means and what to do. Help ›
+Troubleshooting maps symptoms to causes; logs are one command away
+(`smarthostctl prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent`).
+Installation problems: [VPS-INSTALL.md §15](docs/production/VPS-INSTALL.md#15-troubleshooting-the-installation).
+
+
 
 ## Repository layout
 
@@ -73,7 +169,11 @@ The full file-by-file description and workflow diagrams are in
 
 | Start here | Purpose |
 |---|---|
-| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.10) |
+| [docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md) | **Installing on an Ubuntu VPS** (start here) |
+| [docs/production/components.md](docs/production/components.md) | Every component: container, unit, purpose, inputs, outputs, network, data |
+| [docs/production/architecture.md](docs/production/architecture.md) | What happens to an address and a message, step by step |
+| [docs/integration/ctnlist.md](docs/integration/ctnlist.md) | The ctnlist integration and its outstanding re-permission work |
+| [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.11) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
 | [docs/development-environment.md](docs/development-environment.md) | Running the Podman environment, the application and the test suites |
@@ -83,7 +183,7 @@ The full file-by-file description and workflow diagrams are in
 | [docs/api/integration-guide.md](docs/api/integration-guide.md) | For client developers (served at `/docs/api`): authentication, jobs, limits, webhooks, and what the statuses mean |
 | [docs/README.md](docs/README.md) | Index of all contracts and architecture documents |
 
-## Quick start (development)
+## Development
 
 Requirements: rootless Podman 5.1 or later, either on a Linux host or in a Podman
 machine (WSL is supported), plus Python 3.10 or later.
@@ -107,8 +207,8 @@ the pod and containers while keeping every volume. Only `destroy-volumes --yes` 
 [docs/development-environment.md](docs/development-environment.md) §2.
 
 Production is a separate command family, `infra/bin/smarthostctl prod help`. It deploys a
-different topology on a dedicated Ubuntu 24.04 host; follow
-[docs/production/runbook.md](docs/production/runbook.md).
+different topology on a dedicated Ubuntu Server 26.04 LTS host; start with
+[docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md).
 
 The API is then at `https://127.0.0.1:8443/v1` (disposable self-signed certificate). Submitted send
 jobs are delivered by the Go daemon through Postfix and OpenDKIM to Mailpit
@@ -128,7 +228,7 @@ python3 scripts/check-contracts.py
 
 | Phase | Status |
 |---|---|
-| 0: Architecture and contracts | **Complete** (current specification 2.10) |
+| 0: Architecture and contracts | **Complete** (current specification 2.11) |
 | 1: Rootless Podman development environment | **Complete.** `smarthostctl verify` passes all 176 checks (including the persistent pod lifecycle and the DSN spool with the Phase 5 daemon); `verify --clean` additionally proves a start from destroyed volumes. |
 | 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 248/248 tests pass (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests, and the Phase 8 operations and production-guard tests). |
 | 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 295 pytest tests and the 10,000-address end-to-end run pass. |
@@ -139,6 +239,8 @@ python3 scripts/check-contracts.py
 | 7: First client API integration | **Smarthost side complete** (v0.1.7; specification 2.8). The real Symfony webhook worker: transactional outbox fan-out; HMAC-SHA256 signatures with rotation overlap; retries with backoff; at-least-once delivery with leases and fencing; SSRF protection with address pinning and no redirects; health and heartbeats. Also `POST /v1/webhooks/test`, dashboard webhook management and delivery visibility. `smarthostctl test phase7-e2e` proves the client workflow without database access using a deterministic external client (an API-only driver and an independent signature-verifying receiver): validation, a 501-recipient batched send, tracking, bounce and complaint webhooks, receiver outage, worker crash with de-duplication, permanent failure with polling fallback, and SSRF refusals. **Outstanding:** integrating the real first client application in its own repository. |
 | 8: Controlled production launch | **Repository side implemented** (v0.1.8; specification 2.9). A production topology of standalone containers on internal, ingress and egress networks (no published ports: a systemd socket-activated ingress hands 443/25 to nginx, so nginx/Symfony and Postfix see real client addresses), `smarthostctl prod` (install, build, TLS, DKIM keys, preflight, live activation, pause, backup/restore, upgrade/rollback, seed test), the production configuration profile and safety rules, held mode until an audited, preflight-gated activation, the production preflight (host, runtime, exposure, ingress, TLS, DNS/PTR/SPF/DKIM/DMARC, bounce domain, Postfix, delivery), an installation-wide warm-up ceiling and per-client throttling, Postfix queue depth on the dashboard, and the runbook. Proven by `smarthostctl test phase8` and a local production rehearsal without Internet egress (`test phase8-rehearsal`). **Outstanding (operator):** VPS, DNS/PTR, certificates, live seed and bounce tests, traffic rollout. |
 | 9: Public SaaS hardening | **Repository side implemented** (v0.1.8; specification 2.10). Client lifecycle with approval, throttling, suspension and closure (reasons, permissions, audit); public onboarding gated off (no public route); service-policy acceptance; per-client limits with concurrency-safe quotas (`429 quota-exceeded`); API-key names and expiry; usage summaries, reconciliation, provider-neutral billing statements and export; reputation metrics and alerts (no automatic action; production timer); webhook endpoint health; public API docs at `/docs/api`; a two-client isolation review and query plans at scale. Plans, prices, policy text, threshold calibration and opening public onboarding are owner decisions ([onboarding.md](docs/production/onboarding.md)). |
+
+| 10: Operator self-service | **Repository side implemented** (v0.1.9; specification 2.11). The one-command installer for Ubuntu Server 26.04 LTS (exercised on Ubuntu 26.04 under systemd), the bootstrap sign-in link, the host agent, the administrator setup wizard, diagnostics with history and the system health dashboard, the web emergency stop, Let's Encrypt DNS-01 automation, scheduled encrypted off-host backups and restore rehearsals, log shortcuts, help and tutorials, address batches (10,000 addresses) with separate state dimensions and staged sends, and the re-permission page. **Outstanding:** the real VPS steps, and ctnlist's handling of `repermission.responded`. |
 
 See [CHANGELOG.md](CHANGELOG.md).
 

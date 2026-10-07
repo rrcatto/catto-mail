@@ -1,0 +1,23 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>An old list cannot simply be mailed again: people may have forgotten they subscribed, addresses go stale, and mailing such a list damages your sending reputation. A <strong>re-permission</strong> campaign asks each person whether they still want mail, and only those who confirm stay on the list.</p>
+<h2>The workflow</h2>
+<ol>
+<li><strong>Import</strong> the old list as an address batch with purpose <em>Re-permission</em> and its List-Id.</li>
+<li><strong>Deduplicate and validate</strong> it.</li>
+<li><strong>Review</strong> typo suggestions and risky, unknown and temporary results. Existing suppressions (hard bounces, complaints, global opt-outs) are applied automatically and cannot be overridden here.</li>
+<li><strong>Get the compliance approval</strong> and record it on the batch: who approved mailing these people, when, and on what basis. The software never decides that historical re-permission is allowed.</li>
+<li><strong>Seed test</strong> the message to your own addresses.</li>
+<li><strong>Controlled</strong> send to a small sample; watch bounces, complaints and deferrals.</li>
+<li><strong>Rollout</strong> in portions, then <strong>full</strong>.</li>
+<li>People answer on their personal page; catto-mail tells the client application, which updates the subscription.</li>
+</ol>
+<h2>The three answers</h2>
+<table class="dense"><tbody>
+<tr><th scope="row">Keep me subscribed</th><td>Consent state <em>confirmed</em>. The client keeps or re-activates the subscription.</td></tr>
+<tr><th scope="row">Unsubscribe me from this list</th><td>Consent state <em>unsubscribed</em>. The client removes them from this list. This is the client's own unsubscribe: catto-mail does not turn it into a suppression, and other mail the person asked for is unaffected. A mail program's one-click unsubscribe button does the same.</td></tr>
+<tr><th scope="row">Never send me any e-mail through this service</th><td>Consent state <em>global opt-out</em>, and a global <code>recipient_global_opt_out</code> suppression: no client of this catto-mail can mail the address again unless an administrator lifts it. Final on the page.</td></tr>
+</tbody></table>
+<h2>The message</h2>
+<p>Write the subject and text (and optionally HTML) on the batch's send page with placeholders: <code>{{ '{{response_url}}' }}</code> (the personal answer page), <code>{{ '{{confirm_url}}' }}</code>, <code>{{ '{{unsubscribe_url}}' }}</code>, <code>{{ '{{global_opt_out_url}}' }}</code>. Each recipient gets their own links: 256-bit random tokens, stored only as hashes, valid for <code>APP_REPERMISSION_RESPONSE_DAYS</code> (60 days by default). The address is never in the link. Opening a link only shows the choices; the answer is a button press, so link scanners cannot answer for the recipient. Answers are idempotent and audited, and every change is sent to the client as a <code>repermission.responded</code> webhook.</p>
+{% endblock %}

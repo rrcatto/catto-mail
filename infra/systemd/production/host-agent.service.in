@@ -1,0 +1,21 @@
+# catto-mail production: the host agent (specification 2.11). Rendered by
+# `smarthostctl prod render` as <instance>-host-agent.service.
+#
+# Reports the host-side system checks (Ubuntu, Podman, lingering, units, disk, memory,
+# clock, containers, backups, boot recovery, and the production preflight) to the web
+# application and carries out the requests administrators make in the dashboard
+# (diagnostics, holding the Postfix queue, live enable/disable, backups, restore
+# rehearsals, DKIM keys, certificate renewal) with the production tooling. The web
+# application itself never runs host commands. Started and stopped by the topology
+# script with the containers.
+[Unit]
+Description=catto-mail ${SMARTHOST_INSTANCE}: host agent (system checks and dashboard requests)
+After=podman.socket
+
+[Service]
+Environment=CONTAINER_HOST=unix://%t/podman/podman.sock
+Environment=SMARTHOST_DOTENV=@DOTENV@
+Environment=SMARTHOST_GENERATED=@GENERATED@
+ExecStart=@REPO@/infra/bin/smarthostctl-prod agent run
+Restart=always
+RestartSec=15

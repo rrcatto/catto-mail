@@ -1,0 +1,26 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>catto-mail is a self-hosted mail platform for <strong>client applications</strong> — for example a mailing-list application such as ctnlist. The client application decides who gets which message;
+catto-mail does the mail infrastructure work:</p>
+<ul>
+<li><strong>Validation</strong> — checking whether addresses look deliverable, with the evidence for each verdict.</li>
+<li><strong>Sending</strong> — delivering fully prepared, per-recipient messages through its own mail server, at a controlled pace, with DKIM signatures.</li>
+<li><strong>Suppression</strong> — never mailing addresses that hard-bounced, complained or opted out globally, whichever client asks.</li>
+<li><strong>Events</strong> — recording what happened to each message: submitted, accepted by the remote server, deferred, bounced, complained, opened, clicked.</li>
+<li><strong>Notifications</strong> — telling the client application through signed webhooks and its API.</li>
+</ul>
+<h2>What catto-mail is not</h2>
+<ul>
+<li><strong>Not a mailing-list manager.</strong> Subscribers, lists, campaigns, templates and ordinary unsubscribes belong to the client application. catto-mail receives finished messages.</li>
+<li><strong>Not a guarantee of inbox delivery.</strong> It can show that the recipient's mail server accepted a message; whether it landed in the inbox or the spam folder is decided by the receiver and is not visible to the sender.</li>
+<li><strong>Not proof of reading.</strong> Opens are recorded when a tracking image is fetched, which privacy proxies and scanners also do, and many readers never load images.</li>
+<li><strong>Not consent.</strong> A valid address is evidence that mail can be delivered, never permission to send it.</li>
+</ul>
+<h2>How you use it</h2>
+<ol>
+<li>Install it on a server and complete the <a href="{{ path('dashboard_operator_setup') }}">System setup</a> (DNS, certificates, DKIM, tests).</li>
+<li>Create a client (for your mailing-list application), give it an API key and a verified sending domain.</li>
+<li>The client application validates addresses and sends through the API; you watch the dashboards, bounces, complaints and reputation alerts.</li>
+<li>For an old list, upload it as an <a href="{{ path('dashboard_operator_help_topic', {topic: 'uploading-lists'}) }}">address batch</a>, validate it and ask the people for permission again.</li>
+</ol>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>The <strong>Catto-mail Delivery Daemon</strong> is a Go program in the <code>smarthost-delivery</code> container. Postfix is an excellent mail server but knows nothing about clients, jobs, suppressions or tracking; the daemon is the layer that does.</p>
+<h2>Its responsibilities</h2>
+<ol>
+<li><strong>Claim work.</strong> It claims queued send jobs with a lease (renewed while working; a crashed daemon's jobs are picked up again) — only in LIVE mode, only for active or throttled clients, and not while the emergency stop is in force.</li>
+<li><strong>Apply suppressions.</strong> For every recipient it checks the suppression list (global and the client's) when it creates the message, and again right before submission.</li>
+<li><strong>Build the message</strong> from the client's rendered content: headers, a unique Message-ID, the <strong>VERP</strong> envelope sender <code>bounce+&lt;token&gt;@&lt;bounce domain&gt;</code> (so any bounce identifies its exact message), List-Unsubscribe headers for subscription mail, and the tracking image and rewritten links if requested.</li>
+<li><strong>Pace.</strong> It respects the installation-wide rate ceiling, per-domain concurrency and rate, the throttled-client rate, and backs off providers that defer.</li>
+<li><strong>Submit to Postfix</strong> on port 587, authenticated, encrypted. When Postfix answers with a queue id the message is <em>submitted</em> — <strong>this is where the daemon's responsibility ends and Postfix's begins.</strong></li>
+<li><strong>Follow Postfix.</strong> It reads Postfix's log to record each delivery attempt: remote accepted, deferred, bounced. It compares Postfix's queue snapshots with what it expects; a message whose queue entry vanished without a logged outcome becomes <em>outcome unknown</em>.</li>
+<li><strong>Process DSNs and complaints</strong> from the bounce spool: parse, match to the exact message by its VERP token, record, suppress where the rules say so; unmatched ones go to the operator.</li>
+<li><strong>Report</strong> a heartbeat with its mode and the Postfix queue depth every few seconds.</li>
+</ol>
+<h2>Held, live, paused</h2>
+<ul>
+<li><strong>HELD</strong> (production before live activation): it claims nothing; bounce processing and reconciliation continue.</li>
+<li><strong>LIVE</strong>: normal work.</li>
+<li><strong>PAUSED</strong> (emergency stop or pause flag): within seconds it starts no new submission; in-flight submissions finish; claimed jobs keep their leases and resume afterwards.</li>
+</ul>
+<h2>Crash recovery</h2>
+<p>Messages are created exactly once per recipient; a submission whose outcome was not recorded is reconciled against the Postfix log and queue, never blindly repeated.</p>
+<p>Logs: <code>smarthostctl prod logs delivery</code>.</p>
+{% endblock %}

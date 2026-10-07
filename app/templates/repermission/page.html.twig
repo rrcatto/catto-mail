@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Your e-mail preferences</title>
+    <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
+</head>
+<body>
+<main id="main" class="help-body">
+{% if view == 'choose' %}
+    <h1>Do you still want e-mail from {{ entry.client_name }}?</h1>
+    <p>You received a message asking whether you still want e-mail from <strong>{{ entry.client_name }}</strong>{% if entry.list_id %} (list <code>{{ entry.list_id }}</code>){% endif %}. Choose one answer. You do not need an account.</p>
+    {% if entry.consent_state in ['confirmed', 'unsubscribed'] %}<p class="flash">Your current answer: <strong>{{ entry.consent_state == 'confirmed' ? 'stay subscribed' : 'unsubscribed from this list' }}</strong>. You can change it below.</p>{% endif %}
+    {% if entry.consent_state == 'global_opt_out' %}<p class="flash">You have asked not to receive any e-mail through this service. That answer is final.</p>{% else %}
+    <form method="post" class="stack">
+        <button type="submit" name="answer" value="confirm"{% if choice == 'confirm' %} autofocus{% endif %}>Yes, keep me subscribed</button>
+        <p class="muted">You stay on this list.</p>
+        <button type="submit" name="answer" value="unsubscribe" class="secondary"{% if choice == 'unsubscribe' %} autofocus{% endif %}>Unsubscribe me from this list</button>
+        <p class="muted">You will no longer receive this list from {{ entry.client_name }}. Other messages you asked for are not affected.</p>
+        <button type="submit" name="answer" value="global_opt_out" class="danger"{% if choice == 'global_opt_out' %} autofocus{% endif %}>Never send me any e-mail through this service</button>
+        <p class="muted">Stronger than unsubscribing: no message to this address will be sent through this mail service again, for {{ entry.client_name }} or anyone else using it. This cannot be undone from this page.</p>
+    </form>{% endif %}
+{% elseif view == 'done' %}
+    <h1>Thank you</h1>
+    {% if state == 'confirmed' %}<p>You stay subscribed to {{ entry.client_name }}{% if entry.list_id %} ({{ entry.list_id }}){% endif %}.</p>
+    {% elseif state == 'unsubscribed' %}<p>You are unsubscribed from this list of {{ entry.client_name }}.</p>
+    {% else %}<p>No e-mail will be sent to this address through this service again.</p>{% endif %}
+    {% if not changed %}<p class="muted">This was already your answer; nothing changed.</p>{% endif %}
+    {% if state != 'global_opt_out' %}<p><a href="{{ path('repermission_page', {token: token}) }}">Change my answer</a></p>{% endif %}
+{% elseif view == 'seed' %}
+    <h1>Test message</h1>
+    <p>This link comes from a test message sent by the mail service's administrator. In real messages it opens a personal page where the recipient can confirm, unsubscribe or opt out completely. Nothing was recorded.</p>
+{% elseif view == 'busy' %}
+    <h1>Please try again</h1><p>Too many requests from your network. Please wait a minute and try again.</p>
+{% else %}
+    <h1>This link is not valid</h1>
+    <p>It may have expired or been replaced by a newer message. If you no longer want e-mail, use the unsubscribe link in the most recent message, or reply to the sender.</p>
+{% endif %}
+</main>
+</body>
+</html>

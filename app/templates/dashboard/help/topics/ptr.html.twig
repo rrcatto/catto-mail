@@ -1,0 +1,7 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p><strong>PTR</strong> (reverse DNS) answers "which name belongs to this IP address?". Receiving mail servers look it up for every connection: no PTR, or a generic one like <code>vps-203-0-113-10.provider.net</code>, is a strong spam signal and many servers refuse such mail.</p>
+<p><strong>The PTR is set at your VPS provider</strong>, usually in its control panel ("reverse DNS", "rDNS" or "PTR") — not in your own DNS zone, because the provider owns the IP address range.</p>
+<p><strong>FCrDNS</strong> (forward-confirmed reverse DNS): the PTR name must also resolve forward to the same IP. With PTR <code>203.0.113.10 → mta.example.com</code>, the A record <code>mta.example.com → 203.0.113.10</code> must exist. catto-mail's Postfix greets other servers with the same name (EHLO <code>mta.example.com</code>), so all three agree.</p>
+<p>Check: System setup › DNS, or <code>smarthostctl prod preflight --section dns</code>.</p>
+{% endblock %}

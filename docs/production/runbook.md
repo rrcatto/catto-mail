@@ -1,6 +1,9 @@
 # catto-mail production runbook
 
-Specification 2.10 (Phase 8; Phase 9 SaaS operations in section 21). Topology and network matrix: [README.md](README.md). Every
+Specification 2.11 (Phase 8; Phase 9 SaaS operations in section 20; operator self-service in
+section 21). **New installations start with [VPS-INSTALL.md](VPS-INSTALL.md)**: the installer
+`install-catto-mail` performs sections 1 and 2, and the web application's System setup guides
+the rest. This runbook is the reference for every command behind it. Topology and network matrix: [README.md](README.md). Every
 production command is `infra/bin/smarthostctl prod <command>` (`prod help` lists them). The
 development commands (`smarthostctl start`, `recreate`, ...) refuse a production configuration.
 
@@ -20,19 +23,21 @@ Placeholders below: `mail.example.com` (public hostname), `mta.example.com` (mai
 
 ---
 
-## 1. First VPS preparation (Ubuntu Server 24.04)
+## 1. First VPS preparation (Ubuntu Server 26.04 LTS)
+
+`install-catto-mail` does all of this (and section 2); the manual equivalent:
 
 1. A VPS with a static public IPv4 address. Your provider must allow outbound TCP 25 (many block
    it by default: ask) and must let you set the **PTR** record of the address.
 2. As root:
    ```sh
-   apt-get update && apt-get install -y podman git python3 openssl iproute2 nftables uidmap slirp4netns
+   apt-get update && apt-get install -y podman git python3 openssl iproute2 nftables uidmap slirp4netns passt rsync openssh-client lego
    adduser --disabled-password --gecos '' cattomail           # the service user (rootless Podman)
    loginctl enable-linger cattomail                           # its services start at boot
    echo 'net.ipv4.ip_unprivileged_port_start=25' > /etc/sysctl.d/60-catto-mail-ports.conf
    sysctl --system                                            # applies it now; the file applies it at every boot
    ```
-   Ubuntu 24.04 ships Podman 4.9, the minimum the preflight accepts.
+   Ubuntu 26.04 ships Podman 5.7 (the preflight accepts 4.9 and later).
 
    **Why the sysctl.** The public listeners are TCP 443 (HTTPS) and TCP 25 (SMTP). The service
    user's own systemd binds them on the host: the socket unit `smarthost-ingress.socket` hands them
@@ -76,7 +81,7 @@ Placeholders below: `mail.example.com` (public hostname), `mta.example.com` (mai
 infra/bin/smarthostctl prod init-env      # infra/.env from infra/production.env.example, secrets generated here
 $EDITOR infra/.env                        # every example.com / 203.0.113.x placeholder, SMARTHOST_IMAGE_TAG=<release>
 infra/bin/smarthostctl prod check         # contract + production safety rules: must PASS
-infra/bin/smarthostctl prod build         # images localhost/smarthost-*:<SMARTHOST_IMAGE_TAG>
+infra/bin/smarthostctl prod build         # images localhost/smarthost-*:<SMARTHOST_IMAGE_TAG>, plus the pinned PostgreSQL image
 infra/bin/smarthostctl prod tls set proxy.crt proxy.key mta.crt mta.key   # section 4
 infra/bin/smarthostctl prod install       # host check, systemd units (start at boot; the ingress socket), containers
 infra/bin/smarthostctl prod start         # postgres -> bootstrap, migrations, grants -> services (nginx via the ingress socket) -> healthy
@@ -119,11 +124,17 @@ delivery controls need.
 - **SMTP (Postfix):** a certificate for `POSTFIX_MYHOSTNAME`, used for STARTTLS on port 25 and
   submission. A publicly trusted certificate is recommended; MTAs accept self-signed ones
   opportunistically.
-- **Install or renew:**
+- **Let's Encrypt (DNS-01, specification 2.11):** set `ACME_EMAIL`, `ACME_DNS_PROVIDER` and
+  `ACME_CREDENTIALS_FILE` (VPS-INSTALL.md §5), then `prod tls acme issue`. The daily
+  `<instance>-tls-renew.timer` runs `prod tls acme renew`; `prod tls acme status` shows the state.
+  `ACME_DNS_PROVIDER=manual` prints the TXT record to create by hand.
+- **Temporary certificate:** `prod tls self-signed-bootstrap` (the installer uses it until Let's
+  Encrypt is set up; the TLS checks report it as untrusted and live activation is refused).
+- **Install or renew any certificate:**
   `prod tls set <proxy.crt> <proxy.key> <postfix.crt> <postfix.key>`. It checks that each
   certificate matches its key, replaces the Podman secrets, and recreates nginx and Postfix only.
 - **Check:** the preflight reports validity, names, trust, and expiry within 14 days.
-- Automate the renewal with your ACME client's deploy hook calling `prod tls set`.
+- With another ACME client, call `prod tls set` from its deploy hook.
 
 ## 5. DNS identity (external actions)
 
@@ -338,7 +349,9 @@ Back off (lower the values) at the first spike. A client on probation can be set
 
 ## 15. Emergency controls
 
-**Stop all outbound mail now (pause):**
+**Stop all outbound mail now (pause):** the red *STOP SENDING EMAIL NOW* button on every operator
+page does the same (it sets the database emergency stop the delivery daemon reads within seconds,
+and the host agent holds the Postfix queue). From a terminal:
 ```sh
 prod pause --operator admin@example.com --note "complaint spike from client X"
 prod pause-status
@@ -346,6 +359,7 @@ prod resume --operator admin@example.com --note "investigated: X suspended"
 ```
 
 Pause:
+- sets the database emergency stop (`smarthost:delivery:emergency-stop`, audited with the operator);
 - sets `defer_transports = smtp`, so mail already accepted by Postfix stays in the queue (nothing
   is lost or bounced);
 - writes a durable flag, so the pause survives restarts;
@@ -388,6 +402,14 @@ your compliance owner. Configuring a period today records the policy only: no de
 exists yet for the long-term categories.
 
 ## 17. Backups
+
+**Scheduled (specification 2.11):** `<instance>-backup.timer` runs `prod backup --scheduled` at
+`BACKUP_SCHEDULE`: a backup in `BACKUP_DIR`, encrypted when `BACKUP_ENCRYPTION_PASSPHRASE_FILE` is
+set (one `.tar.enc` file, AES-256), the newest `BACKUP_KEEP` kept, copied with rsync to
+`BACKUP_OFFHOST_TARGET` (SSH key `BACKUP_OFFHOST_SSH_KEY`). `prod backup-status` shows the last
+backup, the off-host copy and the last restore rehearsal; `prod restore-rehearsal [backup]`
+restores the newest backup into a temporary database, verifies it and drops it. `prod restore`
+accepts the encrypted file directly. Manual backups:
 
 ```sh
 prod backup                                   # infra/.generated/backups/<UTC timestamp>/ (0700)
@@ -459,7 +481,19 @@ Alerts (Operator › Alerts) never act on a client: decide, act through the life
 acknowledge the alert with a note. A failing preflight `runtime / reputation evaluation` check
 means the timer has not run for an hour: `prod machine systemctl list-timers`.
 
-## 21. Still to do outside the repository
+## 21. Operator self-service (specification 2.11)
+
+- **First sign-in / recovery:** `prod admin-link` prints a single-use ADMIN link (15 minutes).
+- **Host agent:** `<instance>-host-agent.service` (`prod agent run`). It records the host-side
+  checks every minute (the full preflight hourly) and carries out dashboard requests; see them
+  under Operator › System › Host requests. `prod agent once --requested` runs everything now;
+  `prod agent facts` prints what it reports. Its log: `prod logs agent`.
+- **Diagnostics:** Operator › Diagnostics (and its history); System setup for the guided checks.
+- **Logs:** `prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent [lines|-f]`.
+- **Address batches and re-permission:** Operator › Address batches; Help › Uploading lists and
+  Re-permission.
+
+## 22. Still to do outside the repository
 
 - [ ] The VPS (section 1), outbound port 25 unblocked, and the PTR of the sending IP.
 - [ ] DNS records of section 5 for the public hostname, the mail hostname and the bounce domain.

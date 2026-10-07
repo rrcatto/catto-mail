@@ -18,6 +18,8 @@ parameters:
     app.no_admin_email: ''
     app.mail_from: '%env(APP_MAIL_FROM)%'
     app.login_link_ttl_seconds: '%env(int:APP_LOGIN_LINK_TTL_SECONDS)%'
+    # Specification 2.11: how long a re-permission message's answer links stay valid.
+    app.repermission.response_days: '%env(int:APP_REPERMISSION_RESPONSE_DAYS)%'
     # Webhook worker (Phase 7, contract APP_WEBHOOK_*).
     app.webhook.max_attempts: '%env(int:APP_WEBHOOK_MAX_ATTEMPTS)%'
     app.webhook.timeout_seconds: '%env(int:APP_WEBHOOK_TIMEOUT_SECONDS)%'

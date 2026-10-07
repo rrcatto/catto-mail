@@ -1,0 +1,35 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}System health{% endblock %}
+{% block body %}
+<h1>Catto-mail system</h1>
+<p class="muted">Every line is the worst result of that component's latest checks — never just "the container exists".
+    The web application runs its own checks; the <strong>host agent</strong> (a small service on the server) runs the host, DNS, TLS, Postfix and backup checks
+    {% if agent_age is null %}<strong>but has never reported</strong>{% else %}and last reported {{ agent_age|duration }} ago{% endif %}.
+    {{ ui.help('components', 'What each component does') }}</p>
+{% if not setup_complete and is_granted('SYSTEM.SETUP.MANAGE') %}<p class="warn">The setup is not complete. <a href="{{ path('dashboard_operator_setup') }}">Continue the System setup</a>.</p>{% endif %}
+<div class="cards">
+<section class="card" aria-labelledby="comp-h">
+    <h2 id="comp-h">Components</h2>
+    <table class="dense"><tbody>
+    {% for label, c in components %}
+        <tr><th scope="row">{{ label }}</th><td>{{ ui.result(c.result) }}</td>
+            <td><small class="muted">{% set bad = c.checks|filter(x => x.result in ['fail', 'warn']) %}{% if bad is not empty %}{{ (bad|first).summary }}{% elseif c.checks is empty %}no check yet{% else %}{{ c.checks|length }} checks{% endif %}</small></td></tr>
+    {% endfor %}
+    </tbody></table>
+    <p><a href="{{ path('dashboard_operator_diagnostics') }}">All diagnostics</a> · <a href="{{ path('dashboard_operator_diagnostics_history') }}">History</a></p>
+</section>
+{% include 'dashboard/operator/system/_delivery_controls.html.twig' %}
+<section class="card" aria-labelledby="work-h">
+    <h2 id="work-h">Work and housekeeping</h2>
+    <dl>
+        <dt>Validation jobs running</dt><dd>{{ work.validation_jobs }}</dd>
+        <dt>Send jobs queued or running</dt><dd>{{ work.send_jobs }}{% if work.collecting_jobs %} <small class="muted">({{ work.collecting_jobs }} still collecting recipients)</small>{% endif %}</dd>
+        <dt>Last backup</dt><dd>{% if backup and backup.value.last_success_at is defined %}{{ backup.value.last_success_at|ts }}{% if backup.value.offhost is defined and not backup.value.offhost %} <span class="res res-warn">WARN</span> not copied off the server{% endif %}{% else %}none recorded{% endif %}</dd>
+        <dt>Certificates</dt><dd>{% for t in tls %}{{ ui.result(t.result) }} {{ t.summary }}<br>{% else %}not checked yet{% endfor %}</dd>
+        <dt>Host requests waiting</dt><dd>{{ pending_requests }} <a href="{{ path('dashboard_operator_system_requests') }}">request log</a></dd>
+        {% if host %}<dt>Server</dt><dd>{{ host.value.os|default('?') }}, Podman {{ host.value.podman|default('?') }}, up since {{ host.value.boot_time|default('?') }}</dd>{% endif %}
+    </dl>
+</section>
+</div>
+{% endblock %}
