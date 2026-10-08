@@ -358,6 +358,19 @@ None of these blocks the repository work; the defaults are safe.
 | ctnlist is not modified from this repository; the outstanding ctnlist work is specified for its own maintainers. | `docs/integration/ctnlist.md` |
 | **GitHub Releases (owner decision, v0.1.9):** each release gets a release page with its CHANGELOG notes and the source as `catto-mail-vX.Y.Z.zip`/`.tar.gz` (made with `git archive` from the tag) plus `SHA256SUMS`, next to GitHub's automatic archives. The installer and upgrades keep using the immutable Git tag. | `VPS-INSTALL.md` §12 |
 
+### Development on a local Linux engine (owner instruction, v0.2.0, 2026-10-08)
+
+The specification is unchanged: it already allows a Linux host or a WSL Podman machine for
+development and requires Podman 4.9 or later.
+
+| Choice | Where |
+|---|---|
+| **The development minimum is Podman 4.9, the specification's own minimum** (owner instruction). The README and the development guide had said 5.1. | `README.md`, `docs/development-environment.md` §1 |
+| Podman 4.9 can report `cgroup: Unit user-libpod_pod_<id>.slice not loaded` after a pod stop or removal that worked, and always does for a pod that is already stopped. The pod script judges the result instead: a stop succeeds when nothing runs, a removal when the pod is gone. Volumes are never involved. | `infra/podman/smarthost-pod.sh.in` |
+| aardvark-dns 1.4 (Ubuntu 24.04's Podman 4.9) forwards public names from the `Internal=true` network and briefly fails alias lookups while containers join or leave it. The development topology is not changed for this: the network still has no route out, and steady-state use is unaffected. Verify T06 and T13 are documented as expected failures on such engines. | `docs/development-environment.md` §1 |
+| The pinned PostgreSQL and Mailpit images are pulled once per engine by hand (documented), because the pod creates containers with `--pull never`; `smarthostctl build` does not fetch them. | `docs/development-environment.md` §1 |
+| The owner asked for release "v0.2". Release tags are `vX.Y.Z` (the installer accepts nothing else), so it is `v0.2.0`. | `CHANGELOG.md` |
+
 ## 3. Verification tasks (not architecture decisions)
 
 All seven were resolved in Phase 1 against the actual container images. The observed results are

@@ -44,7 +44,11 @@ tools() {
     -e FAKE_SMTP_PORT="$(ev FAKE_SMTP_PORT)" "$@"
 }
 pf_log() { podman exec smarthost-postfix cat "$OBS/log/postfix.log"; }
-unit_state() { "$CTL" systemctl show -p ActiveState -p SubState -p Result --value "$1" | tr '\n' ' '; }
+# "ActiveState SubState Result " in this order (with --value, systemd 255 prints them in its own order).
+unit_state() {
+  local out k; out="$("$CTL" systemctl show -p ActiveState -p SubState -p Result "$1")"
+  for k in ActiveState SubState Result; do sed -n "s/^$k=//p" <<<"$out"; done | tr '\n' ' '
+}
 # Identity of the persistent objects: pod id, then "<container id> <name>" per member.
 object_ids() { podman pod inspect smarthost --format '{{.Id}}' 2>/dev/null; podman ps -a --filter pod=smarthost --format '{{.ID}} {{.Names}}' | sort -k2; }
 member_count() { podman ps -a --filter pod=smarthost --format '{{.Names}}' | grep -c '^smarthost-' || true; }
@@ -56,8 +60,9 @@ wait_healthy() {
   while (( SECONDS < deadline )); do
     all=true
     for s in "${SERVICES[@]}"; do
-      status="$(podman inspect "smarthost-$s" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)"
-      [[ "$status" == healthy ]] || { all=false; break; }
+      # A stopped container keeps its last health status, so it must also be running.
+      status="$(podman inspect "smarthost-$s" --format '{{.State.Status}}/{{.State.Health.Status}}' 2>/dev/null || echo missing)"
+      [[ "$status" == running/healthy ]] || { all=false; break; }
     done
     $all && return 0
     sleep 3

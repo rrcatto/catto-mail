@@ -6,6 +6,44 @@ the *specification* version, which is 2.11.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
+The development environment runs on a local Linux engine with Podman 4.9, the specification's
+minimum, as well as in a WSL Podman machine; the documentation is brought up to date. Software
+version 0.2.0 (Symfony application, Go delivery daemon, validator, production image tag). No
+schema, API, vocabulary or environment-contract change; production behaviour is unchanged.
+
+### Fixed
+- `smarthostctl stop`, `restart`, `recreate` and `remove` failed on Podman 4.9. After a pod stop
+  or removal that worked, Podman 4.9 can report `cgroup: Unit user-libpod_pod_<id>.slice not
+  loaded`, and it always does for a pod that is already stopped; a failed `recreate` could leave
+  the pod removed (the volumes were kept). The pod script now judges the result: a stop succeeds
+  when nothing runs, a removal when the pod is gone.
+- `smarthostctl verify` read the systemd unit state positionally, but systemd 255 prints
+  `systemctl show --value` in its own order; it now reads ActiveState, SubState and Result by
+  name. It also counted a stopped container as healthy, because a stopped container keeps its
+  last health status, which hid a failed start; a container now counts only while it runs.
+
+### Changed
+- The development requirement is rootless Podman 4.9 or later (the README and the development
+  guide said 5.1), on a local Linux engine or in a WSL Podman machine, with lingering, the user's
+  `podman.socket`, and Python 3.10 or later with PyYAML.
+- `docs/development-environment.md`: local-engine notes; Podman 4.9 notes (the stop message, and
+  aardvark-dns 1.4 behaviour on the internal network); the one-time pull of the pinned
+  PostgreSQL and Mailpit images, which the pod creates with `--pull never`; `smarthostctl test`
+  runs the Phase 2, 3 and 4/5 suites.
+- README: requirements, the image pull in the quick start, the test phases, the version.
+- `CLAUDE.md`: commands (setup, the test suites and how to narrow them) and the cross-component
+  architecture; `docs/PROJECT.md` and the decision log updated.
+
+### Known limitations
+- With aardvark-dns 1.4 (Podman 4.9 on Ubuntu 24.04), public names resolve on the
+  `Internal=true` network, although nothing there can reach the Internet, and alias lookups can
+  fail for several seconds while containers join or leave it. `verify` T06 fails and T13 usually
+  does; steady-state use is unaffected.
+- `smarthostctl build` does not fetch the PostgreSQL and Mailpit images; pull them once per
+  engine.
+
 ## [0.1.9] - 2026-10-07
 
 Phase 10, operator self-service (specification 2.11, owner instruction): someone who did not

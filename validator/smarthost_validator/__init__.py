@@ -7,4 +7,4 @@ job counters, usage and the outbox event in fenced transactions. It has no
 public API and runs no DDL.
 """
 
-__version__ = "0.1.9"
+__version__ = "0.2.0"

@@ -185,13 +185,22 @@ cmd_start() {
   say "all ${#SERVICES[@]} services healthy"
 }
 
+# Podman 4.9 can report an error after stopping or removing a pod, when it tries to remove
+# the pod's cgroup slice once more ("Unit user-libpod_pod_<id>.slice not loaded"); it always
+# does so for an already stopped pod. What counts is the result: nothing runs, or no pod.
+running() { podman ps -q --filter "pod=$POD"; }
+
 cmd_stop() {
-  if exists; then podman pod stop --time 30 "$POD" >/dev/null; say "pod $POD stopped (pod and containers retained)"; fi
+  exists || return 0
+  if [[ -n "$(running)" ]]; then
+    podman pod stop --time 30 "$POD" >/dev/null || [[ -z "$(running)" ]] || die "pod $POD did not stop"
+  fi
+  say "pod $POD stopped (pod and containers retained)"
 }
 
 cmd_remove() {
   if exists; then
-    podman pod rm --force --time 30 "$POD" >/dev/null
+    podman pod rm --force --time 30 "$POD" >/dev/null || ! exists || die "pod $POD was not removed"
     say "pod $POD and its containers removed (named volumes kept)"
   fi
 }

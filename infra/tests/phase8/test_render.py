@@ -129,7 +129,7 @@ class ProductionRenderingTest(unittest.TestCase):
     def test_the_script_is_valid_bash_with_rendered_values(self) -> None:
         self.assertEqual(0, subprocess.run(["bash", "-n", str(self.out / "podman/smarthost-production.sh")]).returncode)
         self.assertIn("I=smarthost\n", self.script)
-        self.assertIn("TAG=0.1.9\n", self.script)
+        self.assertIn("TAG=0.2.0\n", self.script)
         self.assertIn("EGRESS_ENABLED=true\n", self.script)
         self.assertNotRegex(self.script, r"\$\{[A-Z][A-Z0-9_]*\}", "every contract placeholder is rendered")
 

@@ -5,7 +5,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 mailing-list application. The data model is multi-tenant from the start, so it can later serve
 third-party clients as a SaaS.
 
-**Version:** 0.1.9 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); live production steps and the ctnlist side of re-permission outstanding
+**Version:** 0.2.0 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); v0.2.0 runs the development environment on a local Linux Podman 4.9 engine; live production steps and the ctnlist side of re-permission outstanding
 
 **Install it:** [docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md) — one command on a clean Ubuntu Server 26.04 LTS VPS.
 
@@ -185,19 +185,21 @@ The full file-by-file description and workflow diagrams are in
 
 ## Development
 
-Requirements: rootless Podman 5.1 or later, either on a Linux host or in a Podman
-machine (WSL is supported), plus Python 3.10 or later.
+Requirements: rootless Podman 4.9 or later, either on a Linux host (local engine) or in a WSL
+Podman machine, with lingering and the user's `podman.socket` enabled, plus Python 3.10 or later
+with PyYAML. Details: [docs/development-environment.md](docs/development-environment.md) §1.
 
 ```sh
 infra/bin/smarthostctl init-env     # infra/.env with random dev secrets (gitignored)
 infra/bin/smarthostctl build        # build all images
+podman pull docker.io/library/postgres:16.15-trixie docker.io/axllent/mailpit:v1.31.0   # once per host
 infra/bin/smarthostctl secrets      # disposable dev TLS certs as Podman secrets
 infra/bin/smarthostctl dkim-dev-key # disposable dev DKIM key (OpenDKIM volume only)
 infra/bin/smarthostctl install      # systemd boot service + create the persistent pod and containers
 infra/bin/smarthostctl start        # start the existing pod (ordered: PostgreSQL, DB tasks, services)
 infra/bin/smarthostctl status       # pod and containers (they stay listed when stopped)
 infra/bin/smarthostctl verify       # Phase 1 verification suite
-infra/bin/smarthostctl test         # Phase 2 and 3 test suites (throwaway, network-less pods)
+infra/bin/smarthostctl test         # Phase 2, 3 and 4/5 test suites (throwaway, network-less pods)
 infra/bin/smarthostctl console smarthost:dev:bootstrap   # dev client + API key (shown once)
 ```
 
@@ -229,8 +231,8 @@ python3 scripts/check-contracts.py
 | Phase | Status |
 |---|---|
 | 0: Architecture and contracts | **Complete** (current specification 2.11) |
-| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify` passes all 176 checks (including the persistent pod lifecycle and the DSN spool with the Phase 5 daemon); `verify --clean` additionally proves a start from destroyed volumes. |
-| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 248/248 tests pass (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests, and the Phase 8 operations and production-guard tests). |
+| 1: Rootless Podman development environment | **Complete.** `smarthostctl verify` passes all 176 checks (including the persistent pod lifecycle and the DSN spool with the Phase 5 daemon); `verify --clean` additionally proves a start from destroyed volumes. Since v0.2.0 it also runs on a local Linux engine with Podman 4.9, where two DNS checks fail for a known aardvark-dns limitation ([§1](docs/development-environment.md#1-requirements)). |
+| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 289/289 tests pass (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests, and the Phase 8 operations and production-guard tests). |
 | 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 295 pytest tests and the 10,000-address end-to-end run pass. |
 | 4: Go/Postfix delivery pipeline | **Complete.** Leased send-job claiming, exactly-once message creation, suppression lookup, VERP, tracking, MIME and RFC 8058 headers, authenticated submission through OpenDKIM, queue-id capture with content purge and `message_submitted` metering, Postfix log ingestion with persistent cursors, D-27 reconciliation, pacing. `smarthostctl test phase4` (Go unit + PostgreSQL integration) and `test phase4-e2e` (real Postfix/OpenDKIM/Mailpit, crash/restart, 10,000 recipients) pass. |
 | 5: Inbound DSN, complaint and global suppression processing | **Complete** (v0.1.5; the spec 2.5 corrections D-36–D-38 in v0.1.6). D-30: global suppressions with provenance, the trusted-client opt-out API with durable request idempotency and operator capability, RFC 3464/6533 DSN and ARF parsing, correlation only by Smarthost identifiers (VERP, ENVID, Message-ID, queue id; never by recipient), conservative classification, the unmatched-DSN operator workflow, spool claim/reclaim/retention. `smarthostctl test phase5` and `test phase5-e2e` (real Postfix :25 and spool) pass. |

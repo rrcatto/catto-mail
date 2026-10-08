@@ -5,19 +5,62 @@ processing, D-30, v0.1.5; Phase 6: tracking and dashboards with passwordless sig
 ACL, v0.1.6; Phase 7 Smarthost side: the webhook worker, specification 2.8, v0.1.7); Phases 8 and
 9 repository side (production tooling and rehearsal, public SaaS hardening, specification 2.10,
 v0.1.8); Phase 10 operator self-service (installer, host agent, setup wizard, diagnostics, help,
-address batches, re-permission, specification 2.11, v0.1.9). `smarthostctl verify`
-passes all 176 checks (§6; `--clean` additionally starts from destroyed volumes), and
-`smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and `smarthostctl test phase4-e2e`,
-`test phase5-e2e`, `test phase6-e2e` and `test phase7-e2e` the end-to-end runs (§7).
+address batches, re-permission, specification 2.11, v0.1.9). Since v0.2.0 the environment also
+runs on a local Linux engine with Podman 4.9 (§1). `smarthostctl verify` passes all 176 checks
+(§6; `--clean` additionally starts from destroyed volumes; on Podman 4.9 two DNS checks fail, see
+§1), and `smarthostctl test` passes the Phase 2, 3 and 4/5 suites, and
+`smarthostctl test phase4-e2e`, `test phase5-e2e`, `test phase6-e2e` and `test phase7-e2e` the
+end-to-end runs (§7).
 
 ## 1. Requirements
 
-- Rootless Podman 5.1 or later. Verified with engine 6.0.2 in a WSL Podman machine (Fedora 44)
-  and client `podman-remote` 6.1.1.
-- A systemd user manager on the engine host, with lingering enabled and the user's
-  `podman.socket` available (the boot service talks to it).
-- Python 3.10 or later on the workstation (for `infra/lib/smarthost_render.py` and the contract
-  checker). `curl` is needed by the verification suite.
+- Rootless Podman 4.9 or later (the specification's minimum), either as a **local engine** on a
+  Linux host or in a **WSL Podman machine**. Verified with:
+  - Podman 4.9.3 as a local engine (the Ubuntu 24.04 packages: netavark, aardvark-dns 1.4.0,
+    cgroup v2 with systemd 255); see *Podman 4.9 notes* below;
+  - engine 6.0.2 in a WSL Podman machine (Fedora 44) with client `podman-remote` 6.1.1.
+- A systemd user manager on the engine host, with lingering enabled
+  (`loginctl enable-linger "$USER"`) and the user's `podman.socket` enabled
+  (`systemctl --user enable --now podman.socket`; the boot service talks to it).
+- Python 3.10 or later with PyYAML on the workstation (for `infra/lib/smarthost_render.py` and the
+  contract checker). `curl` is needed by the verification suite.
+- The two external images, pulled once per engine. The pod creates every container with
+  `--pull never`, so `install` or `start` fails with "image not known" without them:
+
+  ```sh
+  podman pull docker.io/library/postgres:16.15-trixie docker.io/axllent/mailpit:v1.31.0
+  ```
+
+**Start at boot.** `smarthostctl install` links `smarthost.service` into
+`~/.local/share/systemd/user/default.target.wants/`, on either kind of engine. With lingering,
+the user manager starts at boot (on WSL: when the machine starts, for example from Podman
+Desktop), and the service starts the existing `smarthost` pod.
+
+### Local Linux engine notes
+
+`smarthostctl` detects a local engine (`podman info` reports no remote service) and runs the
+systemd steps directly with `systemctl --user`. The units are installed to
+`~/.local/share/systemd/user/` as on WSL. Podman Desktop connected to the same rootless engine
+lists the `smarthost` pod and its containers; its Start and Stop buttons are the
+`podman pod start`/`stop` of §2.
+
+### Podman 4.9 notes
+
+- **Stop and remove errors.** Podman 4.9 may print
+  `removing pod … cgroup: Unit user-libpod_pod_<id>.slice not loaded` after stopping or removing
+  the pod, and always does when the pod is already stopped. The operation itself has worked.
+  `smarthostctl stop`, `restart`, `recreate` and `remove` therefore judge the result (nothing
+  running, or no pod) rather than Podman's exit status. Podman Desktop may show the same message
+  when you stop the pod there.
+- **DNS on the internal network.** aardvark-dns 1.4 answers the pod's aliases but also forwards
+  queries for public names from the `Internal=true` network, so public MX hosts resolve (verify
+  T06 fails). The network still has no route out: connections to the Internet fail, and Postfix
+  in capture mode only relays to Mailpit. While containers join or leave the network, alias
+  lookups (for example `opendkim`) can fail for several seconds; verify T13's "signing after
+  restore" check, which runs while test containers come and go, can then time out. Steady-state
+  use is not affected. Expect `verify` to report T06, and usually T13, as failed on such an
+  engine. (The production topology does not depend on aardvark-dns for service names: it uses
+  fixed addresses and `/etc/hosts`.)
 
 ### WSL Podman machine notes
 
@@ -31,11 +74,8 @@ PID 1 is WSL's `/init`; systemd runs in a nested namespace.
   `~/.config/systemd/user` is root-owned.
 - The repository must be on a path visible to the machine. `/mnt/wsl/...` is shared between WSL
   distributions.
-- **Start at boot.** `smarthost.service` is wanted by `default.target` through a link in
-  `~/.local/share/systemd/user/default.target.wants/` (`systemctl --user enable` would write to the
-  root-owned directory, and `is-enabled` therefore reports `disabled`). With lingering, the user
-  manager starts when the machine starts (for example from Podman Desktop), and the service starts
-  the existing `smarthost` pod.
+- The boot link is written directly because `systemctl --user enable` would write to the
+  root-owned directory; `is-enabled` therefore reports `disabled`.
 
 ## 2. Lifecycle
 
@@ -82,7 +122,7 @@ flowchart TD
     D --> F[start<br/>PostgreSQL → bootstrap → migrate → grants → all services healthy]
     F --> V[verify<br/>Phase 1 suite]
     F --> K[console smarthost:dev:bootstrap<br/>dev client, domain, API key]
-    D --> T[test<br/>Phase 2/3 suites, throwaway pods]
+    D --> T[test<br/>Phase 2/3/4 suites, throwaway pods]
     F --> G{status / logs}
     G --> H[stop / restart<br/>same objects]
     H --> F
@@ -96,13 +136,13 @@ flowchart TD
 |---|---|
 | `smarthostctl init-env` | Creates `infra/.env` (mode 0600, gitignored) from `infra/.env.example` and fills the secrets with random development values. Never overwrites. |
 | `smarthostctl render` | Writes one env file per consumer (least privilege, following the contract's *Consumers* column) and renders the pod script (`infra/podman/`) and the systemd units (`infra/systemd/`) into `infra/.generated/`. Rejects any variable that is not in the contract. |
-| `smarthostctl build` | Builds the seven Smarthost images (`localhost/smarthost-*:dev`). |
+| `smarthostctl build` | Builds the seven Smarthost images (`localhost/smarthost-*:dev`). The PostgreSQL and Mailpit images are not built; pull them once (§1). |
 | `smarthostctl secrets` | Creates disposable self-signed TLS certificates for Postfix and nginx as Podman secrets. |
 | `smarthostctl install` | Renders the files, installs the systemd units and the boot link (removing the pre-D-35 Quadlet units once), and creates the pod and its containers if they do not exist. It never replaces an existing pod. |
 | `smarthostctl create` | Creates the network and volumes if missing, then the pod and its containers. Fails if the pod exists. |
 | `smarthostctl dkim-dev-key [domain selector]` | Generates a dev DKIM key inside the OpenDKIM volume, creating the volume with its project label if needed. The default is `smarthost-dev.test` / `phase1`. |
 | `smarthostctl start` | Ordered start of the existing pod (see above); returns once all ten services are healthy. |
-| `smarthostctl stop` | Stops the pod (`podman pod stop`). The pod and containers are kept. |
+| `smarthostctl stop` | Stops the pod (`podman pod stop`). The pod and containers are kept. Succeeds when nothing is left running, even if Podman 4.9 reports a cgroup error (§1). |
 | `smarthostctl restart` | `stop` + `start` of the same objects. |
 | `smarthostctl recreate` | Stops, removes the pod and its containers, creates them again from the current images and configuration, starts them and shows their status. Volumes are never touched. |
 | `smarthostctl remove` | Stops and removes the pod and its containers. Volumes are kept. |
@@ -198,7 +238,8 @@ Three independent layers keep development mail off the Internet:
    - capture mode without a relayhost;
    - any value of the switch other than `true` or `false`.
 3. **Network isolation.** Containers on `smarthost-internal` have no default route.
-   - TCP to `1.1.1.1:25` fails with "Network is unreachable", and public MX hosts do not resolve.
+   - TCP to `1.1.1.1:25` fails with "Network is unreachable", and public MX hosts do not resolve
+     (with aardvark-dns 1.4 they do resolve, but are still unreachable; §1).
    - Published loopback ports and container aliases still work.
 
 ## 5. Facts established in Phase 1
@@ -254,7 +295,12 @@ The suite is `infra/tests/phase1-verify.sh`. It runs throwaway clients from
 
 The latest clean-state run (`--clean`, after Phase 4) passed all 180 checks. The latest run after
 Phase 5 (without `--clean`, so without the five T03 checks, and with the new T16 daemon check)
-passed all 176 checks.
+passed all 176 checks. On a local Podman 4.9.3 engine (v0.2.0) 174 of 176 passed; T06 (public MX
+resolution) and T13 (signing after restore) failed for the aardvark-dns reasons in §1.
+
+The suite reads the systemd unit state by property name (systemd 255 orders `--value` output
+differently) and counts a container as healthy only while it runs (a stopped container keeps its
+last health status).
 
 ## 7. The Symfony application and the test suites
 
@@ -319,7 +365,7 @@ there; meaningful validation results come from the fake DNS/SMTP scenarios of
 ### Test suites
 
 ```sh
-infra/bin/smarthostctl test                                 # Phase 2 and Phase 3 suites
+infra/bin/smarthostctl test                                 # Phase 2, 3 and 4/5 suites
 infra/bin/smarthostctl test phase2                          # PHPUnit only
 infra/bin/smarthostctl test phase2 --testsuite schema       # one suite (unit, contract, schema, integration)
 infra/bin/smarthostctl test phase3                          # pytest + end to end
@@ -470,9 +516,9 @@ an Internet route, and D-35. Production is a separate topology and command famil
 **`smarthostctl test phase8-rehearsal`** deploys the production topology as `smarthost-rehearsal`:
 - `SMARTHOST_ENV=production`, live delivery off, `SMARTHOST_EGRESS_ENABLED=false` (every network
   internal), and the ingress socket on `127.0.0.1:18443` and `127.0.0.1:12525`. Its systemd units
-  `smarthost-rehearsal-ingress.socket/.service` are installed in the Podman machine's user
-  manager. `smarthostctl prod` reaches that manager through `SMARTHOST_HOSTCTL`, a tool location it
-  sets itself for a WSL engine; the unprivileged ports need no sysctl.
+  `smarthost-rehearsal-ingress.socket/.service` are installed in the engine host's user manager.
+  With a WSL engine that is the Podman machine's, which `smarthostctl prod` reaches through
+  `SMARTHOST_HOSTCTL`, a tool location it sets itself; the unprivileged ports need no sysctl.
 - configuration under `infra/.generated/rehearsal/`;
 - images tagged `:rehearsal` and `:rehearsal2`.
 
@@ -542,6 +588,12 @@ integration tests (including the web emergency stop); `phase4-e2e` 21/21; `phase
 `phase6-e2e` 75/75; `phase7-e2e` 38/38; `test phase8` 25/25 (64 unit tests); `test
 phase8-rehearsal` 68/68 (rehearsal preflight 52 PASS, 1 WARN, 0 FAIL, 1 SKIP); `test installer
 --with-upgrade` 17/17.
+
+Latest runs (v0.2.0, on a local Podman 4.9.3 engine): `verify` 174/176 (T06 and T13, §1);
+`test phase2` 289 tests and 4,817 assertions; `test phase3` ruff, mypy, 295 pytest tests and the
+10,000-address run; `test phase4` the Go units and 34 integration tests; `test phase8` 25/25 (64
+unit tests). The end-to-end suites, the rehearsal and the installer test were not re-run for
+0.2.0, which changes no application behaviour.
 
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender

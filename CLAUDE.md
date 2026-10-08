@@ -1,4 +1,6 @@
-# CLAUDE.md — instructions for Claude Code in this repository
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
@@ -14,15 +16,90 @@ Read `AGENTS.md` first; everything there applies. This file adds Claude-specific
 4. `docs/PROJECT.md` describes every file and the main workflows. Keep it current when you add,
    move or delete files.
 
+## Commands
+The toolchains (PHP 8.5, Python 3.14, Go 1.26) exist only in the container images: every build,
+lint and test runs through Podman via `infra/bin/smarthostctl`. The host needs rootless Podman 4.9+
+(the spec's minimum), lingering and the user's `podman.socket`, and Python 3.10+ with PyYAML
+(`scripts/check-contracts.py`).
+
+```sh
+# First setup (docs/development-environment.md §1–2)
+infra/bin/smarthostctl init-env && infra/bin/smarthostctl build && infra/bin/smarthostctl secrets
+podman pull docker.io/library/postgres:16.15-trixie docker.io/axllent/mailpit:v1.31.0  # once per engine (--pull never)
+infra/bin/smarthostctl dkim-dev-key && infra/bin/smarthostctl install && infra/bin/smarthostctl start
+infra/bin/smarthostctl console smarthost:dev:bootstrap   # dev client + API key (printed once)
+
+python3 scripts/check-contracts.py    # spec <-> vocabulary <-> OpenAPI <-> DDL <-> env contract
+infra/bin/smarthostctl test           # phase2 + phase3 + phase4 in throwaway, network-less pods
+infra/bin/smarthostctl console <cmd>  # Symfony console in the running app container
+```
+
+The throwaway suites build their test images from the working tree, so they always test the
+current code. The running pod's images contain the code (no bind mounts), so the e2e suites
+(`test phase4-e2e` … `phase7-e2e`) see a change only after `build` and `recreate`.
+
+Arguments after the phase go to the underlying runner:
+
+| Suite | What runs | Narrowing it |
+|---|---|---|
+| `test phase2` | PHPUnit (`app/phpunit.dist.xml`: suites unit, contract, schema, integration). Any deprecation, notice or warning fails. No PHP linter. | `test phase2 --testsuite schema`, `test phase2 --filter GlobalSuppressionApiTest` |
+| `test phase3` | `ruff check` and `mypy`, then pytest, then the 10,000-address e2e (always) | `test phase3 tests/test_syntax.py -k <expr>` (paths relative to `validator/`) |
+| `test phase4` = `phase5` | gofmt and go vet (in the image build), Go unit tests, then all `integration`-tagged tests | `test phase4 -run TestX ./internal/dsn/...` (name the package; the default is `./...`); `PHASE4_RUN=<regex>` narrows the integration tests |
+| `test phase8` | `infra/tests/phase8` unittest, shellcheck of the shell tooling and the installer, Postfix/nginx/DKIM-tool checks | — |
+| `test phase4-e2e [A-E]`, `phase5-e2e [A-G]` | scenarios against the running pod | scenario letters |
+
+## Architecture
+Diagrams: `docs/PROJECT.md` §3. Cross-language rules: `docs/architecture/conventions.md`. These
+points span components and need several files to see:
+- **PostgreSQL is the only coordination medium.** There is no broker and no service-to-service
+  RPC. The processes share one schema, each as its own least-privilege role: `smarthost_app` (web),
+  `smarthost_webhook` (webhook worker), `smarthost_validator`, `smarthost_delivery`, and
+  `smarthost_owner` for migrations only. The grants are part of the design: Python and Go
+  deliberately lack some privileges (for example SELECT on `webhook_events`, so no
+  `ON CONFLICT`). All suites run as the real roles.
+- **Leased work.** Workers claim with `FOR UPDATE SKIP LOCKED` and a lease. Every write is fenced
+  on still holding the lease and re-checks that the client is active or throttled (D-31). Symfony
+  `NOTIFY`s `smarthost_send_work` / `smarthost_validation_work`; the workers also poll.
+- **Transactional outbox.** A client-visible change inserts `webhook_events` in the same
+  transaction. Only `smarthost:webhook:work` fans out to `webhook_deliveries` and sends.
+- **Append-only events.** `messages.current_status` is a rank-ordered projection
+  (`delivery/internal/status`), so replayed or out-of-order events never regress a message.
+- **Postfix has no API to Go.** Go submits on 587 with VERP and ENVID. It learns outcomes from:
+  - the Postfix log (`ingest`, `postfixlog`; persistent cursors);
+  - `postqueue -j` snapshots (`snapshot`, `reconcile`, D-27); both are on the shared
+    observability volume;
+  - inbound DSN/ARF files in the Maildir spool (`dsnspool`, `dsn`; claimed by rename).
+  Correlation uses only Smarthost identifiers, never the recipient address (D-36). All SQL and
+  the suppression policy live in `delivery/internal/store`.
+- **One vocabulary in three languages.** Statuses and events come from `status-vocabulary.yaml`:
+  - the PHP enums are checked against OpenAPI (contract suite);
+  - the CHECK constraints are checked against the vocabulary (schema suite);
+  - Go mirrors it in `delivery/internal/status`.
+  Address normalisation (D-32) is implemented in PHP, Python and Go and tested against the shared
+  `docs/contracts/address-normalization-vectors.json`. A change touches every copy.
+- **Contracts are enforced at runtime and in tests.**
+  - Request bodies are validated against `openapi.v1.yaml` (`app/src/Api/OpenApiContract.php`),
+    and tests validate every API response.
+  - `/v1` routes must equal the OpenAPI operations.
+  - The migrated schema must equal `reference-schema.sql`.
+- **Rendered configuration.** `infra/.env` goes through `smarthost_render.py` to per-service env
+  files, the pod script and the systemd units in `infra/.generated/`. The templates are
+  `infra/podman/smarthost-pod.sh.in` (dev) and `smarthost-production.sh.in`.
+- **Symfony layout.** Domain services are in `app/src/<Area>/`. Controllers in
+  `app/src/Controller/{Api,Dashboard}/` stay thin. Operator CLI commands are in
+  `app/src/Command/` (`smarthost:*`).
+
 ## Current state
 - **Phase 0:** complete.
 - **Phase 1** (rootless Podman development environment): complete. `infra/bin/smarthostctl verify`
-  (optionally `--clean`) re-proves it. See `docs/development-environment.md`.
+  (optionally `--clean`) re-proves it. See `docs/development-environment.md`. Since v0.2.0 it also
+  runs on a local Linux engine with Podman 4.9; there, verify T06 and T13 fail for a known
+  aardvark-dns 1.4 limitation (§1 *Podman 4.9 notes*), which is not a regression.
 - **Phase 2** (database and Symfony foundation): complete (v0.1.2). The Symfony 8.1
   application is in `app/`; `infra/bin/smarthostctl test phase2` runs its suite in a throwaway pod.
 - **Phase 3** (Python validation engine): complete (v0.1.3). The worker is in `validator/`;
   `infra/bin/smarthostctl test phase3` runs pytest and the 10,000-address end-to-end
-  run in a throwaway pod; `smarthostctl test` runs Phases 2 and 3.
+  run in a throwaway pod; `smarthostctl test` runs Phases 2, 3 and 4/5.
 - **Phase 4** (Go/Postfix delivery pipeline): complete (v0.1.4). The daemon is in `delivery/`;
   `infra/bin/smarthostctl test phase4` runs the Go unit and PostgreSQL
   integration tests in a throwaway pod; `test phase4-e2e` runs against the running pod's Postfix,
@@ -106,8 +183,9 @@ This is a public repository. Documentation, comments, examples, tests, configura
   `smarthostctl recreate` replaces them (volumes kept), and only `destroy-volumes --yes` deletes
   data. Never reintroduce Quadlet `.pod`/`.container` units or any unit that removes the pod or
   containers on stop. After rebuilding images or changing `infra/podman/smarthost-pod.sh.in`, run
-  `smarthostctl recreate`. In this development setup the engine runs in the WSL Podman machine
-  `podman-machine-default`:
+  `smarthostctl recreate`. Always run systemd steps through `smarthostctl`. With a local engine
+  on a Linux host it runs them directly. When the engine is remote, it must be the WSL Podman
+  machine (`podman-machine-default`):
   - Container commands work through `podman` (remote).
   - systemd commands must run inside the machine's systemd namespace. Use
     `infra/bin/smarthostctl`; it enters that namespace through the machine's
@@ -205,7 +283,8 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - `infra/bin/smarthostctl install` must succeed, followed by `recreate` when container
     definitions or images changed;
   - `infra/bin/smarthostctl status` must show the services healthy;
-  - `infra/bin/smarthostctl verify` must pass.
+  - `infra/bin/smarthostctl verify` must pass (on a Podman 4.9 engine: everything except T06 and
+    T13, see `docs/development-environment.md` §1).
 - For application changes: `infra/bin/smarthostctl test` must pass.
 - Report the files changed, the checks run and their results, anything unverified, and any
   specification ambiguity (see `AGENTS.md`).
