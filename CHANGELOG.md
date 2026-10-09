@@ -6,6 +6,25 @@ the *specification* version, which is 2.11.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-09
+
+An installer fix found on the first real Ubuntu Server 26.04 VPS installation. Software version
+0.2.1 (Symfony application, Go delivery daemon, validator, production image tag); the installed
+software is otherwise unchanged from 0.2.0.
+
+### Fixed
+- The installer failed at step 8 (*Starting the user's Podman socket*, log:
+  `cannot chdir to /root/catto-mail-installer: Permission denied`) when run as the guide says,
+  from a clone in root's home. `runuser` kept root's working directory, which the service user
+  cannot enter, and rootless Podman does not start there. Commands as the service user now run
+  in its home directory. Affects the installers of v0.1.9 and v0.2.0; with those, run the
+  installer from `/` (`cd / && /root/catto-mail-installer/install-catto-mail`).
+- The installer's hints and the installation guide used `sudo -u cattomail …`, which fails the
+  same way from root's home; they now use `sudo -iu cattomail …` (a login shell in the service
+  user's home).
+- The installer test ran the installer from `/`, which hid this. It now runs it as the guide
+  does: from a clone of the release tag in `/root`, without `--version`.
+
 ## [0.2.0] - 2026-10-08
 
 The development environment runs on a local Linux engine with Podman 4.9, the specification's

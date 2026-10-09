@@ -293,7 +293,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |
 | `SMARTHOST_PUBLIC_IPV4` | `203.0.113.10` | The host's public IPv4 (placeholder: TEST-NET-3). |
 | `SMARTHOST_EGRESS_ENABLED` | `true` | Postfix, validator, webhook worker and application DNS reach the Internet. |
-| `SMARTHOST_IMAGE_TAG` | `0.2.0` | The released version being deployed. |
+| `SMARTHOST_IMAGE_TAG` | `0.2.1` | The released version being deployed. |
 | `ACME_SERVER` | `https://acme-v02.api.letsencrypt.org/directory` | Let's Encrypt production; the installer fills in `ACME_EMAIL` and the provider when you choose automatic certificates. |
 | `BACKUP_SCHEDULE` | `*-*-* 03:15:00` | A daily backup. Set `BACKUP_OFFHOST_TARGET` before relying on it. |
 | `SMARTHOST_LOG_LEVEL` | `info` | |

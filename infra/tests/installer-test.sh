@@ -55,8 +55,10 @@ snapshot() {
   git -C "$RELEASE" -c user.name=installer-test -c user.email=installer-test@example.invalid commit -q --allow-empty -m "installer test $1"
   git -C "$RELEASE" tag -f "$1" >/dev/null
 }
+# install: as the guide does it, from a clone of the release tag in root's home (a directory the
+# service user cannot enter), without --version (the installer takes the checkout's tag).
 install() {
-  podman exec "$VPS" bash /src/catto-mail.git/install-catto-mail --non-interactive --repo file:///src/catto-mail.git --version v0.0.1 \
+  podman exec -w /root/catto-mail-installer "$VPS" ./install-catto-mail --non-interactive --repo file:///src/catto-mail.git \
     --web-host "mail.$NAME" --mta-host "mta.$NAME" --bounce-domain "bounce.$NAME" --admin-email "admin@$NAME" \
     --mail-from "no-reply@$NAME" --public-ip "$IP" --no-egress
 }
@@ -90,6 +92,7 @@ podman run -d --name "$VPS" --label project=smarthost --hostname vps-test --syst
   --security-opt seccomp=unconfined --cap-add SYS_ADMIN,NET_ADMIN --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
   -v "$RELEASE:/src/catto-mail.git:ro" "$IMAGE" >/dev/null
 podman exec "$VPS" systemctl is-system-running --wait >/dev/null 2>&1 || true
+podman exec "$VPS" git clone -q --branch v0.0.1 --depth 1 file:///src/catto-mail.git /root/catto-mail-installer
 
 echo "== I installation"
 if install > "$GEN/install-1.log" 2>&1; then pass "the installer finished (exit 0)"; else fail "installer exit: $(tail -n 15 "$GEN/install-1.log")"; fi

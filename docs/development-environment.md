@@ -556,7 +556,13 @@ rehearsal configuration). It checks:
   (`infra/tests/installer/Containerfile`). The installer installs everything else, including
   Podman, the service user and lingering.
 - The release is the working tree, committed as tag `v0.0.1` into a throwaway repository under
-  `infra/.generated/installer-test/`. It installs with the installer's test option
+  `infra/.generated/installer-test/`. As the guide says, the test clones that tag into
+  `/root/catto-mail-installer` and runs the installer from there without `--version`, so it
+  starts in a directory the service user cannot enter.
+- The stand-in must map the service user's subordinate IDs (from 165,536 up, after the image's
+  own `ubuntu` user), so the engine host needs more than the common 65,536 subordinate IDs
+  (`/etc/subuid` and `/etc/subgid`); otherwise step 8 fails with
+  `newuidmap: write to uid_map failed`. It installs with the installer's test option
   `--no-egress` (`SMARTHOST_EGRESS_ENABLED=false`: no container has an Internet route, and the
   production rules then accept the `.test` host names it uses), so nothing resolves and nothing
   is sent. The installer refuses private and documentation addresses as the public IPv4, so the
@@ -594,6 +600,12 @@ Latest runs (v0.2.0, on a local Podman 4.9.3 engine): `verify` 174/176 (T06 and 
 10,000-address run; `test phase4` the Go units and 34 integration tests; `test phase8` 25/25 (64
 unit tests). The end-to-end suites, the rehearsal and the installer test were not re-run for
 0.2.0, which changes no application behaviour.
+
+Latest runs (v0.2.1, installer fix): `test phase2` 289; `test phase3` 295 and the 10,000-address
+run; `test phase4` 34 integration tests; `test phase8` 25/25. Installer steps 1–8 run from a clone
+in `/root` in the Ubuntu 26.04 stand-in: the v0.2.0 installer fails step 8 (`cannot chdir`), the
+v0.2.1 installer passes it; the full installer test was not run (the engine host had only 65,536
+subordinate IDs).
 
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender

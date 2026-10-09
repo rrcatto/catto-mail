@@ -5,7 +5,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 mailing-list application. The data model is multi-tenant from the start, so it can later serve
 third-party clients as a SaaS.
 
-**Version:** 0.2.0 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); v0.2.0 runs the development environment on a local Linux Podman 4.9 engine; live production steps and the ctnlist side of re-permission outstanding
+**Version:** 0.2.1 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); v0.2.0 runs the development environment on a local Linux Podman 4.9 engine; v0.2.1 fixes the installer when run from root's home; live production steps and the ctnlist side of re-permission outstanding
 
 **Install it:** [docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md) — one command on a clean Ubuntu Server 26.04 LTS VPS.
 

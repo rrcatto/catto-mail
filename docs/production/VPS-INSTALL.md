@@ -71,7 +71,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.0`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.1`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -172,7 +172,7 @@ Release:            vX.Y.Z
 Live bulk delivery: HELD (nothing is delivered to the Internet until you enable it)
 
 First sign-in (valid 15 minutes, one use; make a new one with
-  sudo -u cattomail /home/cattomail/catto-mail/infra/bin/smarthostctl prod admin-link):
+  sudo -iu cattomail /home/cattomail/catto-mail/infra/bin/smarthostctl prod admin-link):
   https://mail.example.com/dashboard/login/verify?token=…
 
 Next step:
@@ -191,7 +191,7 @@ installer prints a link instead. It works once, for 15 minutes, only for an admi
 recorded in the audit log. Create a new one at any time on the server:
 
 ```sh
-sudo -u cattomail /home/cattomail/catto-mail/infra/bin/smarthostctl prod admin-link
+sudo -iu cattomail /home/cattomail/catto-mail/infra/bin/smarthostctl prod admin-link
 ```
 
 1. Create the **A record** of the web host name first (§4), so `mail.example.com` reaches the
@@ -515,7 +515,8 @@ the Git tag, which names exactly the same code. An unpacked archive's installer 
 | Symptom | Do |
 |---|---|
 | A step FAILs | Read its *How to fix*; the log is `/var/log/catto-mail-install.log`; re-run after fixing. |
-| The sign-in link expired | `sudo -u cattomail ~cattomail/catto-mail/infra/bin/smarthostctl prod admin-link` |
+| Step 8 FAILs with `cannot chdir to /root/…: Permission denied` in the log | The installers of v0.1.9 and v0.2.0 only: run it from a directory every user can enter, `cd / && /root/catto-mail-installer/install-catto-mail` (re-running is safe), or clone v0.2.1 or later, whose installer handles this itself. |
+| The sign-in link expired | `sudo -iu cattomail ~cattomail/catto-mail/infra/bin/smarthostctl prod admin-link` |
 | The browser cannot reach the site | The A record (§4); inbound 443 at the provider; `prod status` shows the ingress socket. |
 | "host agent never reported" | `systemctl --user status smarthost-host-agent.service` as cattomail; `prod install` installs it. |
 | Port 25 refused | `prod preflight --section host` (the low-port setting); the provider's firewall. |

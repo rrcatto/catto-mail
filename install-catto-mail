@@ -111,13 +111,16 @@ fail() {
 }
 run() { "$@" >>"$LOG" 2>&1; }
 
-# Commands as the service user, in its own systemd session environment.
+# Commands as the service user, in its own systemd session environment and in its home
+# directory. runuser keeps the caller's working directory, and the installer is usually run
+# from root's home, which the service user cannot enter; rootless Podman then fails with
+# "cannot chdir to …: Permission denied".
 as_user() {
   local uid; uid="$(id -u "$SERVICE_USER")"
-  runuser -u "$SERVICE_USER" -- env -i HOME="/home/$SERVICE_USER" USER="$SERVICE_USER" LOGNAME="$SERVICE_USER" \
-    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
+  (cd "/home/$SERVICE_USER" && runuser -u "$SERVICE_USER" -- env -i HOME="/home/$SERVICE_USER" USER="$SERVICE_USER" \
+    LOGNAME="$SERVICE_USER" PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
     XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-    bash -c "$1"
+    bash -c "$1")
 }
 APP_DIR() { echo "/home/$SERVICE_USER/catto-mail"; }
 prod() { as_user "cd $(APP_DIR) && infra/bin/smarthostctl prod $*"; }
@@ -283,7 +286,7 @@ fi
 
 step "Checking the configuration"
 prod check >>"$LOG" 2>&1 || fail "the configuration does not satisfy the production rules" \
-  "run: sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod check   (it names each problem); edit $ENV_FILE" yes
+  "run: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod check   (it names each problem); edit $ENV_FILE" yes
 pass
 
 step "Building the container images (several minutes)"
@@ -315,13 +318,13 @@ prod install >>"$LOG" 2>&1 || fail "prod install failed" "see the log; the host 
 pass "units linked into the boot target"
 
 step "Starting catto-mail in HELD mode"
-prod start >>"$LOG" 2>&1 || fail "the services did not start" "run: sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status; then prod logs <component>" yes
+prod start >>"$LOG" 2>&1 || fail "the services did not start" "run: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status; then prod logs <component>" yes
 grep -q '^SMARTHOST_LIVE_DELIVERY_ENABLED=false' "$ENV_FILE" || fail "live delivery is enabled in the configuration" "set SMARTHOST_LIVE_DELIVERY_ENABLED=false; live delivery is enabled later, deliberately" no
 pass "database initialised, migrations applied"
 
 step "Checking the health of every component"
 if ! as_user "cd $(APP_DIR) && infra/.generated/podman/smarthost-production.sh wait-healthy 300" >>"$LOG" 2>&1; then
-  fail "not every container became healthy" "sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status, then prod logs <component>" yes
+  fail "not every container became healthy" "sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status, then prod logs <component>" yes
 fi
 pass "$(as_user "podman ps --filter label=smarthost.topology=production --format '{{.Names}}'" | wc -l) containers healthy"
 
@@ -355,7 +358,7 @@ pass "lingering on, smarthost.service in the boot target"
 
 step "Creating the first sign-in link"
 LINK="$(prod "admin-link" 2>>"$LOG" | sed -n 's/^sign_in_url: //p')"
-[[ -n "$LINK" ]] && pass || warn "run later: sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod admin-link"
+[[ -n "$LINK" ]] && pass || warn "run later: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod admin-link"
 
 WEB="$(grep -E '^PROXY_SERVER_NAME=' "$ENV_FILE" | cut -d= -f2)"
 ADMIN="$(grep -E '^APP_ADMIN_EMAIL=' "$ENV_FILE" | cut -d= -f2)"
@@ -369,7 +372,7 @@ Release:            $VERSION
 Live bulk delivery: HELD (nothing is delivered to the Internet until you enable it)
 
 First sign-in (valid 15 minutes, one use; make a new one with
-  sudo -u $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod admin-link):
+  sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod admin-link):
   ${LINK:-(not created; see above)}
 
 Before the link works, $WEB must resolve to $PUBLIC_IP (an A record at your DNS provider).
