@@ -10,6 +10,7 @@ use App\Client\QuotaEnforcer;
 use App\Entity\Client;
 use App\Usage\UsagePeriod;
 use App\Usage\UsageReporting;
+use App\Util\InstallationTime;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 
@@ -30,6 +31,7 @@ final class ClientAccountReadModel
         private readonly QuotaEnforcer $quotas,
         private readonly UsageReporting $usage,
         private readonly ClientLifecycle $lifecycle,
+        private readonly InstallationTime $time,
     ) {
     }
 
@@ -104,7 +106,7 @@ final class ClientAccountReadModel
     {
         $out = [];
         foreach (['current_day', 'current_month', 'previous_month'] as $name) {
-            $out[$name] = $this->usage->clientTotals($clientId, UsagePeriod::named($name));
+            $out[$name] = $this->usage->clientTotals($clientId, UsagePeriod::named($name, $this->time->zone));
         }
 
         return $out;

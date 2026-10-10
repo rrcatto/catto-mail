@@ -1,5 +1,5 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
-<div class="scroll"><table class="dense"><tbody>
+<div class="scroll"><table class="kv dense"><tbody>
 {% for k, label in {total: 'Total recipients', waiting: 'Waiting (job not started — e.g. HELD mode)', queued: 'Queued in the delivery daemon', submitted: 'Submitted to Postfix', remote_accepted: 'Remote accepted', deferred: 'Deferred (retrying)', soft_bounced: 'Soft bounced', hard_bounced: 'Hard bounced', complaints: 'Complaints', suppressed: 'Suppressed (not sent)', failed: 'Failed', outcome_unknown: 'Outcome unknown', unresolved: 'Still unresolved', open_observed: 'Open observed', clicked: 'Clicked'} %}
 <tr><th scope="row">{{ label }}</th><td class="num">{{ (attribute(report, k) ?? 0)|number_format }}</td></tr>{% endfor %}
 </tbody></table></div>

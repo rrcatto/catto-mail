@@ -9,6 +9,8 @@ use App\Audit\AuditActor;
 use App\Dashboard\ClientAccess;
 use App\Dashboard\ClientReadModel;
 use App\Dashboard\Listing;
+use App\Dashboard\OverviewPeriod;
+use App\Dashboard\TrendCharts;
 use App\Domain\DomainRuleViolation;
 use App\Domain\SendingDomainService;
 use App\Entity\Client;
@@ -42,15 +44,21 @@ final class ClientDashboardController extends AbstractController
         private readonly ClientAccess $access,
         private readonly ClientReadModel $read,
         private readonly \App\Dashboard\ClientAccountReadModel $account,
+        private readonly \App\Util\InstallationTime $time,
     ) {
     }
 
     #[Route('', name: 'dashboard_client_overview', methods: ['GET'])]
-    public function overview(string $clientId): Response
+    public function overview(string $clientId, Request $request): Response
     {
         $client = $this->access->client($clientId);
+        $period = OverviewPeriod::fromKey($request->query->getString('period', OverviewPeriod::DEFAULT), $this->time->zone);
+        $o = $this->read->overview($clientId, $period);
 
-        return $this->page('client/overview.html.twig', $client, 'overview', ['o' => $this->read->overview($clientId),
+        return $this->page('client/overview.html.twig', $client, 'overview', ['o' => $o, 'period' => $period,
+            'periods' => array_map(static fn (array $p): string => $p[0], OverviewPeriod::PERIODS),
+            'kpis' => TrendCharts::kpis($o['trends'], $period), 'flow' => TrendCharts::flow($o['trends'], $period),
+            'validation' => TrendCharts::validation($o['trends']['validation']),
             'limits' => $this->account->limits($client), 'policy' => $this->account->policy($client),
             'may_admin' => $this->access->may(ClientVoter::ADMIN, $client)]);
     }
@@ -220,7 +228,7 @@ final class ClientDashboardController extends AbstractController
         $custom = null;
         if ('' !== $request->query->getString('from') || '' !== $request->query->getString('to')) {
             try {
-                $period = \App\Usage\UsagePeriod::custom($request->query->getString('from'), $request->query->getString('to'));
+                $period = \App\Usage\UsagePeriod::custom($request->query->getString('from'), $request->query->getString('to'), $this->time->zone);
                 $custom = ['period' => $period, 'totals' => $reporting->clientTotals($clientId, $period), 'daily' => $reporting->daily($clientId, $period)];
             } catch (\App\Domain\DomainRuleViolation $e) {
                 $this->addFlash('error', $e->getMessage());

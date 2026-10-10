@@ -22,7 +22,7 @@ final class PermissionCatalog
     private const PERMISSIONS = [
         ['key' => 'SYSTEM.ROLE.VIEW', 'group' => 'System · Access control', 'description' => 'View roles and the permissions they grant.'],
         ['key' => 'SYSTEM.ROLE.MANAGE', 'group' => 'System · Access control', 'description' => 'Create, edit and delete roles, change their permissions, and grant or revoke ADMIN.'],
-        ['key' => 'SYSTEM.DELIVERY.CONTROL', 'group' => 'System · Delivery', 'description' => 'Activate or deactivate live delivery and stop or resume all outbound mail (Operator › System, or smarthostctl prod live-enable/live-disable/pause/resume).'],
+        ['key' => 'SYSTEM.DELIVERY.CONTROL', 'group' => 'System · Delivery', 'description' => 'Activate or deactivate live delivery and stop or resume all outbound mail (Mail flow › Delivery and Stop sending, or smarthostctl prod live-enable/live-disable/pause/resume).'],
         ['key' => 'SYSTEM.SETUP.MANAGE', 'group' => 'System · Setup and diagnostics', 'description' => 'Use the administrator setup wizard: mark steps done, run the seed and bounce tests, send a test webhook.'],
         ['key' => 'SYSTEM.DIAGNOSTICS.RUN', 'group' => 'System · Setup and diagnostics', 'description' => 'Run the system checks and ask the host agent for backups, restore rehearsals, DKIM keys and TLS renewal.'],
         ['key' => 'SYSTEM.ADDRESS_BATCH.MANAGE', 'group' => 'System · Address batches', 'description' => 'Upload, validate, review and send address batches (up to 10,000 addresses) on behalf of a client, including re-permission sends.'],

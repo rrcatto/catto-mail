@@ -26,9 +26,15 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class UsageBillingTest extends ApiTestCase
 {
+    /** The installation's time zone (APP_TIMEZONE): usage periods are its calendar days and months. */
+    private function zone(): \DateTimeZone
+    {
+        return $this->container()->get(\App\Util\InstallationTime::class)->zone;
+    }
+
     private function previousMonth(string $offset = '+3 days'): string
     {
-        return (new \DateTimeImmutable('first day of last month 10:00', new \DateTimeZone('UTC')))->modify($offset)->format('Y-m-d H:i:s');
+        return (new \DateTimeImmutable('first day of last month 10:00', $this->zone()))->modify($offset)->format('Y-m-d H:i:sP');
     }
 
     /** @return array{0: \App\Entity\Client, 1: string, 2: array{job: string, messages: list<string>}, 3: string} */
@@ -51,16 +57,16 @@ final class UsageBillingTest extends ApiTestCase
         [, $id] = $this->meteredClient();
         /** @var UsageReporting $reporting */
         $reporting = $this->service(UsageReporting::class);
-        $previous = $reporting->clientTotals($id, UsagePeriod::named('previous_month'));
+        $previous = $reporting->clientTotals($id, UsagePeriod::named('previous_month', $this->zone()));
         self::assertSame(['validation_address' => ['quantity' => 30, 'records' => 1], 'message_submitted' => ['quantity' => 12, 'records' => 12]], $previous);
-        self::assertSame(7, $reporting->clientTotals($id, UsagePeriod::named('current_month'))['validation_address']['quantity']);
-        self::assertSame(7, $reporting->clientTotals($id, UsagePeriod::named('current_day'))['validation_address']['quantity']);
-        self::assertSame(0, $reporting->clientTotals($id, UsagePeriod::named('current_day'))['message_submitted']['quantity']);
-        $daily = $reporting->daily($id, UsagePeriod::named('previous_month'));
+        self::assertSame(7, $reporting->clientTotals($id, UsagePeriod::named('current_month', $this->zone()))['validation_address']['quantity']);
+        self::assertSame(7, $reporting->clientTotals($id, UsagePeriod::named('current_day', $this->zone()))['validation_address']['quantity']);
+        self::assertSame(0, $reporting->clientTotals($id, UsagePeriod::named('current_day', $this->zone()))['message_submitted']['quantity']);
+        $daily = $reporting->daily($id, UsagePeriod::named('previous_month', $this->zone()));
         self::assertSame([30, 12], [array_sum(array_column($daily, 'validation_address')), array_sum(array_column($daily, 'message_submitted'))]);
         foreach ([['2026-01-01', '2027-01-03'], ['2026-02-01', '2026-01-01'], ['2026-13-01', '2026-12-01']] as [$from, $to]) {
             try {
-                UsagePeriod::custom($from, $to);
+                UsagePeriod::custom($from, $to, $this->zone());
                 self::fail("$from..$to");
             } catch (DomainRuleViolation) {
             }
@@ -72,7 +78,7 @@ final class UsageBillingTest extends ApiTestCase
         [$client, $id, $send, $validation] = $this->meteredClient();
         /** @var UsageReconciliation $reconciliation */
         $reconciliation = $this->service(UsageReconciliation::class);
-        $period = UsagePeriod::named('previous_month');
+        $period = UsagePeriod::named('previous_month', $this->zone());
         $r = $reconciliation->reconcile($id, $period);
         self::assertSame('consistent', $r['status'], json_encode($r['findings']));
         self::assertSame(['validation_jobs' => 1, 'message_usage_records' => 12, 'messages_accepted' => 12], $r['checked']);
@@ -115,14 +121,14 @@ final class UsageBillingTest extends ApiTestCase
         [$client, $id] = $this->meteredClient();
         /** @var BillingStatementService $statements */
         $statements = $this->service(BillingStatementService::class);
-        $period = UsagePeriod::named('previous_month');
+        $period = UsagePeriod::named('previous_month', $this->zone());
         $actor = AuditActor::system('test');
         $s = $statements->prepare($this->reload($client), $period, $actor);
         self::assertSame(['draft', 'consistent'], [$s->getStatus()->value, $s->getReconciliationStatus()->value]);
         $lines = Db::owner()->fetchAllKeyValue('SELECT usage_type, quantity FROM billing_statement_lines WHERE statement_id = ? ORDER BY 1', [$s->getId()->toRfc4122()]);
         self::assertSame(['message_submitted' => 12, 'validation_address' => 30], array_map('intval', $lines));
         try {
-            $statements->prepare($this->reload($client), UsagePeriod::named('current_month'), $actor);
+            $statements->prepare($this->reload($client), UsagePeriod::named('current_month', $this->zone()), $actor);
             self::fail('only ended periods');
         } catch (DomainRuleViolation) {
         }
@@ -174,7 +180,7 @@ final class UsageBillingTest extends ApiTestCase
         [$client] = $this->meteredClient();
         /** @var BillingStatementService $statements */
         $statements = $this->service(BillingStatementService::class);
-        $period = UsagePeriod::named('previous_month');
+        $period = UsagePeriod::named('previous_month', $this->zone());
         $first = $statements->prepare($this->reload($client), $period, self::actor());
         $statements->finalize($this->reload($first), self::actor());
         $statements->void($this->reload($first), 'wrong plan applied downstream', self::actor());

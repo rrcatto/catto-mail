@@ -39,7 +39,8 @@ usage: sudo ./install-catto-mail [options]
   --web-host NAME         public web/API host name, e.g. mail.example.com
   --mta-host NAME         mail host name (EHLO and PTR), e.g. mta.example.com
   --bounce-domain NAME    bounce domain, e.g. bounce.example.com
-  --admin-email ADDRESS   the administrator's mailbox (ADMIN sign-in)
+  --admin-email ADDRESS   the administrator's existing mailbox at a mail provider (sign-in
+                          links go there; catto-mail does not receive mail for it)
   --mail-from ADDRESS     sender of the sign-in mail, at a domain you will give a DKIM key
   --public-ip ADDRESS     the server's public IPv4 (default: detected)
   --ssh-port PORT         the SSH port the firewall keeps open (default: detected)
@@ -245,7 +246,7 @@ else
   ask WEB_HOST "Public web host name (dashboard and API), e.g. mail.example.com"
   ask MTA_HOST "Mail host name (EHLO, PTR), e.g. mta.example.com" "${WEB_HOST:+mta.${WEB_HOST#*.}}"
   ask BOUNCE_DOMAIN "Bounce domain, e.g. bounce.example.com" "${WEB_HOST:+bounce.${WEB_HOST#*.}}"
-  ask ADMIN_EMAIL "Administrator e-mail address"
+  ask ADMIN_EMAIL "Administrator e-mail address (an existing mailbox at your mail provider; catto-mail receives no mail for it)"
   ask MAIL_FROM "Sender of the sign-in mail" "${WEB_HOST:+no-reply@${WEB_HOST#*.}}"
   for pair in "WEB_HOST:$WEB_HOST" "MTA_HOST:$MTA_HOST" "BOUNCE_DOMAIN:$BOUNCE_DOMAIN"; do
     valid_host "${pair#*:}" || fail "${pair%%:*} '${pair#*:}' is not a valid host name" "give a fully qualified lower-case name, e.g. mail.example.com" yes
@@ -287,7 +288,10 @@ fi
 step "Checking the configuration"
 prod check >>"$LOG" 2>&1 || fail "the configuration does not satisfy the production rules" \
   "run: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod check   (it names each problem); edit $ENV_FILE" yes
-pass
+# Sign-in links are e-mailed to the administrator, and catto-mail receives only bounce-domain mail:
+# warn when mail for that address would come to this server or has nowhere to go.
+mailbox="$(prod preflight --admin-mailbox 2>>"$LOG" || true)"
+if [[ -n "$mailbox" ]]; then warn "$mailbox"; else pass; fi
 
 step "Building the container images (several minutes)"
 tag="$(grep -E '^SMARTHOST_IMAGE_TAG=' "$ENV_FILE" | cut -d= -f2)"

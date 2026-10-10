@@ -1,7 +1,8 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
+<section class="card" aria-labelledby="seed-h">
+<div class="card-head"><h2 id="seed-h">Send a seed test</h2><span>Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>.</span></div>
 <p>Send a test message to a few addresses <strong>you own</strong> (for example one at Gmail and one at Outlook) and follow every stage. It goes out only when delivery is LIVE;
 in HELD mode the job waits at "Claimed by the delivery daemon" — that itself shows the safety is working. {{ ui.help('sending') }}</p>
-<p>Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>.</p>
 {% if clients is empty %}<p class="warn">No active client has a verified sending domain yet. Create a client for your own tests, add and verify its sending domain, and give it a DKIM key (step 7).</p>{% else %}
 <form method="post" action="{{ path('dashboard_operator_setup_test_start') }}" class="stack">{{ ui.csrf() }}<input type="hidden" name="kind" value="seed">
     <label>Send as client <select name="client">{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.domains }})</option>{% endfor %}</select></label>
@@ -10,5 +11,6 @@ in HELD mode the job waits at "Claimed by the delivery daemon" — that itself s
     <label class="check"><input type="checkbox" name="i_own_these" value="1" required> I own or control every one of these mailboxes.</label>
     <button type="submit">Send the seed test</button>
 </form>{% endif %}
-<p>After it arrives: show images (to record the open) and click the link (to record the click), then confirm below what you see in the message's headers.</p>
+<p class="muted">After it arrives: show images (to record the open) and click the link (to record the click), then confirm below what you see in the message's headers.</p>
+</section>
 {% include 'dashboard/operator/setup/steps/_test_reports.html.twig' %}

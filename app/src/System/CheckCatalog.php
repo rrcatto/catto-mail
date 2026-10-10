@@ -39,6 +39,7 @@ final class CheckCatalog
         'dns.mx' => ['Bounces reach this server: the bounce domain\'s MX points here.', 'Create the MX record of the bounce domain.', 'bounces'],
         'dns.spf' => ['SPF authorises this IP to send for the envelope domain and the EHLO name.', 'Publish the SPF TXT record shown in System setup › DNS.', 'spf'],
         'dns.dmarc' => ['The sending domain publishes a DMARC policy.', 'Publish a DMARC TXT record (start with p=none).', 'dmarc'],
+        'dns.mailbox' => ['The administrator\'s address is a mailbox at a mail provider. Sign-in links are e-mailed, and catto-mail itself receives only bounce-domain mail, so it refuses mail for any other address.', 'Point the domain\'s MX at a mail provider (for example the registrar\'s e-mail forwarding). Until then, sign in with: smarthostctl prod admin-link.', 'dns'],
         'dns.inbound-smtp' => ['Port 25 of this server is reachable from the Internet (bounces and complaints arrive here).', 'Ask the VPS provider to allow inbound TCP 25; check the host firewall.', 'postfix'],
         'dkim.' => ['Each sending domain has an active DKIM key whose public half is published in DNS.', 'System setup › DKIM: generate, publish, test, activate.', 'dkim'],
         'postfix.port-25-is-not-an-open-relay' => ['Postfix refuses to relay mail for strangers. An open relay would be abused within hours.', 'Do not change the Postfix configuration; report a FAIL as a bug.', 'postfix'],

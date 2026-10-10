@@ -69,7 +69,7 @@ final class TrackingStatisticsTest extends ApiTestCase
         // Every event is kept: nothing was de-duplicated away by the aggregation.
         self::assertSame(10, (int) $o->fetchOne("SELECT count(*) FROM message_events e JOIN messages m ON m.id = e.message_id WHERE m.send_job_id = ? AND e.event_source = 'tracking_endpoint'", [$set['job']]));
 
-        $overview = $read->overview($clientId);
+        $overview = $read->overview($clientId, \App\Dashboard\OverviewPeriod::fromKey('30d', $this->container()->get(\App\Util\InstallationTime::class)->zone));
         self::assertSame(['open_events' => 6, 'opened_messages' => 4, 'click_events' => 4, 'clicked_messages' => 3],
             array_map('intval', $overview['engagement']));
     }

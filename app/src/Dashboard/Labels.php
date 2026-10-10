@@ -72,7 +72,7 @@ final class Labels
         'client_origin' => ['operator' => 'Created by an operator', 'public_application' => 'Public application'],
         'quota_metric' => ['validation_jobs' => 'Validation jobs', 'validation_addresses' => 'Validation addresses submitted',
             'send_jobs' => 'Send jobs', 'send_recipients' => 'Send recipients accepted'],
-        'quota_period' => ['day' => 'Today (UTC)', 'month' => 'This month (UTC)'],
+        'quota_period' => ['day' => 'Today', 'month' => 'This month'],
         'alert_metric' => ['hard_bounce_rate' => 'Hard-bounce rate', 'complaint_rate' => 'Complaint rate',
             'deferral_rate' => 'Deferral / soft-bounce rate', 'volume_increase' => 'Volume increase'],
         'alert_severity' => ['warning' => 'Warning', 'critical' => 'Critical'],

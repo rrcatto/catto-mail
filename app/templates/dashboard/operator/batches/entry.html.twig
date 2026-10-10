@@ -4,23 +4,34 @@
 {% block body %}
 {% set e = entry %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Address</p>
-<h1>{{ e.normalized_address ?? e.original_value }}</h1>
-<div class="cards">
-<section class="card"><h2>Its states</h2><table class="kv dense"><tbody>
-<tr><th scope="row">Uploaded as</th><td>{{ e.original_value }} (row {{ e.row_number }}, {{ e.outcome }})</td></tr>
-<tr><th scope="row">Validation result</th><td>{{ e.outcome == 'imported' ? labels.validation[e.validation_result] : '—' }}{% for f in e.flags %} <span class="tag">{{ f|replace({'_': ' '}) }}</span>{% endfor %}<br><small>{{ e.explanation }}</small></td></tr>
-<tr><th scope="row">Evidence</th><td>syntax {{ e.syntax_status ?? '—' }} · domain {{ e.domain_status ?? '—' }} · SMTP {{ e.smtp_status ?? '—' }} · confidence {{ e.confidence ?? '—' }} · code {{ e.diagnostic_code ?? '—' }}</td></tr>
-<tr><th scope="row">Send eligibility</th><td>{{ labels.eligibility[e.eligibility] }}{% if e.suppression_reason %} ({{ e.suppression_reason }}, {{ e.suppression_scope }}){% endif %}</td></tr>
-<tr><th scope="row">Consent (answers)</th><td>{{ labels.consent[e.consent_state] }}</td></tr>
-<tr><th scope="row">Delivery</th><td>{{ labels.delivery[e.delivery_state] ?? e.delivery_state }}</td></tr>
-<tr><th scope="row">Engagement</th><td>{{ labels.engagement[e.engagement] }}</td></tr>
-</tbody></table></section>
-<section class="card"><h2>Timeline</h2>
-<p class="muted">Only recorded events are shown. DKIM signing happens inside Postfix and is not recorded per message; check it in a received copy.</p>
+<div class="pagehead">
+    <div>
+        <h1>{{ e.normalized_address ?? e.original_value }}</h1>
+        <p class="sub">Row {{ e.row_number }} of {{ batch.name }} · {{ e.outcome }}</p>
+    </div>
+</div>
+<div class="row-2">
+<section class="card" aria-labelledby="states-h"><h2 id="states-h">Its states</h2>
+<dl class="rows">
+<dt>Uploaded as</dt><dd>{{ e.original_value }} (row {{ e.row_number }}, {{ e.outcome }})</dd>
+<dt>Validation result</dt><dd>{{ e.outcome == 'imported' ? labels.validation[e.validation_result] : '—' }}{% for f in e.flags %} <span class="tag">{{ f|replace({'_': ' '}) }}</span>{% endfor %}<br><small>{{ e.explanation }}</small></dd>
+<dt>Evidence</dt><dd>syntax {{ e.syntax_status ?? '—' }} · domain {{ e.domain_status ?? '—' }} · SMTP {{ e.smtp_status ?? '—' }} · confidence {{ e.confidence ?? '—' }} · code {{ e.diagnostic_code ?? '—' }}</dd>
+<dt>Send eligibility</dt><dd>{{ labels.eligibility[e.eligibility] }}{% if e.suppression_reason %} ({{ e.suppression_reason }}, {{ e.suppression_scope }}){% endif %}</dd>
+<dt>Consent (answers)</dt><dd>{{ labels.consent[e.consent_state] }}</dd>
+<dt>Delivery</dt><dd>{{ labels.delivery[e.delivery_state] ?? e.delivery_state }}</dd>
+<dt>Engagement</dt><dd>{{ labels.engagement[e.engagement] }}</dd>
+</dl>
+</section>
+<section class="card" aria-labelledby="tl-h"><h2 id="tl-h">Timeline</h2>
+<p class="muted small">Only recorded events are shown. DKIM signing happens inside Postfix and is not recorded per message; check it in a received copy.</p>
 <ol class="timeline">{% for t in timeline %}<li class="ev"><strong>{{ t.what }}</strong> <small>{{ t.at|ts }}</small>{% if t.detail %}<br><small>{{ t.detail }}</small>{% endif %}</li>{% endfor %}</ol>
 </section>
 </div>
-{% if evidence is not empty %}<h2>Validator evidence</h2>
-<table class="dense"><thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Host</th><th scope="col">Code</th><th scope="col">Detail</th></tr></thead>
-<tbody>{% for v in evidence %}<tr><td>{{ v.occurred_at|ts }}</td><td>{{ v.evidence_type }}</td><td>{{ v.provider_host }}</td><td>{{ v.response_code }} {{ v.enhanced_status_code }}</td><td><small>{{ v.detail_json }}</small></td></tr>{% endfor %}</tbody></table>{% endif %}
+{% if evidence is not empty %}
+<section class="card card-flush" aria-labelledby="evi-h">
+<div class="card-head"><h2 id="evi-h">Validator evidence</h2></div>
+<div class="scroll"><table class="dense"><thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Host</th><th scope="col">Code</th><th scope="col">Detail</th></tr></thead>
+<tbody>{% for v in evidence %}<tr><td>{{ v.occurred_at|ts }}</td><td>{{ v.evidence_type }}</td><td>{{ v.provider_host }}</td><td>{{ v.response_code }} {{ v.enhanced_status_code }}</td><td><small class="diag">{{ v.detail_json }}</small></td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endif %}
 {% endblock %}

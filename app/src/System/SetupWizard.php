@@ -16,7 +16,7 @@ use Doctrine\DBAL\Connection;
  * The administrator setup wizard (specification 2.11). The steps follow the system's real
  * dependencies; each shows the checks of its components, explains them and links to help.
  * Progress is stored (setup_steps), so the wizard can be left and resumed, and it stays
- * available afterwards as Operator › System setup. A step is never "done" by itself: the
+ * available afterwards as System › System setup. A step is never "done" by itself: the
  * administrator marks it done when its checks are satisfactory (or skips it to come back).
  */
 final class SetupWizard

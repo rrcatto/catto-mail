@@ -1,105 +1,108 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
+{% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}{{ client.companyName }} – Overview{% endblock %}
+{% block pills %}
+<nav class="pills" aria-label="Period">
+    {% for key, label in periods %}<a class="pill" href="{{ path('dashboard_client_overview', {clientId: client.id.toRfc4122, period: key}) }}"{% if key == period.key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>
+{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
-<h1>{{ client.companyName }}</h1>
-<p>Client status: {{ ui.status(client.status.value, 'client_status') }}</p>
+<div class="pagehead">
+    <div>
+        <div class="titleline"><h1>{{ client.companyName }}</h1>{{ ui.status(client.status.value, 'client_status') }}</div>
+        <p class="sub">{{ client.approvedAt ? 'Approved ' ~ client.approvedAt|date('j M Y', time_zone()) : 'Not approved yet' }}
+            · {{ policy.version_in_force ? (policy.accepted ? 'service policy version ' ~ policy.version_in_force ~ ' accepted' : (policy.required ? 'service policy version ' ~ policy.version_in_force ~ ' not yet accepted' : 'no service policy acceptance required')) : 'no service policy in force' }}
+            · the last {{ period.label }}</p>
+    </div>
+    <div class="actions"><a class="btn btn-secondary" href="{{ path('docs_api') }}">{{ icon.i('list', 18) }}API reference</a></div>
+</div>
+
+{% if client.status.value != 'active' %}
+<section class="banner banner-client-{{ client.status.value }}" aria-label="Account status">
+    <div class="banner-text"><h2>{{ client.status.value|label('client_status') }}</h2><p>{{ client.status.value|label('client_status_meaning') }}</p></div>
+</section>
+{% else %}
 <p class="muted">{{ client.status.value|label('client_status_meaning') }}</p>
+{% endif %}
+
 {% if policy.version_in_force and policy.required and not policy.accepted %}
-<section class="card">
-    <h2>Service policy</h2>
+<section class="card card-accent" aria-labelledby="policy-h">
+    <h2 id="policy-h">Service policy</h2>
     <p>Before this account can be approved, a client admin must accept the service policy, version <strong>{{ policy.version_in_force }}</strong>, as published by the operator.</p>
     {% if may_admin %}
     <form method="post" action="{{ path('dashboard_client_policy_accept', {clientId: cid}) }}" class="stack">
         {{ ui.csrf() }}<input type="hidden" name="policy_version" value="{{ policy.version_in_force }}">
-        <label><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
+        <label class="check"><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
         <button type="submit">Accept policy {{ policy.version_in_force }}</button>
     </form>
     {% else %}<p class="muted">Ask a client admin to accept it.</p>{% endif %}
 </section>
 {% endif %}
 
-<div class="cards">
-    <section class="card">
-        <h2>Account</h2>
-        <dl>
-            <dt>Created</dt><dd>{{ client.createdAt|ts }}</dd>
-            <dt>Approved</dt><dd>{{ client.approvedAt ? client.approvedAt|ts : 'not yet' }}</dd>
-            <dt>Status since</dt><dd>{{ client.statusChangedAt|ts }}</dd>
-            <dt>Service policy</dt><dd>{{ policy.version_in_force ? (policy.accepted ? 'Version ' ~ policy.version_in_force ~ ' accepted' : (policy.required ? 'Version ' ~ policy.version_in_force ~ ' not yet accepted' : 'Not required')) : 'No policy version in force' }}</dd>
-        </dl>
-        <h3>Today and this month (UTC)</h3>
-        <ul class="plain">{% for q in limits.quotas %}{% if q.limit is not null or q.used > 0 %}<li>{{ q.metric|label('quota_metric') }}, {{ q.period == 'day' ? 'today' : 'this month' }}: {{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}</li>{% endif %}{% endfor %}</ul>
-        <p class="muted">Work beyond a quota is refused with HTTP 429 (problem type quota-exceeded) until the period resets. <a href="{{ path('dashboard_client_usage', {clientId: cid}) }}">All limits and usage</a></p>
-    </section>
-
-    <section class="card">
-        <h2>Validation</h2>
-        <dl>
-            <dt>Jobs</dt><dd>{{ o.validation.jobs|number_format }} ({{ o.validation.active_jobs|number_format }} in progress)</dd>
-            <dt>Addresses submitted</dt><dd>{{ o.validation.addresses|number_format }}</dd>
-            <dt>Addresses checked</dt><dd>{{ o.validation.processed|number_format }}</dd>
-        </dl>
-        {% if o.classifications is not empty %}
-            <h3>Results by classification</h3>
-            <ul class="counts">{% for k, v in o.classifications %}<li>{{ k|label('classification') }}: {{ v|number_format }}</li>{% endfor %}</ul>
+<div class="row-2 row-wide-left">
+    {% include 'dashboard/_flow_card.html.twig' with {flow_title: 'Messages per ' ~ period.unit} %}
+    <section class="card" aria-labelledby="quota-h">
+        <div class="card-head"><h2 id="quota-h">Quotas</h2><a class="more" href="{{ path('dashboard_client_usage', {clientId: cid}) }}">All limits and usage</a></div>
+        {% set shown = limits.quotas|filter(q => q.limit is not null or q.used > 0) %}
+        {% if shown is empty %}
+            <p class="empty">No quota is set for this account and nothing has been counted today or this month.</p>
+        {% else %}
+        <ul class="quotas">
+            {% for q in shown %}
+            {% set pct = q.limit ? min(100, 100 * q.used / q.limit) : null %}
+            <li>
+                <svg class="ring" viewBox="0 0 80 80" role="img" aria-label="{{ q.metric|label('quota_metric') }}, {{ q.period|label('quota_period')|lower }}: {{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}">
+                    <circle class="ring-track" cx="40" cy="40" r="32"/>
+                    {% if pct is not null %}<circle class="ring-fill ring-{{ pct >= 90 ? 'bad' : (pct >= 75 ? 'warn' : 'ok') }}" cx="40" cy="40" r="32" pathLength="100" stroke-dasharray="{{ max(0.5, pct)|round(1) }} 100" transform="rotate(-90 40 40)"/>{% endif %}
+                    <text class="ring-text" x="40" y="45" text-anchor="middle">{{ pct is null ? 'no limit' : pct|round ~ '%' }}</text>
+                </svg>
+                <span><span class="quota-name">{{ q.metric|label('quota_metric') }}</span>
+                    <span class="quota-period">{{ q.period|label('quota_period') }} ({{ time_zone_abbreviation() }})</span>
+                    <span class="quota-used">{{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}</span></span>
+            </li>
+            {% endfor %}
+        </ul>
         {% endif %}
-        <p class="muted">Validation estimates deliverability; it does not prove that a mailbox will accept a message.</p>
-    </section>
-
-    <section class="card">
-        <h2>Sending (all jobs)</h2>
-        {% set s = o.statuses %}
-        <dl>
-            <dt>Send jobs</dt><dd>{{ o.sending.jobs|number_format }} ({{ o.sending.active_jobs|number_format }} in progress)</dd>
-            <dt>Recipients</dt><dd>{{ o.sending.recipients|number_format }}</dd>
-            <dt>Remote accepted</dt><dd>{{ (s.remote_accepted ?? 0)|number_format }}</dd>
-            <dt>Deferred (still retrying)</dt><dd>{{ (s.deferred ?? 0)|number_format }}</dd>
-            <dt>Soft bounced</dt><dd>{{ (s.soft_bounced ?? 0)|number_format }}</dd>
-            <dt>Hard bounced</dt><dd>{{ (s.hard_bounced ?? 0)|number_format }}</dd>
-            <dt>Complaints</dt><dd>{{ (s.complained ?? 0)|number_format }}</dd>
-            <dt>Suppressed (not sent)</dt><dd>{{ (s.suppressed ?? 0)|number_format }}</dd>
-            <dt>Outcome unknown</dt><dd>{{ (s.outcome_unknown ?? 0)|number_format }}</dd>
-            <dt>Failed</dt><dd>{{ (s.failed ?? 0)|number_format }}</dd>
-        </dl>
-        <p class="muted">“Remote accepted” means the receiving mail server accepted responsibility for the message. It does not prove inbox placement or that anyone received it.</p>
-    </section>
-
-    <section class="card">
-        <h2>Engagement (jobs of the last {{ o.engagement_window_days }} days)</h2>
-        <dl>
-            <dt>Messages with a recorded open</dt><dd>{{ o.engagement.opened_messages|number_format }}</dd>
-            <dt>Recorded open events</dt><dd>{{ o.engagement.open_events|number_format }}</dd>
-            <dt>Messages with a recorded click</dt><dd>{{ o.engagement.clicked_messages|number_format }}</dd>
-            <dt>Recorded click events</dt><dd>{{ o.engagement.click_events|number_format }}</dd>
-        </dl>
-        {% include 'dashboard/_engagement_caveat.html.twig' %}
-    </section>
-
-    <section class="card">
-        <h2>Sending domains</h2>
-        {% if o.domains is empty %}<p>No sending domains yet.</p>{% else %}
-        <ul class="plain">{% for d in o.domains %}<li>{{ d.domain }} – {{ ui.status(d.status, 'domain_status') }}, DKIM {{ d.dkim_status|label('dkim_status') }}</li>{% endfor %}</ul>
-        {% endif %}
-        <p><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Sending domain details</a></p>
-    </section>
-
-    <section class="card">
-        <h2>Usage this month</h2>
-        <dl>
-            <dt>Validation addresses</dt><dd>{{ (o.usage_this_month.validation_address ?? 0)|number_format }}</dd>
-            <dt>Messages submitted</dt><dd>{{ (o.usage_this_month.message_submitted ?? 0)|number_format }}</dd>
-        </dl>
-        <p><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}">Usage history</a></p>
+        <p class="muted small">Work beyond a quota is refused with HTTP 429 (problem type quota-exceeded) until the period resets, at midnight {{ time_zone_abbreviation() }}.</p>
     </section>
 </div>
 
-<h2>Recent validation jobs</h2>
-{% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: o.recent_validation_jobs, listing: null} %}
-<p><a href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}">All validation jobs</a></p>
+{% include 'dashboard/_kpis.html.twig' %}
 
-<h2>Recent send jobs</h2>
-{% include 'dashboard/client/_send_job_rows.html.twig' with {rows: o.recent_send_jobs, listing: null} %}
-<p><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">All send jobs</a></p>
+<div class="grid grid-4">
+    {% include 'dashboard/_validation_card.html.twig' with {validation_link: path('dashboard_client_validation_jobs', {clientId: cid})} %}
+    <section class="card" aria-labelledby="dom-h">
+        <div class="card-head"><h2 id="dom-h">Sending domains</h2><a class="more" href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Details</a></div>
+        {% if o.domains is empty %}<p class="empty">No sending domains yet. An operator registers them.</p>{% else %}
+        <ul class="domains">{% for d in o.domains %}
+            <li><span class="domain-name">{{ d.domain }}</span>
+                <span class="domain-state">{{ ui.status(d.status, 'domain_status') }}<span class="st st-dkim-{{ d.dkim_status }}">DKIM {{ d.dkim_status|label('dkim_status')|lower }}</span></span></li>
+        {% endfor %}</ul>
+        {% endif %}
+        <p class="muted small">A domain sends only when it is verified and its DKIM key is active.</p>
+    </section>
+    <section class="card" aria-labelledby="eng-h">
+        <h2 id="eng-h">Engagement</h2>
+        <p class="muted small">Send jobs of the last {{ period.label }}.</p>
+        <dl class="facts facts-2">
+            <div><dt>Messages with a recorded open</dt><dd>{{ o.engagement.opened_messages|number_format }}</dd></div>
+            <div><dt>Recorded open events</dt><dd>{{ o.engagement.open_events|number_format }}</dd></div>
+            <div><dt>Messages with a recorded click</dt><dd>{{ o.engagement.clicked_messages|number_format }}</dd></div>
+            <div><dt>Recorded click events</dt><dd>{{ o.engagement.click_events|number_format }}</dd></div>
+        </dl>
+        {% include 'dashboard/_engagement_caveat.html.twig' %}
+    </section>
+</div>
+
+<section class="card card-flush" aria-labelledby="rs-h">
+    <div class="card-head"><h2 id="rs-h">Recent send jobs</h2><span class="muted small">{{ o.active_send_jobs }} in progress</span><a class="more" href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">All send jobs</a></div>
+    {% include 'dashboard/client/_send_job_rows.html.twig' with {rows: o.recent_send_jobs, listing: null} %}
+</section>
+
+<section class="card card-flush" aria-labelledby="rv-h">
+    <div class="card-head"><h2 id="rv-h">Recent validation jobs</h2><span class="muted small">{{ o.validation.active_jobs }} in progress</span><a class="more" href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}">All validation jobs</a></div>
+    {% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: o.recent_validation_jobs, listing: null} %}
+</section>
 {% endblock %}

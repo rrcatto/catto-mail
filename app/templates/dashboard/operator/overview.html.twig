@@ -1,114 +1,207 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
-{% block title %}System overview{% endblock %}
+{% import 'dashboard/_icons.html.twig' as icon %}
+{% import _self as page %}
+{% block title %}Overview{% endblock %}
+{% block pills %}
+<nav class="pills" aria-label="Period">
+    {% for key, label in periods %}<a class="pill" href="{{ path('dashboard_operator_overview', {period: key}) }}"{% if key == period.key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>
+{% endblock %}
 {% block body %}
-<h1>System overview</h1>
-<p class="muted">Figures come from the database as of this page load (no live probes): work queues, worker leases and the newest results the workers wrote. A worker that is down shows up as stalled work rather than as an error here.</p>
-<div class="cards">
-    <section class="card">
-        <h2>Validation (Python worker)</h2>
-        {% set v = o.validation %}
-        <dl>
-            <dt>Jobs queued or processing</dt><dd>{{ v.active_jobs|number_format }}{% if v.oldest_active_job %} (oldest submitted {{ v.oldest_active_job|ts }}){% endif %}</dd>
-            <dt>Addresses waiting</dt><dd>{{ v.pending|number_format }}</dd>
-            <dt>Waiting to retry</dt><dd>{{ v.retry_scheduled|number_format }}</dd>
-            <dt>Being checked now</dt><dd>{{ v.claimed|number_format }} by {{ v.active_workers }} worker{{ v.active_workers == 1 ? '' : 's' }}</dd>
-            <dt>Expired leases (awaiting reclaim)</dt><dd>{{ v.expired_leases|number_format }}</dd>
-            <dt>Newest result of a job in progress</dt><dd>{{ o.validation_last_result|ts }}</dd>
-            <dt>Last job completed</dt><dd>{{ o.validation_last_completed|ts }}</dd>
-        </dl>
-        {% if v.pending > 0 and v.active_workers == 0 %}<p class="warn" role="status"><strong>Attention:</strong> addresses are waiting and no validation worker holds a lease.</p>{% endif %}
-    </section>
-    <section class="card">
-        <h2>Delivery (Go daemon)</h2>
-        {% set s = o.sending %}
-        <dl>
-            <dt>Send jobs queued</dt><dd>{{ s.queued_jobs|number_format }}{% if s.oldest_queued %} (oldest {{ s.oldest_queued|ts }}){% endif %}</dd>
-            <dt>Send jobs processing</dt><dd>{{ s.processing_jobs|number_format }} ({{ s.leased_jobs }} leased by {{ s.active_workers }} worker{{ s.active_workers == 1 ? '' : 's' }})</dd>
-            <dt>Dispatched, awaiting outcomes</dt><dd>{{ s.dispatched_jobs|number_format }}</dd>
-            {% for c in o.ingest %}<dt>Ingest cursor “{{ c.source }}” last advanced</dt><dd>{{ c.updated_at|ts }}</dd>{% else %}<dt>Postfix-log ingest</dt><dd>No cursor recorded yet</dd>{% endfor %}
-        </dl>
-        {% if (s.queued_jobs + s.processing_jobs) > 0 and s.active_workers == 0 %}<p class="warn" role="status"><strong>Attention:</strong> send work is waiting and no delivery worker holds a lease.</p>{% endif %}
-    </section>
-    <section class="card">
-        <h2>Delivery state and Postfix queue</h2>
-        {% set d = o.delivery|filter(x => x.alive)|first %}
-        {% if d %}
-        <dl>
-            <dt>Delivery state</dt><dd>{% if d.outbound_paused %}<strong>Paused by the operator</strong>{% elseif d.send_work_held %}<strong>Held: live delivery not activated</strong>{% elseif d.live_delivery %}Live{% else %}Capture (development){% endif %}</dd>
-            <dt>Warm-up ceiling</dt><dd>{{ d.global_rate_per_minute > 0 ? d.global_rate_per_minute ~ ' submissions/min' : 'none' }}</dd>
-            {% if d.queue_snapshot_at %}
-            <dt>Postfix queue active / deferred / hold</dt><dd>{{ d.queue_active|number_format }} / {{ d.queue_deferred|number_format }} / {{ d.queue_hold|number_format }}</dd>
-            <dt>Postfix queue incoming</dt><dd>{{ d.queue_incoming|number_format }}</dd>
-            <dt>Queue snapshot taken</dt><dd>{{ d.queue_snapshot_at|ts }}</dd>
-            {% endif %}
-            <dt>Delivery daemon</dt><dd>{{ d.version }}, last seen {{ d.last_seen_at|ts }}</dd>
-        </dl>
-        {% if not d.queue_snapshot_at or not d.snapshot_fresh %}<p class="warn" role="status"><strong>Attention:</strong> no fresh Postfix queue snapshot (the snapshot timer or Postfix may be stopped; reconciliation draws no conclusions meanwhile).</p>{% endif %}
-        {% if d.outbound_paused %}<p class="warn" role="status"><strong>Attention:</strong> outbound mail is paused; accepted mail stays in the Postfix queue.</p>{% endif %}
+{% set ds = delivery_status() %}
+<div class="pagehead">
+    <div>
+        <h1>Overview</h1>
+        <p class="sub"><span class="dot mode-{{ ds.mode }}" aria-hidden="true"></span>Delivery {{ ds.mode }}{% if ds.global_rate_per_minute %} · rate ceiling {{ ds.global_rate_per_minute }} messages per minute{% endif %} · the last {{ period.label }}, from {{ period.since|date('j M Y, H:i', time_zone()) }} {{ period.zoneAbbreviation }}</p>
+    </div>
+    <div class="actions">
+        {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
+        <form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}">{{ ui.csrf() }}<button type="submit" class="secondary">{{ icon.i('refresh', 18) }}Run diagnostics</button></form>
+        {% endif %}
+        {% if is_granted('PLATFORM.CLIENT.APPROVE') %}<a class="btn" href="{{ path('dashboard_operator_clients') }}#new-client">New client{{ icon.i('plus', 18) }}</a>{% endif %}
+    </div>
+</div>
+
+{% if ds.mode != 'LIVE' %}
+<section class="banner banner-{{ ds.mode }}" aria-labelledby="mode-h">
+    <div class="banner-text">
+        <h2 id="mode-h">Delivery is {{ ds.mode }}</h2>
+        <p>{{ ds.explanation }}</p>
+    </div>
+    <dl class="banner-facts">
+        <div><dt>Emergency stop</dt><dd>{{ ds.emergency_stop ? 'In force since ' ~ (ds.stop_changed_at|ts) : 'Not in force' }}</dd></div>
+        <div><dt>Delivery daemon</dt><dd>{{ ds.heartbeat_age is null ? 'never reported' : 'seen ' ~ (ds.heartbeat_age|duration) ~ ' ago' }}</dd></div>
+        <div><dt>Postfix queue</dt><dd>{% if ds.queue %}{{ ds.queue.active }} active · {{ ds.queue.deferred }} deferred · {{ ds.queue.hold }} held{% else %}no snapshot{% endif %}</dd></div>
+    </dl>
+    {% if ds.mode == 'HELD' and is_granted('SYSTEM.SETUP.MANAGE') %}<a class="btn" href="{{ path('dashboard_operator_setup') }}">System setup</a>
+    {% elseif ds.mode == 'STOPPED' and is_granted('PLATFORM.SYSTEM.VIEW') %}<a class="btn" href="{{ path('dashboard_operator_diagnostics') }}">Diagnostics</a>
+    {% elseif is_granted('PLATFORM.SYSTEM.VIEW') %}<a class="btn" href="{{ path('dashboard_operator_system') }}">Delivery controls</a>{% endif %}
+</section>
+{% endif %}
+
+
+
+<div class="row-2">
+    <section class="card chart-card" aria-labelledby="scatter-h">
+        <div class="card-head">
+            <h2 id="scatter-h">Send jobs by hard-bounce rate</h2>
+            <ul class="legend">{% for l in scatter.legend %}<li><span class="swatch sw-{{ loop.index0 < 4 ? loop.index0 : 'other' }}" aria-hidden="true"></span>{{ l.label }}</li>{% endfor %}</ul>
+        </div>
+        {% if scatter.jobs == 0 %}
+            <p class="empty">No send job of the period has reached Postfix yet.</p>
         {% else %}
-        <p class="warn" role="status"><strong>Attention:</strong> no delivery daemon has reported in the last two minutes.</p>
+            <div class="chart chart-tall"><canvas data-controller="chart" data-chart-kind-value="scatter" data-chart-config-value="{{ scatter.chart|json_encode }}" role="img"
+                aria-label="Scatter chart of {{ scatter.jobs }} send jobs by hard-bounce rate; {{ scatter.above }} at or above the {{ thresholds.hard.warning }} % warning threshold."></canvas></div>
+            <p class="muted small">Each square is a send job of the period (the newest 500), by the share of its messages that hard-bounced among those that reached Postfix. The dashed line is the warning threshold ({{ thresholds.hard.warning }} %).</p>
         {% endif %}
     </section>
-    <section class="card">
-        <h2>Messages in flight</h2>
-        <table class="kv"><tbody>
-            {% for key in ['created', 'queued', 'submitted', 'deferred', 'outcome_unknown'] %}
-                <tr><th scope="row">{{ key|label('message_status') }}</th><td class="num">{{ (o.statuses[key] ?? 0)|number_format }}</td></tr>
+    {% include 'dashboard/operator/_submission_rate.html.twig' %}
+</div>
+
+{% include 'dashboard/_kpis.html.twig' %}
+
+<div class="row-2 row-wide-left">
+    {% include 'dashboard/_flow_card.html.twig' with {flow_title: 'Mail flow'} %}
+    <section class="card" id="attention" aria-labelledby="att-h">
+        <div class="card-head">
+            <h2 id="att-h">Needs attention</h2>
+            <span class="count count-{{ attention is empty ? 'ok' : 'dark' }}">{{ attention|length }}</span>
+        </div>
+        {% if attention is empty %}
+            <p class="empty">Nothing needs attention right now.</p>
+        {% else %}
+        <ul class="attention">
+            {% for a in attention %}
+            <li>{% if a.href %}<a href="{{ a.href }}">{% else %}<div>{% endif %}
+                <span class="att-mark att-{{ a.tone }}" aria-hidden="true">{{ icon.i(a.icon, 18) }}</span>
+                <span class="att-text"><span class="att-title">{{ a.title }}</span><span class="att-meta">{{ a.tone == 'bad' ? 'Action needed' : (a.tone == 'warn' ? 'Warning' : 'To review') }} · {{ a.meta }}</span></span>
+                {% if a.href %}{{ icon.i('chevron', 16) }}</a>{% else %}</div>{% endif %}</li>
             {% endfor %}
-        </tbody></table>
-        <p class="muted">“Submitted” and “Deferred” are the messages Smarthost believes are in the Postfix queue; the actual queue depth, as the delivery daemon last read it from the newest queue snapshot, is in “Delivery state and Postfix queue”.</p>
-    </section>
-    <section class="card">
-        <h2>All messages by status</h2>
-        {{ ui.counts(o.statuses, 'message_status') }}
-    </section>
-    <section class="card">
-        <h2>Suppressions (active)</h2>
-        <p>{{ o.global_suppressions|number_format }} global.</p>
-        {% if o.suppressions is empty %}<p>None.</p>{% else %}<ul class="counts">{% for k, v in o.suppressions %}<li>{{ k|label('suppression_reason') }}: {{ v|number_format }}</li>{% endfor %}</ul>{% endif %}
-        <p><a href="{{ path('dashboard_operator_suppressions') }}">Suppression administration</a></p>
-    </section>
-    <section class="card">
-        <h2>Unmatched DSNs</h2>
-        <dl>
-            <dt>Open</dt><dd>{{ (o.unmatched_dsns.open ?? 0)|number_format }}</dd>
-            <dt>Match requested (awaiting the daemon)</dt><dd>{{ (o.unmatched_dsns.match_requested ?? 0)|number_format }}</dd>
-        </dl>
-        <p><a href="{{ path('dashboard_operator_dsns') }}">Review unmatched DSNs</a></p>
-    </section>
-    <section class="card">
-        <h2>Webhooks</h2>
-        <dl>
-            <dt>Events awaiting fan-out</dt><dd>{{ o.webhooks.events_awaiting_fanout|number_format }}</dd>
-            {% for k in ['pending', 'retrying', 'delivered', 'failed'] %}<dt>Deliveries {{ k }}{% if k in ['delivered', 'failed'] %} (24 h){% endif %}</dt><dd>{{ (o.webhooks.deliveries[k] ?? 0)|number_format }}</dd>{% endfor %}
-            <dt>Workers running</dt><dd>{{ o.webhooks.workers|filter(w => w.alive)|length }}</dd>
-        </dl>
-        {% if o.webhooks.events_awaiting_fanout > 0 and o.webhooks.workers|filter(w => w.alive)|length == 0 %}<p class="warn" role="status"><strong>Attention:</strong> webhook events are waiting and no webhook worker is running.</p>{% endif %}
-        <p><a href="{{ path('dashboard_operator_webhooks') }}">Deliveries and workers</a></p>
-    </section>
-    <section class="card">
-        <h2>Clients</h2>
-        {{ ui.counts(o.clients, 'client_status') }}
-        <p><a href="{{ path('dashboard_operator_clients', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}) }}">Approval queue</a></p>
-        <p>Open reputation alerts: {{ (o.alerts.critical ?? 0) }} critical, {{ (o.alerts.warning ?? 0) }} warning{% if is_granted('PLATFORM.ABUSE.VIEW') %} · <a href="{{ path('dashboard_operator_alerts') }}">Abuse and reputation</a>{% endif %}</p>
+        </ul>
+        {% endif %}
     </section>
 </div>
 
-<h2>Bounce and complaint rates by client (jobs of the last {{ o.rate_window_days }} days)</h2>
-<p class="muted">Rates are per message that reached Postfix, by current status: a deferred message may still be accepted or bounce.</p>
-{% if o.rates is empty %}<p class="empty">No send jobs in the window.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col" class="num">Reached Postfix</th><th scope="col" class="num">Remote accepted</th><th scope="col" class="num">Hard bounce</th><th scope="col" class="num">Soft bounce</th><th scope="col" class="num">Deferred</th><th scope="col" class="num">Complaint</th><th scope="col" class="num">Outcome unknown</th><th scope="col" class="num">Suppressed</th></tr></thead>
-    <tbody>{% for r in o.rates %}
-        <tr><td><a href="{{ path('dashboard_operator_client', {id: r.client_id}) }}">{{ r.company_name }}</a></td><td>{{ r.client_status|label('client_status') }}</td>
-            <td class="num">{{ r.reached_postfix|number_format }}</td><td class="num">{{ r.remote_accepted|number_format }}</td>
-            <td class="num">{{ r.hard_bounced|number_format }} <small>({{ r.hard_bounce_rate ?? '—' }} %)</small></td>
-            <td class="num">{{ r.soft_bounced|number_format }} <small>({{ r.soft_bounce_rate ?? '—' }} %)</small></td>
-            <td class="num">{{ r.deferred|number_format }} <small>({{ r.deferral_rate ?? '—' }} %)</small></td>
-            <td class="num">{{ r.complained|number_format }} <small>({{ r.complaint_rate ?? '—' }} %)</small></td>
-            <td class="num">{{ r.outcome_unknown|number_format }}</td><td class="num">{{ r.suppressed|number_format }}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
+<section class="card" aria-labelledby="wq-h">
+    <div class="card-head">
+        <h2 id="wq-h">Workers and queues</h2>
+        {% if is_granted('PLATFORM.SYSTEM.VIEW') %}<a class="more" href="{{ path('dashboard_operator_system') }}">Delivery details</a>{% endif %}
+    </div>
+    <p class="muted small">From the database as of this page load (no live probes): work queues, worker leases and the newest results the workers wrote. A worker that is down shows up as stalled work, not as an error.</p>
+    {% set v = o.validation %}{% set s = o.sending %}{% set w = o.webhooks %}
+    <div class="panels">
+        <div class="panel">
+            <p class="panel-head"><span>Validation</span><span class="live live-{{ v.active_workers > 0 ? 'on' : (v.pending > 0 ? 'bad' : 'off') }}">{{ v.active_workers }} worker{{ v.active_workers == 1 ? '' : 's' }}</span></p>
+            <p class="panel-value">{{ v.pending|number_format }} <span>addresses waiting</span></p>
+            <p class="small">{{ v.claimed|number_format }} being checked · {{ v.retry_scheduled|number_format }} waiting to retry · {{ v.expired_leases|number_format }} expired leases</p>
+            <p class="small muted">{{ v.active_jobs|number_format }} job{{ v.active_jobs == 1 ? '' : 's' }} in progress{% if v.oldest_active_job %}, oldest submitted {{ v.oldest_active_job|ago }}{% endif %} · last job completed {{ v.last_completed|ago }}</p>
+        </div>
+        <div class="panel">
+            <p class="panel-head"><span>Send jobs</span><span class="live live-{{ s.active_workers > 0 ? 'on' : (s.queued_jobs + s.processing_jobs > 0 ? 'bad' : 'off') }}">{{ s.active_workers }} worker{{ s.active_workers == 1 ? '' : 's' }}</span></p>
+            <p class="panel-value">{{ s.queued_jobs|number_format }} <span>queued</span></p>
+            <p class="small">{{ s.processing_jobs|number_format }} processing ({{ s.leased_jobs }} leased) · {{ s.dispatched_jobs|number_format }} dispatched, awaiting outcomes</p>
+            <p class="small muted">{% for c in o.ingest %}Ingest cursor “{{ c.source }}” advanced {{ c.updated_at|ago }}{% if not loop.last %} · {% endif %}{% else %}No Postfix-log ingest cursor recorded yet{% endfor %}</p>
+        </div>
+        <div class="panel">
+            {% set q = ds.queue %}
+            <p class="panel-head"><span>Postfix queue</span><span class="live live-{{ q and ds.queue_snapshot_age is not null and ds.queue_snapshot_age <= 300 ? 'on' : 'bad' }}">{{ ds.queue_snapshot_age is null ? 'no snapshot' : 'snapshot ' ~ (ds.queue_snapshot_age|duration) ~ ' old' }}</span></p>
+            {% if q %}
+            {% set qt = q.active + q.deferred + q.hold + q.incoming %}
+            <p class="panel-value">{{ qt|number_format }} <span>messages queued</span></p>
+            <svg class="stackbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/>{% if qt > 0 %}<rect class="seg-ok" width="{{ 100 * q.active / qt }}" height="8"/><rect class="seg-hatch" x="{{ 100 * q.active / qt }}" width="{{ 100 * q.deferred / qt }}" height="8"/><rect class="seg-bad" x="{{ 100 * (q.active + q.deferred) / qt }}" width="{{ 100 * q.hold / qt }}" height="8"/>{% endif %}</svg>
+            <p class="small">{{ q.active|number_format }} active · {{ q.deferred|number_format }} deferred · {{ q.hold|number_format }} held · {{ q.incoming|number_format }} incoming</p>
+            {% else %}
+            <p class="panel-value">— <span>no snapshot yet</span></p>
+            <p class="small muted">The delivery daemon reports the queue depth from Postfix queue snapshots.</p>
+            {% endif %}
+        </div>
+        <div class="panel">
+            <p class="panel-head"><span>Webhooks</span><span class="live live-{{ w.workers > 0 ? 'on' : (w.events_awaiting_fanout > 0 ? 'bad' : 'off') }}">{{ w.workers }} worker{{ w.workers == 1 ? '' : 's' }}</span></p>
+            <p class="panel-value">{{ ((w.deliveries.pending ?? 0) + (w.deliveries.retrying ?? 0))|number_format }} <span>pending or retrying</span></p>
+            <p class="small">{{ w.events_awaiting_fanout|number_format }} event{{ w.events_awaiting_fanout == 1 ? '' : 's' }} awaiting fan-out</p>
+            <p class="small muted">24 h: {{ (w.deliveries.delivered ?? 0)|number_format }} delivered · {% if (w.deliveries.failed ?? 0) > 0 %}<strong class="text-bad">{{ w.deliveries.failed|number_format }} failed</strong>{% else %}0 failed{% endif %}</p>
+        </div>
+    </div>
+    <p class="inflight"><strong>Messages in flight</strong>
+        {% for key in ['created', 'queued', 'submitted', 'deferred', 'outcome_unknown'] %}<span class="chip-sm">{{ key|label('message_status') }} <strong>{{ (o.statuses[key] ?? 0)|number_format }}</strong></span>{% endfor %}
+        <span class="muted small">Submitted and deferred are the messages catto-mail believes are in the Postfix queue.</span></p>
+</section>
+
+<section class="card card-flush" aria-labelledby="cl-h">
+    <div class="card-head">
+        <div>
+            <h2 id="cl-h">Bounce and complaint rates by client</h2>
+            <p class="muted small">Send jobs of the last {{ period.label }}, worst first. Rates are per message that reached Postfix, by current status: a deferred message may still be accepted or bounce.</p>
+        </div>
+        {% if is_granted('PLATFORM.CLIENT.VIEW') %}<a class="more" href="{{ path('dashboard_operator_clients') }}">All clients</a>{% endif %}
+    </div>
+    {% if rates is empty %}<p class="empty">No send jobs in the period.</p>{% else %}
+    <div class="scroll"><table class="table-clients">
+        <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col" class="num">Reached Postfix</th><th scope="col" class="num">Remote accepted</th><th scope="col">Hard bounces</th><th scope="col">Complaints</th><th scope="col" class="num">Soft bounced</th><th scope="col" class="num">Deferred</th><th scope="col" class="num">Outcome unknown</th><th scope="col" class="num">Suppressed</th></tr></thead>
+        <tbody>{% for r in rates %}
+            <tr>
+                <td><a class="client-name" href="{{ path('dashboard_operator_client', {id: r.client_id}) }}"><span class="avatar av-{{ r.company_name|tone_slot }}" aria-hidden="true">{{ r.company_name|initials }}</span>{{ r.company_name }}</a></td>
+                <td>{{ ui.status(r.client_status, 'client_status') }}</td>
+                <td class="num">{{ r.reached_postfix|number_format }}</td>
+                <td class="num">{{ r.accepted_rate }}</td>
+                <td>{{ page.meter(r.hard_bounced, r.hard_bounce_rate, r.hard_meter) }}</td>
+                <td>{{ page.meter(r.complained, r.complaint_rate, r.complaint_meter) }}</td>
+                <td class="num">{{ r.soft_bounced|number_format }} <small>({{ r.soft_bounce_rate ?? '—' }} %)</small></td>
+                <td class="num">{{ r.deferred|number_format }} <small>({{ r.deferral_rate ?? '—' }} %)</small></td>
+                <td class="num">{{ r.outcome_unknown|number_format }}</td>
+                <td class="num">{{ r.suppressed|number_format }}</td>
+            </tr>
+        {% endfor %}</tbody>
+    </table></div>
+    <p class="muted small card-foot">The mark on each bar is the warning threshold ({{ thresholds.hard.warning }} % for hard bounces, {{ thresholds.complaint.warning }} % for complaints); a full bar is the critical threshold ({{ thresholds.hard.critical }} %, {{ thresholds.complaint.critical }} %).</p>
+    {% endif %}
+</section>
+
+<div class="grid grid-4">
+    {% include 'dashboard/_validation_card.html.twig' %}
+
+    {% if health %}
+    <section class="card" aria-labelledby="hl-h">
+        <div class="card-head"><h2 id="hl-h">System health</h2><a class="more" href="{{ path('dashboard_operator_diagnostics') }}">Diagnostics</a></div>
+        {% if health.last %}<p class="big">{{ health.pass }} of {{ health.total }} <span>components pass · checked {{ health.last|ago }}</span></p>
+        {% else %}<p class="empty">No check has run yet{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}: use <em>Run diagnostics</em> above{% endif %}.</p>{% endif %}
+        <ul class="health">{% for r in health.rows %}<li class="h-{{ r.result }}"><span class="hdot" aria-hidden="true"></span><span>{{ r.label }}</span><span class="sr">: {{ r.result|upper }}</span></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+
+    <section class="card" aria-labelledby="sp-h">
+        <div class="card-head"><h2 id="sp-h">Suppressions</h2>{% if is_granted('PLATFORM.SUPPRESSION.VIEW') %}<a class="more" href="{{ path('dashboard_operator_suppressions') }}">Manage</a>{% endif %}</div>
+        {% set stotal = o.suppressions|reduce((carry, v) => carry + v, 0) %}
+        {% set smax = o.suppressions is empty ? 1 : max(o.suppressions) %}
+        <p class="big">{{ stotal|number_format }} <span>active · {{ o.global_suppressions|number_format }} global</span></p>
+        {% if o.suppressions is empty %}<p class="empty">None.</p>{% else %}
+        <ul class="bars">{% for reason, n in o.suppressions %}
+            <li><span class="bar-label"><span>{{ reason|label('suppression_reason') }}</span><strong>{{ n|number_format }}</strong></span>
+                <svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="6" rx="3"/><rect class="bar-{{ reason }}" width="{{ max(2, 100 * n / smax) }}" height="6" rx="3"/></svg></li>
+        {% endfor %}</ul>
+        {% endif %}
+        <p class="muted small">Bounces, complaints and recipient opt-outs block an address for every client.</p>
+    </section>
+
+    {% if activity is not null %}
+    <section class="card" aria-labelledby="ac-h">
+        <div class="card-head"><h2 id="ac-h">Recent activity</h2><a class="more" href="{{ path('dashboard_operator_audit') }}">Audit log</a></div>
+        {% if activity is empty %}<p class="empty">No audited activity yet.</p>{% else %}
+        <ol class="activity">{% for a in activity %}
+            <li><span class="avatar av-{{ a.actor|tone_slot }}" aria-hidden="true">{{ a.who }}</span>
+                <span><span class="act-line"><strong>{{ a.actor }}</strong> {{ a.action|lower }}</span><span class="act-meta">{{ a.target }} · <time datetime="{{ a.at|date('c', 'UTC') }}" title="{{ a.at|ts }}">{{ a.at|ago }}</time></span></span></li>
+        {% endfor %}</ol>
+        {% endif %}
+    </section>
+    {% endif %}
+</div>
 {% endblock %}
+
+{% macro meter(count, rate, m) %}
+    {% if m is null %}<span class="muted">—</span>{% else %}
+    <span class="meterline"><span class="meter-num">{{ count|number_format }} <small>({{ rate }} %)</small></span>
+        <svg class="meter" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/><rect class="fill-{{ m.tone }}" width="{{ max(1.5, m.width) }}" height="8" rx="4"/><rect class="tick" x="{{ m.tick }}" y="0" width="1.4" height="8"/></svg>
+        {% if m.tone != 'ok' %}<span class="sr">{{ m.tone == 'bad' ? 'above the critical threshold' : 'above the warning threshold' }}</span>{% endif %}</span>
+    {% endif %}
+{% endmacro %}

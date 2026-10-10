@@ -19,6 +19,7 @@ use App\Entity\ClientLimits;
 use App\Enum\ClientStatus;
 use App\Enum\PolicyAcceptanceSource;
 use App\Security\ApiKeyManager;
+use App\Util\InstallationTime;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -202,12 +203,12 @@ final class OperatorClientController extends AbstractController
 
     #[Route('/{id}/api-keys', name: 'dashboard_operator_client_key_create', methods: ['POST'])]
     #[IsGranted('PLATFORM.CLIENT_KEY.MANAGE')]
-    public function createKey(string $id, Request $request, ApiKeyManager $keys): Response
+    public function createKey(string $id, Request $request, ApiKeyManager $keys, InstallationTime $time): Response
     {
         $client = $this->loadClient($id);
         $this->assertCsrf($request);
         try {
-            [$key, $raw] = $keys->create($client, $request->request->getString('name'), $this->actor(), self::expiry($request));
+            [$key, $raw] = $keys->create($client, $request->request->getString('name'), $this->actor(), self::expiry($request, $time->zone));
         } catch (DomainRuleViolation $e) {
             $this->addFlash('error', $e->getMessage());
 
@@ -237,14 +238,14 @@ final class OperatorClientController extends AbstractController
         return $this->back($id);
     }
 
-    /** Optional expiry date (YYYY-MM-DD, end of that UTC day) from a key form. */
-    public static function expiry(Request $request): ?\DateTimeImmutable
+    /** Optional expiry date (YYYY-MM-DD, the end of that day in the dashboard's time zone) from a key form. */
+    public static function expiry(Request $request, \DateTimeZone $zone): ?\DateTimeImmutable
     {
         $raw = trim($request->request->getString('expires_on'));
         if ('' === $raw) {
             return null;
         }
-        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $raw, new \DateTimeZone('UTC'));
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $raw, $zone);
         if (false === $date || $date->format('Y-m-d') !== $raw) {
             throw new DomainRuleViolation('The expiry date must be YYYY-MM-DD.');
         }

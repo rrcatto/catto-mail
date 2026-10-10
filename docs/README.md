@@ -14,6 +14,7 @@
 | `integration/ctnlist.md` | The ctnlist integration and its outstanding re-permission work |
 | `production/onboarding.md` | Client onboarding and SaaS operations (Phase 9): checklist, lifecycle, limits, API keys, reputation alerts, usage and billing statements, the public-onboarding decision |
 | `api/integration-guide.md` | Client integration guide (public at `/docs/api`): authentication, limits, jobs, webhooks, the meaning of statuses |
+| `screenshots/README.md` | Screenshots of every dashboard page (operator console, client workspace, public pages, phone width) |
 | `architecture/overview.md` | One-page map of contracts, services, flows and state machines (summary only) |
 | `architecture/conventions.md` | Cross-language development conventions |
 | `architecture/open-decisions.md` | Decision log only (not authority) |

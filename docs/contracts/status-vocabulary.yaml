@@ -437,7 +437,7 @@ quota_metric:
     send_recipients: {origin: contract, meaning: Recipients accepted in recipient batches.}
 
 quota_period:
-  description: client_quota_usage.period - UTC calendar periods (specification 2.10).
+  description: client_quota_usage.period - calendar periods in the installation's time zone, APP_TIMEZONE (specification 2.10).
   values:
     day: {origin: contract}
     month: {origin: contract}

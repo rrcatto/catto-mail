@@ -6,38 +6,43 @@
 {% block body %}
 {% set s = summary %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › {{ batch.name }}</p>
-<h1>{{ batch.name }}</h1>
-<p>{{ batch.purpose == 'repermission' ? 'Re-permission batch' : 'Validation batch' }} for <strong>{{ batch.company_name }}</strong> ({{ batch.client_status }}) ·
-   uploaded {{ batch.created_at|ts }} by {{ batch.uploaded_by ?? '—' }} from <code>{{ batch.original_filename }}</code>{% if batch.email_column %} (column “{{ batch.email_column }}”){% endif %}
-   {% if batch.source %} · source: {{ batch.source }}{% endif %}</p>
+<div class="pagehead">
+    <div>
+        <div class="titleline"><h1>{{ batch.name }}</h1><span class="tag">{{ batch.purpose == 'repermission' ? 'Re-permission batch' : 'Validation batch' }}</span></div>
+        <p class="sub">For <strong>{{ batch.company_name }}</strong> ({{ batch.client_status }}) ·
+           uploaded {{ batch.created_at|ts }} by {{ batch.uploaded_by ?? '—' }} from <code>{{ batch.original_filename }}</code>{% if batch.email_column %} (column “{{ batch.email_column }}”){% endif %}
+           {% if batch.source %} · source: {{ batch.source }}{% endif %}</p>
+    </div>
+    <div class="actions"><a class="btn" href="{{ path('dashboard_operator_batch_send', {id: batch.id, stage: 'seed'}) }}">Prepare a send »</a></div>
+</div>
 {% if batch.description %}<p class="muted">{{ batch.description }}</p>{% endif %}
 
 <section class="card" aria-labelledby="val-h" {% if progress.running %}data-controller="progress" data-progress-url-value="{{ path('dashboard_operator_batch_progress', {id: batch.id}) }}"{% endif %}>
-<h2 id="val-h">Validation</h2>
-{% if progress.linked == 0 %}<p>Not validated yet.</p>{% else %}
-<p><progress data-progress-target="bar" max="100" value="{{ progress.percent }}">{{ progress.percent }} %</progress></p>
-<p data-progress-target="text">{{ progress.done|number_format }} / {{ progress.linked|number_format }} processed ({{ progress.percent }} %){% if progress.running %} — this page follows the validator; it reloads when it has finished.{% endif %}</p>{% endif %}
-<form method="post" action="{{ path('dashboard_operator_batch_validate', {id: batch.id}) }}">{{ ui.csrf() }}
-    <button type="submit">{{ progress.linked == 0 ? 'Validate the batch' : 'Validate addresses without a result' }}</button>
-    <small class="muted">The Email Validator does the work, as ordinary validation jobs of {{ batch.company_name }} (its quotas apply). {{ ui.help('validation', 'How validation works') }}</small>
-</form>
+    <div class="card-head"><h2 id="val-h">Validation</h2>{{ ui.help('validation', 'How validation works') }}</div>
+    {% if progress.linked == 0 %}<p>Not validated yet.</p>{% else %}
+    <p><progress data-progress-target="bar" max="100" value="{{ progress.percent }}">{{ progress.percent }} %</progress></p>
+    <p data-progress-target="text">{{ progress.done|number_format }} / {{ progress.linked|number_format }} processed ({{ progress.percent }} %){% if progress.running %} — this page follows the validator; it reloads when it has finished.{% endif %}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_operator_batch_validate', {id: batch.id}) }}" class="form-actions">{{ ui.csrf() }}
+        <button type="submit">{{ progress.linked == 0 ? 'Validate the batch' : 'Validate addresses without a result' }}</button>
+        <small class="muted">The Email Validator does the work, as ordinary validation jobs of {{ batch.company_name }} (its quotas apply).</small>
+    </form>
 </section>
 
 <div class="cards">
-<section class="card"><h2>Import</h2><table class="dense"><tbody>
+<section class="card" aria-labelledby="imp-h"><h2 id="imp-h">Import</h2><table class="kv dense"><tbody>
 <tr><th scope="row">Total uploaded (rows)</th><td class="num">{{ batch.data_rows|number_format }}</td></tr>
 <tr><th scope="row">{{ me.flink(batch, 'imported', 'Unique') }}</th><td class="num">{{ s.imported|number_format }}</td></tr>
 <tr><th scope="row">{{ me.flink(batch, 'duplicate', 'Duplicates') }}</th><td class="num">{{ s.duplicate|number_format }}</td></tr>
 <tr><th scope="row">{{ me.flink(batch, 'malformed', 'Malformed input') }}</th><td class="num">{{ s.malformed|number_format }}</td></tr>
 </tbody></table></section>
-<section class="card"><h2>Validation result {{ ui.help('validation-results', '?') }}</h2><table class="dense"><tbody>
+<section class="card" aria-labelledby="res-h"><div class="card-head"><h2 id="res-h">Validation result</h2>{{ ui.help('validation-results', '?') }}</div><table class="kv dense"><tbody>
 {% for f, label in {pending: 'Pending', valid: 'Valid', invalid: 'Invalid', risky: 'Risky', unknown: 'Unknown', temporary_failure: 'Temporary failure'} %}
 <tr><th scope="row">{{ me.flink(batch, f, label) }}</th><td class="num">{{ attribute(s, f)|number_format }}</td></tr>{% endfor %}
-</tbody></table><h3>Warning flags (in addition to the result)</h3><table class="dense"><tbody>
+</tbody></table><h3>Warning flags (in addition to the result)</h3><table class="kv dense"><tbody>
 {% for f, label in {typo_suspected: 'Typo suspected', disposable: 'Disposable', role_account: 'Role accounts', accept_all: 'Accept-all domains'} %}
 <tr><th scope="row">{{ me.flink(batch, f, label) }}</th><td class="num">{{ attribute(s, f)|number_format }}</td></tr>{% endfor %}
 </tbody></table></section>
-<section class="card"><h2>Send eligibility {{ ui.help('suppressions', '?') }}</h2><table class="dense"><tbody>
+<section class="card" aria-labelledby="elig-h"><div class="card-head"><h2 id="elig-h">Send eligibility</h2>{{ ui.help('suppressions', '?') }}</div><table class="kv dense"><tbody>
 <tr><th scope="row">{{ me.flink(batch, 'eligible', 'Eligible to send') }}</th><td class="num">{{ s.eligible|number_format }}</td></tr>
 <tr><th scope="row">{{ me.flink(batch, 'unsent_eligible', '… not sent yet') }}</th><td class="num">{{ s.unsent_eligible|number_format }}</td></tr>
 <tr><th scope="row">{{ me.flink(batch, 'pending_review', 'Needs review') }}</th><td class="num">{{ s.pending_review|number_format }}</td></tr>
@@ -46,34 +51,39 @@
 <tr><th scope="row">{{ me.flink(batch, 'excluded', 'Excluded') }}</th><td class="num">{{ s.excluded|number_format }}</td></tr>
 </tbody></table></section>
 {% if batch.purpose == 'repermission' or s.confirmed + s.unsubscribed + s.global_opt_out + s.unconfirmed > 0 %}
-<section class="card"><h2>Answers (consent) {{ ui.help('repermission', '?') }}</h2><table class="dense"><tbody>
+<section class="card" aria-labelledby="ans-h"><div class="card-head"><h2 id="ans-h">Answers (consent)</h2>{{ ui.help('repermission', '?') }}</div><table class="kv dense"><tbody>
 {% for f, label in {unconfirmed: 'Asked, no answer yet', confirmed: 'Confirmed', unsubscribed: 'Unsubscribed from this list', global_opt_out: 'Global opt-out'} %}
 <tr><th scope="row">{{ me.flink(batch, f, label) }}</th><td class="num">{{ attribute(s, f)|number_format }}</td></tr>{% endfor %}
 </tbody></table></section>{% endif %}
 </div>
-<p><a href="{{ path('dashboard_operator_batch_entries', {id: batch.id}) }}">All addresses</a> · Download CSV:
-{% for f in ['all', 'valid', 'invalid', 'risky', 'unknown', 'temporary_failure', 'typo_suspected', 'eligible', 'pending_review', 'blocked', 'malformed', 'duplicate'] %}<a href="{{ path('dashboard_operator_batch_export', {id: batch.id, filter: f}) }}">{{ f }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
 
-<section class="card" aria-labelledby="send-h"><h2 id="send-h">Sending {{ ui.help('sending', '?') }}</h2>
-<p>Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>. Sends go in stages: a <strong>seed test</strong> to your own addresses, a small <strong>controlled</strong> sample,
-<strong>rollout</strong> portions while you watch bounces and complaints, and finally the <strong>full</strong> remaining eligible list. A brand-new server or IP must never start with the whole list.</p>
-<dl>
-<dt>List identifier</dt><dd>{% if batch.list_id %}<code>{{ batch.list_id }}</code>{% else %}not set{% endif %}
-    <form method="post" action="{{ path('dashboard_operator_batch_list_id', {id: batch.id}) }}" class="inline">{{ ui.csrf() }}<input name="list_id" size="24" placeholder="news.example.org" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}" required><button type="submit" class="secondary">Set</button></form></dd>
-<dt>Compliance approval</dt><dd>{% if batch.compliance_approved_at %}approved {{ batch.compliance_approved_at|ts }} by {{ batch.approved_by }}: {{ batch.compliance_reference }}{% else %}
-    <strong>not approved</strong> — technical validation is not consent. Before anything but a seed test is sent, record who approved mailing these people and on what basis.
-    <form method="post" action="{{ path('dashboard_operator_batch_approve', {id: batch.id}) }}" class="stack">{{ ui.csrf() }}
-        <label>Approval (who, when, basis, reference) <textarea name="reference" required minlength="3" maxlength="1000" rows="2"></textarea></label>
-        <button type="submit" class="secondary">Record the approval</button></form>{% endif %}</dd>
-</dl>
-<p><a href="{{ path('dashboard_operator_batch_send', {id: batch.id, stage: 'seed'}) }}"><strong>Prepare a send »</strong></a></p>
-{% if sends is not empty %}
-<h3>Sends from this batch</h3>
-<table class="dense"><thead><tr><th scope="col">Created</th><th scope="col">Stage</th><th scope="col" class="num">Recipients</th><th scope="col">Subject</th><th scope="col">Job</th></tr></thead>
-<tbody>{% for x in sends %}<tr><td>{{ x.created_at|ts }}<br><small>{{ x.created_by }}</small></td><td>{{ x.stage }}</td><td class="num">{{ x.recipient_count|number_format }}</td><td>{{ x.subject }}</td>
-<td><a href="{{ path('dashboard_operator_batch_send_report', {id: batch.id, jobId: x.send_job_id}) }}">{{ x.status }}</a></td></tr>{% endfor %}</tbody></table>
-<h3>All sends together</h3>
-{% include 'dashboard/operator/batches/_report.html.twig' with {report: report} %}
-{% endif %}
+<section class="card" aria-labelledby="dl-h">
+    <div class="card-head"><h2 id="dl-h">Addresses and downloads</h2><a class="more" href="{{ path('dashboard_operator_batch_entries', {id: batch.id}) }}">All addresses</a></div>
+    <p class="small">Download CSV:
+    {% for f in ['all', 'valid', 'invalid', 'risky', 'unknown', 'temporary_failure', 'typo_suspected', 'eligible', 'pending_review', 'blocked', 'malformed', 'duplicate'] %}<a href="{{ path('dashboard_operator_batch_export', {id: batch.id, filter: f}) }}">{{ f }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+</section>
+
+<section class="card" aria-labelledby="send-h">
+    <div class="card-head"><h2 id="send-h">Sending</h2>{{ ui.help('sending', '?') }}</div>
+    <p>Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>. Sends go in stages: a <strong>seed test</strong> to your own addresses, a small <strong>controlled</strong> sample,
+    <strong>rollout</strong> portions while you watch bounces and complaints, and finally the <strong>full</strong> remaining eligible list. A brand-new server or IP must never start with the whole list.</p>
+    <dl class="rows">
+    <dt>List identifier</dt><dd>{% if batch.list_id %}<code>{{ batch.list_id }}</code>{% else %}not set{% endif %}
+        <form method="post" action="{{ path('dashboard_operator_batch_list_id', {id: batch.id}) }}" class="row">{{ ui.csrf() }}<label class="sr" for="list-id">List identifier</label><input id="list-id" name="list_id" size="24" placeholder="news.example.org" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}" required><button type="submit" class="secondary">Set</button></form></dd>
+    <dt>Compliance approval</dt><dd>{% if batch.compliance_approved_at %}<span class="st st-completed">approved</span> {{ batch.compliance_approved_at|ts }} by {{ batch.approved_by }}: {{ batch.compliance_reference }}{% else %}
+        <strong>not approved</strong> — technical validation is not consent. Before anything but a seed test is sent, record who approved mailing these people and on what basis.
+        <form method="post" action="{{ path('dashboard_operator_batch_approve', {id: batch.id}) }}" class="stack">{{ ui.csrf() }}
+            <label>Approval (who, when, basis, reference) <textarea name="reference" required minlength="3" maxlength="1000" rows="2"></textarea></label>
+            <button type="submit" class="secondary">Record the approval</button></form>{% endif %}</dd>
+    </dl>
+    <p><a class="btn" href="{{ path('dashboard_operator_batch_send', {id: batch.id, stage: 'seed'}) }}">Prepare a send »</a></p>
+    {% if sends is not empty %}
+    <h3>Sends from this batch</h3>
+    <div class="scroll"><table class="dense"><thead><tr><th scope="col">Created</th><th scope="col">Stage</th><th scope="col" class="num">Recipients</th><th scope="col">Subject</th><th scope="col">Job</th></tr></thead>
+    <tbody>{% for x in sends %}<tr><td>{{ x.created_at|ts }}<br><small>{{ x.created_by }}</small></td><td><span class="tag">{{ x.stage }}</span></td><td class="num">{{ x.recipient_count|number_format }}</td><td>{{ x.subject }}</td>
+    <td><a href="{{ path('dashboard_operator_batch_send_report', {id: batch.id, jobId: x.send_job_id}) }}">{{ ui.status(x.status, 'send_job_status') }}</a></td></tr>{% endfor %}</tbody></table></div>
+    <h3>All sends together</h3>
+    {% include 'dashboard/operator/batches/_report.html.twig' with {report: report} %}
+    {% endif %}
 </section>
 {% endblock %}

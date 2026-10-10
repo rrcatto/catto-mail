@@ -2,7 +2,12 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Audit log{% endblock %}
 {% block body %}
-<h1>Audit log</h1>
+<div class="pagehead">
+    <div>
+        <h1>Audit log</h1>
+        <p class="sub">Every change made through the dashboard, the API and the console, with who made it. Secrets in the details are redacted. Days in the date filter are {{ time_zone_abbreviation() }} days.</p>
+    </div>
+</div>
 <form method="get" class="filters" role="search" aria-label="Filter the audit log">
     <label>Action <select name="action"><option value="">Any</option>{% for a in actions %}<option value="{{ a }}"{% if filters.action == a %} selected{% endif %}>{{ a }}</option>{% endfor %}</select></label>
     {{ ui.select('actor_type', 'Actor type', {user: 'User', api_key: 'API key', system: 'System'}, filters.actor_type) }}
@@ -15,17 +20,20 @@
     <button type="submit">Apply</button>
     <a href="{{ path('dashboard_operator_audit') }}">Reset</a>
 </form>
-{% if page.rows is empty %}<p class="empty">No audit entries match.</p>{% else %}
-<table class="dense">
-    <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Details</th></tr></thead>
-    <tbody>{% for a in page.rows %}
-        <tr><td>{{ a.occurred_at|ts }}</td>
-            <td>{{ a.actor_type }}{% if a.actor_email %}: {{ a.actor_email }}{% elseif a.actor_id %}: <code>{{ a.actor_id }}</code>{% endif %}</td>
-            <td><code>{{ a.action }}</code></td>
-            <td>{{ a.target_type }}{% if a.target_id %} <code>{{ a.target_id }}</code>{% endif %}</td>
-            <td>{% if a.detail is empty %}—{% else %}<dl class="inline-dl">{% for k, v in a.detail %}<dt>{{ k }}</dt><dd>{{ v is iterable ? v|json_encode : (v is same as(true) ? 'true' : (v is same as(false) ? 'false' : (v ?? 'null'))) }}</dd>{% endfor %}</dl>{% endif %}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
+<section class="card card-flush" aria-labelledby="audit-h">
+    <div class="card-head"><h2 id="audit-h">Entries</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
+    {% if page.rows is empty %}<p class="empty">No audit entries match.</p>{% else %}
+    <div class="scroll"><table class="dense">
+        <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Details</th></tr></thead>
+        <tbody>{% for a in page.rows %}
+            <tr><td>{{ a.occurred_at|ts }}</td>
+                <td>{{ a.actor_type }}{% if a.actor_email %}: {{ a.actor_email }}{% elseif a.actor_id %}: <code>{{ a.actor_id }}</code>{% endif %}</td>
+                <td><code>{{ a.action }}</code></td>
+                <td>{{ a.target_type }}{% if a.target_id %} <code>{{ a.target_id }}</code>{% endif %}</td>
+                <td>{% if a.detail is empty %}—{% else %}<dl class="inline-dl">{% for k, v in a.detail %}<dt>{{ k }}</dt><dd>{{ v is iterable ? v|json_encode : (v is same as(true) ? 'true' : (v is same as(false) ? 'false' : (v ?? 'null'))) }}</dd>{% endfor %}</dl>{% endif %}</td></tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 {{ ui.pager(page, 'entries') }}
 {% endblock %}

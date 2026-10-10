@@ -1,12 +1,19 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
+{% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}Abuse and reputation{% endblock %}
 {% block body %}
-<h1>Abuse and reputation</h1>
-<p class="muted">Metrics are transport facts counted by event time in a bounded window; rates are of the messages submitted in that window. Alerts are inferred risk from configured thresholds (APP_REPUTATION_*): they never act on a client. Throttle or suspend on the client's page. Last evaluation: {{ computed_at ? computed_at|ts : 'never' }} (every 15 minutes in production).</p>
-<form method="post" action="{{ path('dashboard_operator_alerts_evaluate') }}" class="inline">{{ ui.csrf() }}<button type="submit">Evaluate now</button></form>
+<div class="pagehead">
+    <div>
+        <h1>Abuse and reputation</h1>
+        <p class="sub">Last evaluation: {{ computed_at ? computed_at|ts : 'never' }} (every 15 minutes in production).</p>
+    </div>
+    <div class="actions">
+        <form method="post" action="{{ path('dashboard_operator_alerts_evaluate') }}">{{ ui.csrf() }}<button type="submit" class="secondary">{{ icon.i('refresh', 18) }}Evaluate now</button></form>
+    </div>
+</div>
+<p class="muted">Metrics are transport facts counted by event time in a bounded window; rates are of the messages submitted in that window. Alerts are inferred risk from configured thresholds (APP_REPUTATION_*): they never act on a client. Throttle or suspend on the client's page.</p>
 
-<h2>Alerts</h2>
 <form method="get" class="filters" role="search" aria-label="Filter alerts">
     <label>State <select name="state"><option value="">Open</option><option value="resolved"{% if filters.state == 'resolved' %} selected{% endif %}>Resolved</option><option value="all"{% if filters.state == 'all' %} selected{% endif %}>All</option></select></label>
     {{ ui.select('severity', 'Severity', label_options('alert_severity'), filters.severity) }}
@@ -14,39 +21,51 @@
     {% if filters.client %}<input type="hidden" name="client" value="{{ filters.client }}">{% endif %}
     <button type="submit">Apply</button> <a href="{{ path('dashboard_operator_alerts') }}">Reset</a>
 </form>
-{% if page.rows is empty %}<p class="empty">No alerts match.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Client</th><th scope="col">Client status</th><th scope="col">Metric</th><th scope="col">Window</th><th scope="col">Severity</th><th scope="col" class="num">Numerator / denominator</th><th scope="col" class="num">Value / threshold</th><th scope="col">{{ ui.sort(listing, 'observed', 'First / last observed') }}</th><th scope="col">State</th></tr></thead>
-    <tbody>{% for a in page.rows %}
-        <tr><td><a href="{{ path('dashboard_operator_client', {id: a.client_id}) }}">{{ a.company_name }}</a></td><td>{{ ui.status(a.client_status, 'client_status') }}</td>
-            <td>{{ a.metric|label('alert_metric') }}</td><td>{{ a.window_hours == 24 ? '24 hours' : '7 days' }}</td><td><strong>{{ a.severity|label('alert_severity') }}</strong></td>
-            <td class="num">{{ a.numerator }} / {{ a.denominator }}</td>
-            <td class="num">{{ a.value }}{{ a.metric == 'volume_increase' ? '×' : ' %' }} / {{ a.threshold }}{{ a.metric == 'volume_increase' ? '×' : ' %' }}</td>
-            <td>{{ a.first_observed_at|ts }}<br>{{ a.last_observed_at|ts }}</td>
-            <td>{% if a.resolved_at %}Resolved {{ a.resolved_at|ts }}{% elseif a.acknowledged_at %}Acknowledged by {{ a.acknowledged_by }}: {{ a.acknowledgement_note }}{% else %}Open
-                {% if is_granted('PLATFORM.ABUSE.MANAGE') %}
-                <form method="post" action="{{ path('dashboard_operator_alert_ack', {id: a.id}) }}" class="stack">{{ ui.csrf() }}
-                    <label>Finding / action taken <input type="text" name="note" required minlength="3" maxlength="1000"></label><button type="submit">Acknowledge</button></form>
-                {% endif %}{% endif %}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
+
+<section class="card card-flush" aria-labelledby="alerts-h">
+    <div class="card-head"><h2 id="alerts-h">Alerts</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
+    {% if page.rows is empty %}<p class="empty">No alerts match.</p>{% else %}
+    <div class="scroll"><table class="table-clients">
+        <thead><tr><th scope="col">Client</th><th scope="col">Client status</th><th scope="col">Metric</th><th scope="col">Window</th><th scope="col">Severity</th><th scope="col" class="num">Numerator / denominator</th><th scope="col" class="num">Value / threshold</th><th scope="col">{{ ui.sort(listing, 'observed', 'First / last observed') }}</th><th scope="col">State</th></tr></thead>
+        <tbody>{% for a in page.rows %}
+            <tr><td><a class="client-name" href="{{ path('dashboard_operator_client', {id: a.client_id}) }}"><span class="avatar av-{{ a.company_name|tone_slot }}" aria-hidden="true">{{ a.company_name|initials }}</span>{{ a.company_name }}</a></td><td>{{ ui.status(a.client_status, 'client_status') }}</td>
+                <td>{{ a.metric|label('alert_metric') }}</td><td>{{ a.window_hours == 24 ? '24 hours' : '7 days' }}</td><td><span class="st st-sev-{{ a.severity }}"><strong>{{ a.severity|label('alert_severity') }}</strong></span></td>
+                <td class="num">{{ a.numerator }} / {{ a.denominator }}</td>
+                <td class="num">{{ a.value }}{{ a.metric == 'volume_increase' ? '×' : ' %' }} / {{ a.threshold }}{{ a.metric == 'volume_increase' ? '×' : ' %' }}</td>
+                <td>{{ a.first_observed_at|ts }}<br>{{ a.last_observed_at|ts }}</td>
+                <td>{% if a.resolved_at %}Resolved {{ a.resolved_at|ts }}{% elseif a.acknowledged_at %}Acknowledged by {{ a.acknowledged_by }}: {{ a.acknowledgement_note }}{% else %}<span class="st st-open">Open</span>
+                    {% if is_granted('PLATFORM.ABUSE.MANAGE') %}
+                    <form method="post" action="{{ path('dashboard_operator_alert_ack', {id: a.id}) }}" class="stack">{{ ui.csrf() }}
+                        <label>Finding / action taken <input type="text" name="note" required minlength="3" maxlength="1000"></label><button type="submit">Acknowledge</button></form>
+                    {% endif %}{% endif %}</td></tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 {{ ui.pager(page, 'alerts') }}
 
-<h2>Client metrics ({{ window == 24 ? '24 hours' : '7 days' }})</h2>
-<p><a href="{{ path('dashboard_operator_alerts', {window: 24}) }}">24 hours</a> · <a href="{{ path('dashboard_operator_alerts', {window: 168}) }}">7 days</a> · riskiest first (complaint rate, then hard-bounce rate)</p>
-{% if reputation is empty %}<p class="empty">No client had traffic in the window, or no evaluation has run.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col" class="num">Submitted</th><th scope="col" class="num">Validation</th><th scope="col" class="num">Hard bounces</th><th scope="col" class="num">Complaints</th><th scope="col" class="num">Deferred</th><th scope="col" class="num">Provider policy</th><th scope="col" class="num">Suppressed</th><th scope="col" class="num">Outcome unknown</th><th scope="col" class="num">Webhook failures</th><th scope="col" class="num">Open alerts</th></tr></thead>
-    <tbody>{% for m in reputation %}<tr>
-        <td><a href="{{ path('dashboard_operator_client', {id: m.client_id}) }}">{{ m.company_name }}</a></td><td>{{ ui.status(m.client_status, 'client_status') }}</td>
-        <td class="num">{{ m.messages_submitted|number_format }}</td><td class="num">{{ m.validation_addresses|number_format }}</td>
-        <td class="num">{{ m.hard_bounces }} / {{ m.messages_submitted }}{% if m.hard_bounce_rate is not null %} ({{ m.hard_bounce_rate }} %){% endif %}</td>
-        <td class="num">{{ m.complaints }} / {{ m.messages_submitted }}{% if m.complaint_rate is not null %} ({{ m.complaint_rate }} %){% endif %}</td>
-        <td class="num">{{ m.deferrals }}{% if m.deferral_rate is not null %} ({{ m.deferral_rate }} %){% endif %}</td>
-        <td class="num">{{ m.provider_policy_failures }}</td>
-        <td class="num">{{ m.suppressed }}{% if m.suppression_rate is not null %} ({{ m.suppression_rate }} %){% endif %}</td>
-        <td class="num">{{ m.outcome_unknown }}</td><td class="num">{{ m.webhook_failures }}</td><td class="num">{{ m.open_alerts }}</td></tr>{% endfor %}</tbody>
-</table>
-{% endif %}
+<section class="card card-flush" aria-labelledby="metrics-h">
+    <div class="card-head">
+        <div><h2 id="metrics-h">Client metrics ({{ window == 24 ? '24 hours' : '7 days' }})</h2>
+            <p class="muted small">Riskiest first (complaint rate, then hard-bounce rate).</p></div>
+        <nav class="seg" aria-label="Window">
+            <a href="{{ path('dashboard_operator_alerts', {window: 24}) }}"{% if window == 24 %} aria-current="page"{% endif %}>24 hours</a>
+            <a href="{{ path('dashboard_operator_alerts', {window: 168}) }}"{% if window != 24 %} aria-current="page"{% endif %}>7 days</a>
+        </nav>
+    </div>
+    {% if reputation is empty %}<p class="empty">No client had traffic in the window, or no evaluation has run.</p>{% else %}
+    <div class="scroll"><table class="table-clients">
+        <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col" class="num">Submitted</th><th scope="col" class="num">Validation</th><th scope="col" class="num">Hard bounces</th><th scope="col" class="num">Complaints</th><th scope="col" class="num">Deferred</th><th scope="col" class="num">Provider policy</th><th scope="col" class="num">Suppressed</th><th scope="col" class="num">Outcome unknown</th><th scope="col" class="num">Webhook failures</th><th scope="col" class="num">Open alerts</th></tr></thead>
+        <tbody>{% for m in reputation %}<tr>
+            <td><a class="client-name" href="{{ path('dashboard_operator_client', {id: m.client_id}) }}"><span class="avatar av-{{ m.company_name|tone_slot }}" aria-hidden="true">{{ m.company_name|initials }}</span>{{ m.company_name }}</a></td><td>{{ ui.status(m.client_status, 'client_status') }}</td>
+            <td class="num">{{ m.messages_submitted|number_format }}</td><td class="num">{{ m.validation_addresses|number_format }}</td>
+            <td class="num">{{ m.hard_bounces }} / {{ m.messages_submitted }}{% if m.hard_bounce_rate is not null %} ({{ m.hard_bounce_rate }} %){% endif %}</td>
+            <td class="num">{{ m.complaints }} / {{ m.messages_submitted }}{% if m.complaint_rate is not null %} ({{ m.complaint_rate }} %){% endif %}</td>
+            <td class="num">{{ m.deferrals }}{% if m.deferral_rate is not null %} ({{ m.deferral_rate }} %){% endif %}</td>
+            <td class="num">{{ m.provider_policy_failures }}</td>
+            <td class="num">{{ m.suppressed }}{% if m.suppression_rate is not null %} ({{ m.suppression_rate }} %){% endif %}</td>
+            <td class="num">{{ m.outcome_unknown }}</td><td class="num">{{ m.webhook_failures }}</td><td class="num">{% if m.open_alerts > 0 %}<strong class="text-bad">{{ m.open_alerts }}</strong>{% else %}0{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 {% endblock %}

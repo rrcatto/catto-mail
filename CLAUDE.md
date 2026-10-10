@@ -116,7 +116,7 @@ points span components and need several files to see:
   (`app/src/Dashboard/`, `app/src/Controller/Dashboard/`, `app/templates/dashboard/`). Its tests are
   in `smarthostctl test phase2`; `test phase6-e2e` runs through nginx against the running pod.
 - **Passwordless sign-in, roles and ACL** (spec 2.7): complete (v0.1.6; `app/src/Access/`,
-  `app/src/Security/LoginLink*`, Operator › Users and Roles & permissions).
+  `app/src/Security/LoginLink*`, Access › Users and Access › Roles & permissions).
 - **Phase 7** (first client API integration, spec 2.8): Smarthost side complete (v0.1.7). The
   webhook worker is `smarthost:webhook:work` (`app/src/Webhook/`, `WebhookWorkCommand`), with client
   and operator webhook dashboard pages. `infra/bin/smarthostctl test phase7-e2e` proves the client
@@ -137,7 +137,7 @@ points span components and need several files to see:
   - Client lifecycle (`app/src/Client/ClientLifecycle.php`), limits and quotas
     (`ClientLimitPolicy`, `QuotaEnforcer`), usage and billing (`app/src/Usage/`), reputation
     alerts (`app/src/Reputation/`, production timer `<instance>-reputation-evaluate.timer`).
-  - Dashboards: Operator › Clients/Alerts/Usage; Client › API keys.
+  - Dashboards: Clients › Clients/Abuse & reputation/Usage & billing; client workspace › Settings › API keys.
   - Public docs at `/docs/api`. Operator guide: `docs/production/onboarding.md`.
   - Tests are in `smarthostctl test phase2`, including `Phase9TenantIsolationTest` and
     `Phase9QueryPlanTest`; the rehearsal has a Phase 9 section.
@@ -150,6 +150,10 @@ points span components and need several files to see:
     `templates/dashboard/help/`.
   - Guides: `docs/production/VPS-INSTALL.md`, `components.md`, `architecture.md`,
     `docs/integration/ctnlist.md`.
+- **Dashboard redesign** (v0.2.2, owner decision, spec `user_interfaces.dashboard_layout`): one
+  shell (`app/templates/dashboard/layout.html.twig`, `App\Dashboard\Navigation`), Chart.js charts
+  (`app/assets/controllers/chart_controller.js`), global search (`App\Dashboard\Search`), period
+  choice on both overviews, times in `APP_TIMEZONE`. Screenshots of every page: `docs/screenshots/`.
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## Public repository
@@ -211,6 +215,14 @@ This is a public repository. Documentation, comments, examples, tests, configura
   not covered by the ORM tenant filter). Sorts and filters are whitelisted; changes are POST + CSRF
   through the existing audited services. UI wording: "Remote accepted" (never "delivered"),
   "Recorded open/click" (never "read").
+- **Dashboard UI (v0.2.2).**
+  - The Content-Security-Policy allows no inline styles: every style lives in
+    `app/assets/styles/app.css`, and data-driven widths or positions are SVG attributes.
+  - New pages use the shell's areas and pills (`Navigation`, gated by permission keys) and the
+    existing card, table and chart patterns; charts go through `chart_controller.js`.
+  - Show times with the `ts` filter and compute dashboard days, quota days and billing months with
+    `App\Util\InstallationTime` (`APP_TIMEZONE`); storage, the API, webhooks and logs stay UTC.
+  - When pages change visibly, retake the affected `docs/screenshots/` images (test data only).
 - **Dashboard sign-in is passwordless** (spec 2.7): emailed single-use links (`LoginLinkService`),
   `APP_ADMIN_EMAIL` always gets ADMIN. Operator pages require permission keys
   (`App\Access\PermissionCatalog`, `#[IsGranted('PLATFORM.…')]`), never role names; ADMIN holds

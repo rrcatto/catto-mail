@@ -14,7 +14,7 @@ Names used as examples throughout (replace them with yours):
 | Bounce domain | `bounce.example.com` | Every message's hidden return address (`bounce+…@bounce.example.com`); bounces and complaints come back here. |
 | Sending domain | `news.example.org` | The domain in the visible From address of the mail you send (it can belong to a client). |
 | From address | `newsletter@news.example.org` | A sender at the sending domain. |
-| Administrator | `admin@example.com` | Your mailbox; it always has the ADMIN role. |
+| Administrator | `admin@example.com` | Your existing mailbox at a mail provider (sign-in links go there); it always has the ADMIN role. catto-mail does not receive mail for it. |
 | Server IP | `203.0.113.10` | The VPS's static public IPv4 address. |
 
 Contents: [1 What you need](#1-what-you-need-from-the-vps-provider) ·
@@ -58,6 +58,13 @@ usage records) ran comfortably within 8 GB. Real production sizing under sustain
 You also need a **domain** whose DNS you control (for the web, mail and bounce names) and, for
 automatic certificates, a DNS provider with an API (most have one; see §5).
 
+You also need a **mailbox for the administrator address** at a mail provider: an existing
+address, or for a new domain the registrar's e-mail forwarding to a mailbox you already read.
+catto-mail sends mail; it receives mail **only for the bounce domain** (bounces and complaints)
+and refuses every other address. It has no mailboxes and no webmail. Keep your main domain's MX
+records with your mail provider, never pointing at this server (§4). The installer warns if mail
+for the administrator's address would come to this server.
+
 ## 2. Install
 
 catto-mail is installed from an exact **release**: a Git tag such as `v0.2.0`, which always
@@ -71,7 +78,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.1`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.2`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -239,6 +246,15 @@ What the terms mean:
   alignment, and where to send reports.
 
 The sign-in mail sender's domain (`APP_MAIL_FROM`) needs DKIM (and preferably DMARC) as well.
+
+**Your own mail stays with your mail provider.** The only MX record that points at this server is
+the bounce domain's. Your main domain's MX (`example.com`) stays with whoever holds your
+mailboxes, for example the registrar's e-mail forwarding; if it pointed here, catto-mail would
+refuse that mail, including the sign-in links sent to the administrator. A domain has one SPF
+record: if your mail provider already publishes one for `example.com` and the sign-in sender is
+`no-reply@example.com`, add this server's address to it (`v=spf1 ip4:203.0.113.10
+include:<provider> ~all`) rather than creating a second record.
+
 DNS changes take minutes to hours to be visible. Test: System setup › DNS › *Test DNS*, or
 `infra/bin/smarthostctl prod preflight --section dns`.
 
@@ -291,6 +307,31 @@ the TXT record, waits while you create it, and continues. Renewals then need you
 days. Or obtain a certificate any other way and install it:
 `infra/bin/smarthostctl prod tls set proxy.crt proxy.key mta.crt mta.key`.
 
+**Already have a certificate** (for example a free certificate bundle from your domain
+registrar)? It must cover both host names: a wildcard `*.example.com` does. Install it as the
+service user; the same files serve nginx and Postfix:
+
+```sh
+# on your computer: copy the bundle to the server
+scp example.com-ssl-bundle.zip root@203.0.113.10:/root/
+# on the server, as root: unpack it where only cattomail can read it
+apt-get install -y unzip
+install -d -m 700 -o cattomail -g cattomail /home/cattomail/tls
+unzip -j /root/example.com-ssl-bundle.zip -d /home/cattomail/tls
+chown cattomail:cattomail /home/cattomail/tls/*; chmod 600 /home/cattomail/tls/*
+rm /root/example.com-ssl-bundle.zip
+# as cattomail: install (the certificate file holds the whole chain)
+sudo -iu cattomail
+cd ~/catto-mail
+infra/bin/smarthostctl prod tls set ~/tls/domain.cert.pem ~/tls/private.key.pem ~/tls/domain.cert.pem ~/tls/private.key.pem
+```
+
+`tls set` refuses a certificate that does not match its key, stores both as Podman secrets
+(nginx and Postfix only) and restarts those two containers. Check with System setup › TLS (or
+*Run diagnostics*). Such a certificate is **not renewed automatically**: install each new bundle
+the same way before the old one expires (the TLS checks warn 14 days ahead), or switch to the
+automatic DNS-01 renewal above.
+
 ## 6. DKIM
 
 Every sending domain needs a DKIM key; the private key never leaves the OpenDKIM container.
@@ -330,6 +371,12 @@ SKIPPED with an explanation and a fix), and links to Help:
 15. Backups — last backup, contents, off-host copy, *Back up now*, *Rehearse a restore*.
 16. Seed delivery test — send to your own addresses and follow every stage.
 17. Bounce test — send to a non-existent address at your domain and see the bounce return.
+
+Steps 16 and 17 send real mail, so their messages leave only once live delivery is enabled
+(§11); while HELD they wait, which shows the hold works. Both need a client of your own with a
+verified, DKIM-signing sending domain (System setup shows how). The bounce test needs a domain
+whose mail server **refuses** unknown recipients; e-mail forwarding services do not always do
+that.
 18. Reboot test — reboot and confirm everything came back.
 19. Production readiness — one summary; live delivery stays a separate decision.
 
@@ -401,19 +448,29 @@ Live delivery is a deliberate, audited decision, never automatic. Before it:
 
 - every readiness row is PASS (or a WARN you understand), including PTR, SPF, DKIM, DMARC,
   outbound 25 and a trusted HTTPS certificate;
-- the seed test reached your inboxes with `dkim=pass`, and the bounce test came back;
-- backups are off-host.
+- backups are off-host;
+- no client has send work queued that you do not want sent (it would leave too).
 
-Then System › Health & delivery › *Request live delivery* (type `ENABLE LIVE DELIVERY`), or
+Then Mail flow › Delivery › *Request live delivery* (type `ENABLE LIVE DELIVERY`), or
 `infra/bin/smarthostctl prod live-enable --operator admin@example.com --note "…"`. It runs the
 activation preflight first and changes nothing if anything fails.
+
+**Right after activation, prove the mail path** (System setup steps 16 and 17), at warm-up
+stage 0:
+
+- the seed test reaches your inboxes with `dkim=pass`, `spf=pass` and `dmarc=pass`;
+- the bounce test comes back as a hard bounce with a suppression (lift it afterwards).
+
+If either fails, return to HELD (Mail flow › Delivery, or `prod live-disable`) and fix the
+cause before anything else is sent. The seed and bounce tests cannot run before activation: in
+HELD mode nothing leaves the server except sign-in mail.
 
 **Warm-up.** A new IP has no reputation. The production configuration starts at warm-up stage 0
 (5 messages per minute installation-wide). Raise it stage by stage (the runbook's *Warm-up*
 table) only on clean evidence: hard bounces under 2 %, complaints under 0.1 %, no deferral spikes.
 Start with your seed addresses, then a controlled sample — never a whole list.
 
-**Emergency:** the red *STOP SENDING EMAIL NOW* button on every operator page, or
+**Emergency:** the red *Stop sending* button in the top bar of every operator page, or
 `prod pause --operator … --note …`.
 
 ## 12. Versions, upgrades and rollback
@@ -466,7 +523,7 @@ the Git tag, which names exactly the same code. An unpacked archive's installer 
 | Decide retention periods | you, with your compliance owner (`APP_RETENTION_*`) |
 | Decide consent and compliance (e.g. may an old list be asked again?) | you; recorded on each batch |
 | Decide when to raise sending volume | you, on the evidence (§11) |
-| Watch reputation | Operator › Abuse & reputation, provider tools |
+| Watch reputation | Clients › Abuse & reputation, provider tools |
 
 ## 14. Real-VPS acceptance checklist
 
@@ -517,6 +574,7 @@ the Git tag, which names exactly the same code. An unpacked archive's installer 
 | A step FAILs | Read its *How to fix*; the log is `/var/log/catto-mail-install.log`; re-run after fixing. |
 | Step 8 FAILs with `cannot chdir to /root/…: Permission denied` in the log | The installers of v0.1.9 and v0.2.0 only: run it from a directory every user can enter, `cd / && /root/catto-mail-installer/install-catto-mail` (re-running is safe), or clone v0.2.1 or later, whose installer handles this itself. |
 | The sign-in link expired | `sudo -iu cattomail ~cattomail/catto-mail/infra/bin/smarthostctl prod admin-link` |
+| Sign-in mail never arrives | Sign in with `prod admin-link` meanwhile. Check System setup › DNS (`mailbox … (administrator)`): the administrator's domain MX must point at a mail provider, not at this server (§4). Sign-in mail also needs the PTR, SPF and DKIM of the sender's domain, and outbound 25. |
 | The browser cannot reach the site | The A record (§4); inbound 443 at the provider; `prod status` shows the ingress socket. |
 | "host agent never reported" | `systemctl --user status smarthost-host-agent.service` as cattomail; `prod install` installs it. |
 | Port 25 refused | `prod preflight --section host` (the low-port setting); the provider's firewall. |

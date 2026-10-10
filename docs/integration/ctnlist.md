@@ -71,7 +71,7 @@ ones. Delivery is at least once: de-duplicate by the event id, as for every even
 ## Outstanding ctnlist work
 
 1. **Subscribe the endpoint to the event.** In catto-mail, a ctnlist client admin adds
-   `repermission.responded` to the ctnlist webhook endpoint's events (Client › Webhooks).
+   `repermission.responded` to the ctnlist webhook endpoint's events (client workspace: Settings › Webhooks).
 2. **Handle `repermission.responded` in `WebhookProcessor`** (today it is "ignored unknown event
    type"):
    - find the subscriber by `data.address` (catto-mail normalises only the domain to lower

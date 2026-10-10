@@ -2,16 +2,16 @@
 {% block content %}
 <table class="dense"><tbody>
 <tr><th scope="row">HELD</th><td>Live delivery not activated. Send jobs are accepted and wait; nothing goes to the Internet except dashboard sign-in mail. Every new installation starts here.</td></tr>
-<tr><th scope="row">LIVE</th><td>Mail is delivered within the configured rate limits. Enabled deliberately (Operator › System › Request live delivery, or <code>smarthostctl prod live-enable</code>), after the activation preflight passes; audited.</td></tr>
+<tr><th scope="row">LIVE</th><td>Mail is delivered within the configured rate limits. Enabled deliberately (Mail flow › Delivery › Request live delivery, or <code>smarthostctl prod live-enable</code>), after the activation preflight passes; audited.</td></tr>
 <tr><th scope="row">PAUSED</th><td>The emergency stop is in force: the delivery daemon starts no new message within seconds, and Postfix holds its queue (mail already accepted stays queued, nothing is lost or bounced). Inbound bounces and complaints keep working.</td></tr>
 <tr><th scope="row">STOPPED</th><td>The delivery daemon is not running (stopped or crashed). Nothing is sent and nothing is processed until it runs again.</td></tr>
 </tbody></table>
 <h2>Stop sending email now</h2>
-<p>The red button on every operator page (permission <code>SYSTEM.DELIVERY.CONTROL</code>) needs a reason, which the audit log keeps. It sets the emergency stop in the database (the delivery daemon reads it every few seconds) and asks the host agent to hold the Postfix queue (within a minute). From a terminal: <code>smarthostctl prod pause --operator &lt;you&gt; --note "&lt;why&gt;"</code>.</p>
+<p>The red <em>Stop sending</em> button in the top bar of every operator page, and the form under Mail flow › Delivery (permission <code>SYSTEM.DELIVERY.CONTROL</code>), need a reason, which the audit log keeps. Either one sets the emergency stop in the database (the delivery daemon reads it every few seconds) and asks the host agent to hold the Postfix queue (within a minute). From a terminal: <code>smarthostctl prod pause --operator &lt;you&gt; --note "&lt;why&gt;"</code>.</p>
 <p>Resuming needs the same permission, a reason, and typing <code>RESUME SENDING</code>. Investigate first: which client, which recipients, which bounces or complaints.</p>
 <h2>Narrower controls</h2>
 <ul>
-<li>Suspend one client (Operator › Clients › Lifecycle): its running jobs lose their lease and nothing new starts; other clients continue.</li>
+<li>Suspend one client (Clients › Clients › the client › Lifecycle): its running jobs lose their lease and nothing new starts; other clients continue.</li>
 <li>Throttle one client: it keeps working, more slowly.</li>
 <li>Cancel one send job.</li>
 </ul>

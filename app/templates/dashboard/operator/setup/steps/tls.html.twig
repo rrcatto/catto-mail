@@ -1,14 +1,19 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% set acme = host.value.acme ?? {} %}
+<section class="card" aria-labelledby="tls-h">
+<h2 id="tls-h">Certificates</h2>
 <p>Two certificates: one for HTTPS (this dashboard, the API, tracking links) on the web host name, one for SMTP (STARTTLS on port 25) on the mail host name.
 catto-mail obtains them from <strong>Let's Encrypt</strong> with the <strong>DNS-01</strong> method: it proves control of the names by creating a temporary TXT record in your DNS,
 so port 80 never has to be opened. {{ ui.help('tls') }}</p>
-<table class="kv dense"><tbody>
-<tr><th scope="row">Automatic certificates</th><td>{% if acme.configured ?? false %}configured: DNS provider <code>{{ acme.provider }}</code>{% if acme.provider == 'manual' %} (manual: renewals need you){% endif %}{% else %}<strong>not configured</strong> — set <code>ACME_EMAIL</code>, <code>ACME_DNS_PROVIDER</code> and <code>ACME_CREDENTIALS_FILE</code> in <code>infra/.env</code> (or re-run the installer){% endif %}</td></tr>
-<tr><th scope="row">Last renewal attempt</th><td>{{ acme.last_attempt_at ?? 'never' }} {{ acme.last_result ?? '' }}</td></tr>
-<tr><th scope="row">Renewal timer</th><td>{{ acme.timer ?? 'not installed' }} (daily; renews {{ host.value.config.ACME_RENEW_DAYS ?? 30 }} days before expiry)</td></tr>
-</tbody></table>
+<dl class="rows">
+<dt>Automatic certificates</dt><dd>{% if acme.configured ?? false %}configured: DNS provider <code>{{ acme.provider }}</code>{% if acme.provider == 'manual' %} (manual: renewals need you){% endif %}{% else %}<strong>not configured</strong> — set <code>ACME_EMAIL</code>, <code>ACME_DNS_PROVIDER</code> and <code>ACME_CREDENTIALS_FILE</code> in <code>infra/.env</code> (or re-run the installer){% endif %}</dd>
+<dt>Last renewal attempt</dt><dd>{{ acme.last_attempt_at ?? 'never' }} {{ acme.last_result ?? '' }}</dd>
+<dt>Renewal timer</dt><dd>{{ acme.timer ?? 'not installed' }} (daily; renews {{ host.value.config.ACME_RENEW_DAYS ?? 30 }} days before expiry)</dd>
+</dl>
 {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
+<div class="form-actions">
 <form method="post" action="{{ path('dashboard_operator_system_request') }}" class="inline">{{ ui.csrf() }}<input type="hidden" name="action" value="tls.renew"><input type="hidden" name="return_to" value="{{ path('dashboard_operator_setup_step', {step: 'tls'}) }}"><button type="submit">Obtain or renew the certificate now</button></form>
 <small class="muted">The host agent runs it; a manual DNS provider cannot run unattended: use <code>smarthostctl prod tls acme issue</code> in a terminal.</small>
+</div>
 {% endif %}
+</section>

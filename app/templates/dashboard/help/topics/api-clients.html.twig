@@ -2,7 +2,7 @@
 {% block content %}
 <p>A <strong>client</strong> is an application that uses catto-mail, for example your mailing-list application. Each client has its own data, limits, sending domains, API keys and webhook endpoints; clients never see each other's data.</p>
 <ol>
-<li>Create the client (Operator › Clients). It starts <em>pending approval</em>; approve it with a reason (or create it active for your own internal application).</li>
+<li>Create the client (Clients › Clients, or <em>New client</em> on the Overview). It starts <em>pending approval</em>; approve it with a reason (or create it active for your own internal application).</li>
 <li>Give it limits if you want (sends per day, recipients per job…).</li>
 <li>Create an <strong>API key</strong> (the client's admins can do it on their API keys page). The key is shown <strong>once</strong>; store it in the client application's secret configuration. Give keys a name and preferably an expiry; rotate by creating a new key, deploying it, then revoking the old one.</li>
 <li>The client adds and verifies its sending domain, and (with you) its DKIM key.</li>

@@ -607,6 +607,17 @@ in `/root` in the Ubuntu 26.04 stand-in: the v0.2.0 installer fails step 8 (`can
 v0.2.1 installer passes it; the full installer test was not run (the engine host had only 65,536
 subordinate IDs).
 
+Latest runs (v0.2.2, dashboard redesign, on the local Podman 4.9.3 engine): `test phase2` 295 tests
+and 4,900 assertions; `test phase3` 295 and the 10,000-address run; `test phase4` the Go units and
+34 integration tests; `test phase8` 25/25; `check-contracts` 2,548. End to end against the pod:
+`phase6-e2e` 75/75; `phase4-e2e` B–E passed and A passed on its re-run; `phase5-e2e` and
+`phase7-e2e` had failures in every run, each matching a logged name-resolution timeout
+(aardvark-dns 1.4, §1: Postfix "Name service error for name=mailpit", nginx "symfony-app could not
+be resolved", the application "could not translate host name postgres"), so different checks failed
+on each run. Screenshots of every page were taken with headless Chromium at 1,440 and 390 pixels
+(`docs/screenshots/`) without script errors, CSP violations or horizontal overflow. The rehearsal
+and the installer test were not run.
+
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender
 `bounce@<bounce domain>`, while the header From stays `editor@smarthost-dev.test`, so the DKIM

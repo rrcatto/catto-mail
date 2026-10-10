@@ -1,11 +1,24 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
+{% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}Clients{% endblock %}
 {% block body %}
-<h1>Clients</h1>
-<p><a href="{{ path('dashboard_operator_clients', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}) }}">Approval queue</a> (pending approval, oldest first)
-   · <a href="{{ path('dashboard_operator_clients', {status: 'throttled'}) }}">Throttled</a>
-   · <a href="{{ path('dashboard_operator_clients', {status: 'suspended'}) }}">Suspended</a></p>
+<div class="pagehead">
+    <div>
+        <h1>Clients</h1>
+        <p class="sub">Every client record with its status, open alerts and sending domains. Status changes happen on the client's page, always with a reason.</p>
+    </div>
+    {% if is_granted('PLATFORM.CLIENT.APPROVE') %}<div class="actions"><a class="btn" href="#new-client">New client{{ icon.i('plus', 18) }}</a></div>{% endif %}
+</div>
+
+<nav class="seg" aria-label="Client lists">
+    <a href="{{ path('dashboard_operator_clients') }}"{% if not filters.status %} aria-current="page"{% endif %}>All</a>
+    <a href="{{ path('dashboard_operator_clients', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}) }}"{% if filters.status == 'pending_approval' %} aria-current="page"{% endif %}>Approval queue</a>
+    <a href="{{ path('dashboard_operator_clients', {status: 'throttled'}) }}"{% if filters.status == 'throttled' %} aria-current="page"{% endif %}>Throttled</a>
+    <a href="{{ path('dashboard_operator_clients', {status: 'suspended'}) }}"{% if filters.status == 'suspended' %} aria-current="page"{% endif %}>Suspended</a>
+</nav>
+<p class="muted small">The approval queue lists the clients pending approval, oldest first.</p>
+
 <form method="get" class="filters" role="search" aria-label="Filter clients">
     {{ ui.select('status', 'Status', label_options('client_status'), filters.status) }}
     <label>Name or contact contains <input type="text" name="q" value="{{ filters.q }}"></label>
@@ -13,25 +26,32 @@
     <button type="submit">Apply</button>
     <a href="{{ path('dashboard_operator_clients') }}">Reset</a>
 </form>
-{% if page.rows is empty %}<p class="empty">No clients match.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Organisation') }}</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">{{ ui.sort(listing, 'status_changed', 'Status since') }}</th><th scope="col">Approved</th><th scope="col">Plan</th><th scope="col">Open alerts</th><th scope="col">Global opt-outs</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
-    <tbody>{% for c in page.rows %}
-        <tr><td><a href="{{ path('dashboard_operator_client', {id: c.id}) }}">{{ c.company_name }}</a>{% if c.origin == 'public_application' %} <span class="tag">application</span>{% endif %}</td><td>{{ c.contact_email }}</td>
-            <td>{{ ui.status(c.status, 'client_status') }}</td><td>{{ c.status_changed_at|ts }}</td><td>{{ c.approved_at|ts }}</td><td>{{ c.plan }}</td>
-            <td>{% if c.open_alerts > 0 %}<strong>{{ c.open_alerts }}</strong> ({{ c.worst_alert|label('alert_severity') }}){% else %}—{% endif %}</td>
-            <td>{{ c.can_submit_global_suppressions ? 'Permitted' : 'No' }}</td>
-            <td class="num">{{ c.verified_domains }}</td><td>{{ c.created_at|ts }}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
+
+<section class="card card-flush" aria-labelledby="list-h">
+    <div class="card-head"><h2 id="list-h">{{ filters.status ? filters.status|label('client_status') : 'All clients' }}</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
+    {% if page.rows is empty %}<p class="empty">No clients match.</p>{% else %}
+    <div class="scroll"><table class="table-clients">
+        <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Organisation') }}</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">{{ ui.sort(listing, 'status_changed', 'Status since') }}</th><th scope="col">Approved</th><th scope="col">Plan</th><th scope="col">Open alerts</th><th scope="col">Global opt-outs</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
+        <tbody>{% for c in page.rows %}
+            <tr>
+                <td><a class="client-name" href="{{ path('dashboard_operator_client', {id: c.id}) }}"><span class="avatar av-{{ c.company_name|tone_slot }}" aria-hidden="true">{{ c.company_name|initials }}</span>{{ c.company_name }}</a>{% if c.origin == 'public_application' %} <span class="tag">application</span>{% endif %}</td>
+                <td>{{ c.contact_email }}</td>
+                <td>{{ ui.status(c.status, 'client_status') }}</td><td>{{ c.status_changed_at|ts }}</td><td>{{ c.approved_at|ts }}</td><td>{{ c.plan }}</td>
+                <td>{% if c.open_alerts > 0 %}<span class="st st-sev-{{ c.worst_alert }}"><strong>{{ c.open_alerts }}</strong>&nbsp;({{ c.worst_alert|label('alert_severity') }})</span>{% else %}—{% endif %}</td>
+                <td>{{ c.can_submit_global_suppressions ? 'Permitted' : 'No' }}</td>
+                <td class="num">{{ c.verified_domains }}</td><td>{{ c.created_at|ts }}</td>
+            </tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 {{ ui.pager(page, 'clients') }}
 
 {% if is_granted('PLATFORM.CLIENT.APPROVE') %}
-<section class="card">
-    <h2>Create a client record</h2>
+<section class="card" id="new-client" aria-labelledby="new-h">
+    <h2 id="new-h">Create a client record</h2>
     <p class="muted">The record starts <em>pending approval</em>: it cannot create work until you approve it on its page, after reviewing it, setting its limits and recording its policy acceptance where required. Users, memberships and API keys come after approval.</p>
-    <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="stack">
+    <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="form-grid">
         {{ ui.csrf() }}
         <label>Organisation name <input type="text" name="company_name" required maxlength="200"></label>
         <label>Primary operational contact (email) <input type="email" name="contact_email" required maxlength="320"></label>
@@ -41,8 +61,8 @@
         <label>Service policy acceptance
             <select name="policy_acceptance"><option value="required">Required before approval (external client)</option><option value="exempt">Exempt (internal client)</option></select>
         </label>
-        <label>Private note (optional, operators only) <textarea name="note" maxlength="4000" rows="2"></textarea></label>
-        <button type="submit">Create pending client</button>
+        <label class="span-all">Private note (optional, operators only) <textarea name="note" maxlength="4000" rows="2"></textarea></label>
+        <div class="form-actions span-all"><button type="submit">Create pending client</button></div>
     </form>
 </section>
 {% endif %}

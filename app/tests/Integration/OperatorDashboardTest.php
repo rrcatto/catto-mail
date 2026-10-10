@@ -67,11 +67,31 @@ final class OperatorDashboardTest extends DashboardTestCase
             self::assertSame(200, $this->page($uri)->getStatusCode(), $uri);
         }
         $overview = self::text($this->page('/dashboard/operator'));
-        self::assertStringContainsString('Validation (Python worker)', $overview);
+        self::assertStringContainsString('Workers and queues', $overview);
         self::assertStringContainsString('Operator View Co', $overview, 'cross-client rates');
         // Phase 8: the queue depth comes only from the delivery daemon's durable heartbeat; without
-        // one, the card says so instead of inventing a figure.
-        self::assertStringContainsString('Delivery state and Postfix queue', $overview);
+        // one, the panel says so instead of inventing a figure.
+        self::assertStringContainsString('Postfix queue', $overview);
+        self::assertStringContainsString('no snapshot yet', $overview);
+        // Times are shown in the dashboard's time zone (APP_TIMEZONE; the test pod uses Africa/Johannesburg).
+        self::assertStringContainsString('Times are shown in SAST (Africa/Johannesburg)', $overview);
+        self::assertMatchesRegularExpression('/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d SAST/', self::text($this->page('/dashboard/operator/audit')));
+        // The figures of the period come from the job counters; the charts get them as JSON.
+        $crawler = $this->crawler('/dashboard/operator?period=24h');
+        self::assertSame('24 hours', $crawler->filter('.pills a[aria-current]')->text());
+        self::assertSame(4, $crawler->filter('.kpi')->count());
+        $flow = json_decode((string) $crawler->filter('canvas[data-chart-kind-value="flow"]')->attr('data-chart-config-value'), true);
+        self::assertCount(24, $flow['totals'], 'hourly buckets');
+        self::assertGreaterThanOrEqual(3, $flow['totals'][23], 'the three messages of the job created now, in the current hour');
+        self::assertSame(7, \count(json_decode((string) $this->crawler('/dashboard/operator?period=bogus')
+            ->filter('canvas[data-chart-kind-value="flow"]')->attr('data-chart-config-value'), true)['totals']), 'unknown periods fall back to 7 days');
+        // Navigation: every operator area the user may open, the current one marked.
+        $areas = $crawler->filter('.orbs .orb-label')->each(static fn ($n): string => $n->text());
+        self::assertSame(['Overview', 'Mail flow', 'Clients', 'System', 'Access'], \array_slice($areas, 0, 5));
+        self::assertSame('Overview', $crawler->filter('.orbs a[aria-current] .orb-label')->text());
+        $mail = $this->crawler('/dashboard/operator/unmatched-dsns');
+        self::assertSame(['Delivery', 'Suppressions', 'Unmatched DSNs', 'Webhooks'], $mail->filter('.pills a')->each(static fn ($n): string => trim(preg_replace('/\s+\d+$/', '', $n->text()))));
+        self::assertSame('Mail flow', $mail->filter('.orbs a[aria-current] .orb-label')->text());
         $clients = $this->crawler('/dashboard/operator/clients?q=Operator%20View');
         self::assertSame(1, $clients->filter('tbody tr')->count());
         $detail = self::text($this->page('/dashboard/operator/clients/'.$client->getId()->toRfc4122()));

@@ -5,7 +5,7 @@
 <tr><td>Nothing is sent</td><td>Delivery mode (HELD? PAUSED? STOPPED?); the client's status; the send job's status; <code>prod logs delivery</code>.</td></tr>
 <tr><td>Sent but deferred</td><td>The receiver's message in the message timeline; PTR, SPF, DKIM, DMARC checks; the reputation page; lower the rate.</td></tr>
 <tr><td>Many hard bounces</td><td>The list's quality: validate it, remove old addresses; the bounce rate alert.</td></tr>
-<tr><td>Bounces are not recorded</td><td>The bounce domain's MX; inbound port 25 (provider, firewall); <code>prod logs postfix</code>; Operator › Unmatched DSNs.</td></tr>
+<tr><td>Bounces are not recorded</td><td>The bounce domain's MX; inbound port 25 (provider, firewall); <code>prod logs postfix</code>; Mail flow › Unmatched DSNs.</td></tr>
 <tr><td>Validation never finishes</td><td>The validator heartbeat check; DNS from the server; retries can take up to a few hours for temporary failures.</td></tr>
 <tr><td>Sign-in mail does not arrive</td><td>Use the host-printed link: <code>smarthostctl prod admin-link</code>; then check the sign-in sender's DKIM and the delivery mode (sign-in mail is sent even in HELD mode).</td></tr>
 <tr><td>Certificate errors</td><td>TLS checks; <code>prod tls acme renew</code>; the DNS provider credentials.</td></tr>

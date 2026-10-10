@@ -8,13 +8,16 @@ use App\Audit\AuditActor;
 use App\Dashboard\ClientAccess;
 use App\Dashboard\ClientReadModel;
 use App\Dashboard\Listing;
+use App\Dashboard\OperatorOverview;
 use App\Dashboard\OperatorReadModel;
+use App\Dashboard\OverviewPeriod;
 use App\Domain\DomainRuleViolation;
 use App\Dsn\UnmatchedDsnAdministration;
 use App\Entity\Client;
 use App\Enum\SuppressionReason;
 use App\Enum\SuppressionScopeType;
 use App\Suppression\SuppressionAdministration;
+use App\Util\InstallationTime;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -45,9 +48,11 @@ final class OperatorDashboardController extends AbstractController
 
     #[Route('', name: 'dashboard_operator_overview', methods: ['GET'])]
     #[IsGranted('PLATFORM.OVERVIEW.VIEW')]
-    public function overview(): Response
+    public function overview(Request $request, OperatorOverview $overview, InstallationTime $time): Response
     {
-        return $this->page('overview.html.twig', 'overview', ['o' => $this->read->overview()]);
+        $period = OverviewPeriod::fromKey($request->query->getString('period', OverviewPeriod::DEFAULT), $time->zone);
+
+        return $this->page('overview.html.twig', 'overview', $overview->build($period));
     }
 
     #[Route('/clients', name: 'dashboard_operator_clients', methods: ['GET'])]

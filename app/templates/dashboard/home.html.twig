@@ -1,28 +1,30 @@
 {% extends 'dashboard/layout.html.twig' %}
-{% block title %}Home{% endblock %}
+{% import 'dashboard/_icons.html.twig' as icon %}
+{% block title %}Your workspaces{% endblock %}
 {% block body %}
-<h1>Dashboard</h1>
+<div class="pagehead">
+    <div>
+        <h1>Your workspaces</h1>
+        <p class="sub">Each client has its own workspace: its sending, validation, settings and usage.</p>
+    </div>
+</div>
 {% if memberships is empty %}
     {% if app.user.platformUser %}
-        <p>Use the Operator menu above.</p>
+        <p class="empty">Use the area buttons on the left.</p>
     {% else %}
-        <p>Your account is not a member of any client yet. Ask an operator to add you to a client.</p>
+        <p class="empty">Your account is not a member of any client yet. Ask an operator to add you to a client.</p>
     {% endif %}
 {% else %}
-    <h2>Your clients</h2>
-    <table>
-        <caption class="sr">Clients you are a member of</caption>
-        <thead><tr><th scope="col">Client</th><th scope="col">Your role</th><th scope="col">Client status</th></tr></thead>
-        <tbody>
+    <ul class="workspaces">
         {% for m in memberships %}
-            <tr>
-                <td><a href="{{ path('dashboard_client_overview', {clientId: m.client.id.toRfc4122}) }}">{{ m.client.companyName }}</a></td>
-                <td>{{ m.role.value|capitalize }}</td>
-                <td>{{ m.client.status.value|label('client_status') }}</td>
-            </tr>
+        <li><a class="card workspace" href="{{ path('dashboard_client_overview', {clientId: m.client.id.toRfc4122}) }}">
+            <span class="avatar av-{{ m.client.companyName|tone_slot }}" aria-hidden="true">{{ m.client.companyName|initials }}</span>
+            <span class="workspace-text"><span class="workspace-name">{{ m.client.companyName }}</span>
+                <span class="muted small">Your role: {{ m.role.value|capitalize }} · client status: {{ m.client.status.value|label('client_status') }}</span></span>
+            {{ icon.i('chevron', 18) }}
+        </a></li>
         {% endfor %}
-        </tbody>
-    </table>
-    {% if is_granted('PLATFORM.OVERVIEW.VIEW') %}<p><a href="{{ path('dashboard_operator_overview') }}">Operator dashboard</a></p>{% endif %}
+    </ul>
+    {% if is_granted('PLATFORM.OVERVIEW.VIEW') %}<p><a href="{{ path('dashboard_operator_overview') }}">Operator console</a></p>{% endif %}
 {% endif %}
 {% endblock %}

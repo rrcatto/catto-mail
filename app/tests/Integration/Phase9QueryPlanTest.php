@@ -194,7 +194,7 @@ final class Phase9QueryPlanTest extends DashboardTestCase
         $observations['reputation evaluation (all clients, both windows)'] = $this->explain(QueryRecorder::stop(), true);
         self::assertGreaterThanOrEqual(200, $result['evaluated_clients']);
         QueryRecorder::start();
-        $r = $this->container()->get(UsageReconciliation::class)->reconcile($m, UsagePeriod::named('current_month'));
+        $r = $this->container()->get(UsageReconciliation::class)->reconcile($m, UsagePeriod::named('current_month', $this->container()->get(\App\Util\InstallationTime::class)->zone));
         $observations['reconciliation, measured client, current month'] = $this->explain(QueryRecorder::stop(), true);
         self::assertGreaterThan(0, $r['checked']['message_usage_records']);
 

@@ -2,34 +2,46 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Address batches{% endblock %}
 {% block body %}
-<h1>Address batches</h1>
-<p>Upload a list of up to {{ max|number_format }} addresses, validate it, review the results and, if approved, send to it in careful stages.
-This is an operational tool (validation, re-permission of an old list) — the client application remains where subscribers are managed.
-{{ ui.help('uploading-lists') }} · {{ ui.help('repermission', 'Re-permission') }}</p>
-<section class="card" aria-labelledby="up-h">
-<h2 id="up-h">Upload a list</h2>
-<form method="post" action="{{ path('dashboard_operator_batch_preview') }}" enctype="multipart/form-data" class="stack">
-    {{ ui.csrf() }}
-    <label>File: TXT (one address per line) or CSV (header row; you choose the address column) — at most 10 MiB and {{ max|number_format }} addresses
-        <input type="file" name="file" accept=".txt,.csv,text/plain,text/csv" required></label>
-    <label>On behalf of client (its quotas, sending domains and suppressions apply)
-        <select name="client" required><option value="">Choose…</option>{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.status }})</option>{% endfor %}</select></label>
-    <label>Batch name <input name="name" required maxlength="200"></label>
-    <label>Purpose
-        <select name="purpose"><option value="validation">Validation (and test sends)</option><option value="repermission">Re-permission: ask an old list whether they still want mail</option></select></label>
-    <label>List identifier (List-Id, e.g. <code>news.example.org</code>; required for re-permission and for any send beyond a seed test) <input name="list_id" maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"></label>
-    <label>Where the list comes from (optional) <input name="source" maxlength="500" placeholder="e.g. export of the 2019 newsletter list"></label>
-    <label>Description (optional) <textarea name="description" maxlength="2000" rows="2"></textarea></label>
-    <button type="submit">Preview</button>
-</form>
-<p class="muted">The preview shows what will be imported before anything is stored. Nothing is ever silently dropped: duplicates and rows that are not e-mail addresses are listed in the reports.</p>
-</section>
-<h2>Batches</h2>
-<div class="scroll"><table class="dense">
-<thead><tr><th scope="col">Batch</th><th scope="col">Client</th><th scope="col">Purpose</th><th scope="col" class="num">Rows</th><th scope="col" class="num">Unique</th><th scope="col" class="num">Duplicates</th><th scope="col" class="num">Malformed</th><th scope="col">Uploaded</th><th scope="col">Approval</th><th scope="col" class="num">Sends</th></tr></thead>
-<tbody>{% for b in batches %}<tr><td><a href="{{ path('dashboard_operator_batch', {id: b.id}) }}">{{ b.name }}</a><br><small class="muted">{{ b.original_filename }}</small></td>
-<td>{{ b.company_name }}</td><td>{{ b.purpose }}</td><td class="num">{{ b.data_rows|number_format }}</td><td class="num">{{ b.imported_count|number_format }}</td>
-<td class="num">{{ b.duplicate_count|number_format }}</td><td class="num">{{ b.malformed_count|number_format }}</td><td>{{ b.created_at|ts }}<br><small>{{ b.uploaded_by }}</small></td>
-<td>{{ b.compliance_approved_at ? 'approved' : '—' }}</td><td class="num">{{ b.sends }}</td></tr>
-{% else %}<tr><td colspan="10" class="empty">No batch yet.</td></tr>{% endfor %}</tbody></table></div>
+<div class="pagehead">
+    <div>
+        <h1>Address batches</h1>
+        <p class="sub">Upload a list of up to {{ max|number_format }} addresses, validate it, review the results and, if approved, send to it in careful stages.</p>
+    </div>
+    <div class="actions">{{ ui.help('uploading-lists') }}{{ ui.help('repermission', 'Re-permission') }}</div>
+</div>
+<p class="muted">This is an operational tool (validation, re-permission of an old list) — the client application remains where subscribers are managed.</p>
+
+<div class="with-aside">
+    <section class="card card-flush" aria-labelledby="list-h">
+        <div class="card-head"><h2 id="list-h">Batches</h2><span class="count count-dark">{{ batches|length }}</span></div>
+        <div class="scroll"><table>
+        <thead><tr><th scope="col">Batch</th><th scope="col">Client</th><th scope="col">Purpose</th><th scope="col" class="num">Rows</th><th scope="col" class="num">Unique</th><th scope="col" class="num">Duplicates</th><th scope="col" class="num">Malformed</th><th scope="col">Uploaded</th><th scope="col">Approval</th><th scope="col" class="num">Sends</th></tr></thead>
+        <tbody>{% for b in batches %}<tr><td><a href="{{ path('dashboard_operator_batch', {id: b.id}) }}"><strong>{{ b.name }}</strong></a><br><small class="muted">{{ b.original_filename }}</small></td>
+        <td>{{ b.company_name }}</td><td><span class="tag">{{ b.purpose }}</span></td><td class="num">{{ b.data_rows|number_format }}</td><td class="num">{{ b.imported_count|number_format }}</td>
+        <td class="num">{{ b.duplicate_count|number_format }}</td><td class="num">{{ b.malformed_count|number_format }}</td><td>{{ b.created_at|ts }}<br><small>{{ b.uploaded_by }}</small></td>
+        <td>{% if b.compliance_approved_at %}<span class="st st-completed">approved</span>{% else %}—{% endif %}</td><td class="num">{{ b.sends }}</td></tr>
+        {% else %}<tr><td colspan="10"><span class="muted">No batch yet.</span></td></tr>{% endfor %}</tbody></table></div>
+    </section>
+
+    <aside>
+        <section class="card" aria-labelledby="up-h">
+            <h2 id="up-h">Upload a list</h2>
+            <form method="post" action="{{ path('dashboard_operator_batch_preview') }}" enctype="multipart/form-data" class="stack">
+                {{ ui.csrf() }}
+                <label>File: TXT (one address per line) or CSV (header row; you choose the address column) — at most 10 MiB and {{ max|number_format }} addresses
+                    <input type="file" name="file" accept=".txt,.csv,text/plain,text/csv" required></label>
+                <label>On behalf of client (its quotas, sending domains and suppressions apply)
+                    <select name="client" required><option value="">Choose…</option>{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.status }})</option>{% endfor %}</select></label>
+                <label>Batch name <input name="name" required maxlength="200"></label>
+                <label>Purpose
+                    <select name="purpose"><option value="validation">Validation (and test sends)</option><option value="repermission">Re-permission: ask an old list whether they still want mail</option></select></label>
+                <label>List identifier (List-Id, e.g. <code>news.example.org</code>; required for re-permission and for any send beyond a seed test) <input name="list_id" maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"></label>
+                <label>Where the list comes from (optional) <input name="source" maxlength="500" placeholder="e.g. export of the 2019 newsletter list"></label>
+                <label>Description (optional) <textarea name="description" maxlength="2000" rows="2"></textarea></label>
+                <button type="submit">Preview</button>
+            </form>
+            <p class="muted small">The preview shows what will be imported before anything is stored. Nothing is ever silently dropped: duplicates and rows that are not e-mail addresses are listed in the reports.</p>
+        </section>
+    </aside>
+</div>
 {% endblock %}

@@ -1,9 +1,20 @@
 {% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}Help{% endblock %}
 {% block body %}
-<h1>Help and tutorials</h1>
-<p>How catto-mail works, explained without the source code. Start with the first group; the setup wizard links to the right page at each step.</p>
+{% set icons = {'Start here': 'overview', 'Validation and lists': 'check', 'Sending and results': 'send', 'Mail identity (DNS)': 'mail', 'The components in depth': 'system', 'Clients and integration': 'clients', 'Operations': 'settings'} %}
+<div class="pagehead">
+    <div>
+        <h1>Help and tutorials</h1>
+        <p class="sub">How catto-mail works, explained without the source code. Start with the first group; the setup wizard links to the right page at each step.</p>
+    </div>
+</div>
 <div class="cards">
-{% for group, topics in groups %}<section class="card"><h2>{{ group }}</h2><ul class="plain">{% for slug, title in topics %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}">{{ title }}</a></li>{% endfor %}</ul></section>{% endfor %}
+{% for group, topics in groups %}
+    <section class="card card-flush" aria-labelledby="help-g{{ loop.index }}">
+        <div class="card-head"><h2 id="help-g{{ loop.index }}" class="titleline">{{ icon.i(icons[group] ?? 'help', 20) }}{{ group }}</h2><span class="count count-dark">{{ topics|length }}</span></div>
+        <ul class="result-list">{% for slug, title in topics %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}"><span class="result-text"><span class="result-title">{{ title }}</span></span>{{ icon.i('chevron', 16) }}</a></li>{% endfor %}</ul>
+    </section>
+{% endfor %}
 </div>
 {% endblock %}

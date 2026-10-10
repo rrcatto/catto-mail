@@ -155,9 +155,10 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `APP_RETENTION_USAGE_RECORDS_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
 | `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` | app | no | 7 | | Webhook delivery history (`webhook_deliveries` and their delivered outbox events). Empty means no automatic deletion: rows stay durable until a production retention policy sets a period. Policy only; nothing deletes them yet. |
 | `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. Empty disables this. |
-| `APP_MAIL_FROM` | app, postfix | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail Smarthost"). Its domain should be DKIM-signed by OpenDKIM. Postfix lets only the web application's submission account use it as envelope sender, and in production held mode it is the only sender Postfix delivers. |
+| `APP_MAIL_FROM` | app, postfix | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail"). Its domain should be DKIM-signed by OpenDKIM. Postfix lets only the web application's submission account use it as envelope sender, and in production held mode it is the only sender Postfix delivers. |
 | `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |
 | `APP_REPERMISSION_RESPONSE_DAYS` | app | no | 10 | `60` | How long the answer links of a re-permission message (`/p/<token>`: confirm, unsubscribe from this list, global opt-out) stay valid (specification 2.11). |
+| `APP_TIMEZONE` | app | no | 10 | `Africa/Johannesburg` | The installation's time zone, an IANA name such as `Africa/Johannesburg` (SAST, UTC+2) or `UTC`. The dashboard shows times in it and groups the operator overview's hours and days by it, and the quota, usage and billing periods are its calendar days and months (a daily quota resets at its midnight). The database stores UTC, and the API, webhooks and CSV exports carry UTC timestamps. An unknown name is a startup error. |
 | `APP_MAIL_SUBMISSION_HOST` | app | no | 6 | `postfix` | Postfix submission host for the web application's own mail (sign-in links). |
 | `APP_MAIL_SUBMISSION_PORT` | app | no | 6 | `587` | Authenticated submission port (STARTTLS, OpenDKIM milter). |
 | `APP_MAIL_SUBMISSION_USERNAME` | app, postfix | no | 6 | `smarthost-app` | SASL account of the web application on Postfix submission (separate from the delivery daemon's). |
@@ -293,7 +294,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |
 | `SMARTHOST_PUBLIC_IPV4` | `203.0.113.10` | The host's public IPv4 (placeholder: TEST-NET-3). |
 | `SMARTHOST_EGRESS_ENABLED` | `true` | Postfix, validator, webhook worker and application DNS reach the Internet. |
-| `SMARTHOST_IMAGE_TAG` | `0.2.1` | The released version being deployed. |
+| `SMARTHOST_IMAGE_TAG` | `0.2.2` | The released version being deployed. |
 | `ACME_SERVER` | `https://acme-v02.api.letsencrypt.org/directory` | Let's Encrypt production; the installer fills in `ACME_EMAIL` and the provider when you choose automatic certificates. |
 | `BACKUP_SCHEDULE` | `*-*-* 03:15:00` | A daily backup. Set `BACKUP_OFFHOST_TARGET` before relying on it. |
 | `SMARTHOST_LOG_LEVEL` | `info` | |

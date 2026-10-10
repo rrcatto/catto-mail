@@ -1,16 +1,22 @@
 {% set h = host.value ?? {} %}
+<section class="card" aria-labelledby="host-h">
+<h2 id="host-h">The server</h2>
 <p>The server catto-mail runs on. Everything runs as the unprivileged user <code>{{ h.user ?? 'cattomail' }}</code> in rootless Podman containers; that user's own systemd starts them at boot ("lingering").</p>
 {% if host is null %}<p class="warn">No host report yet: the host agent reports within a minute of starting (<code>smarthostctl prod install</code>).</p>{% else %}
-<table class="kv dense"><tbody>
-<tr><th scope="row">Operating system</th><td>{{ h.os ?? '?' }}{% if h.os_supported is defined and not h.os_supported %} <span class="res res-warn">WARN</span> catto-mail is tested on Ubuntu Server 26.04 LTS{% endif %}</td></tr>
-<tr><th scope="row">Podman</th><td>{{ h.podman ?? '?' }} · rootless: {{ h.rootless is defined ? (h.rootless ? 'yes' : 'NO') : '?' }}</td></tr>
-<tr><th scope="row">Service user</th><td>{{ h.user ?? '?' }} (uid {{ h.uid ?? '?' }}) · lingering: {{ h.linger is defined ? (h.linger ? 'on' : 'OFF') : '?' }}</td></tr>
-<tr><th scope="row">Automatic start</th><td>{% for name, u in h.units ?? {} %}{{ name }}: {{ u.enabled ?? '?' }}/{{ u.active ?? '?' }}{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
-<tr><th scope="row">Disk</th><td>{% for d in h.disk ?? [] %}{{ d.path }}: {{ d.free_gb }} GB free of {{ d.total_gb }} GB ({{ d.free_percent }} %)<br>{% endfor %}</td></tr>
-<tr><th scope="row">Memory</th><td>{{ h.memory.available_mb ?? '?' }} MB available of {{ h.memory.total_mb ?? '?' }} MB</td></tr>
-<tr><th scope="row">Clock synchronised</th><td>{{ h.clock_synchronized is defined ? (h.clock_synchronized ? 'yes' : 'NO') : '?' }}</td></tr>
-<tr><th scope="row">Public IPv4 (configured)</th><td>{{ h.config.SMARTHOST_PUBLIC_IPV4 ?? '?' }}</td></tr>
-<tr><th scope="row">Release</th><td>{{ h.release.tag ?? '?' }} {% if h.release.commit is defined %}<small class="muted">({{ h.release.commit }})</small>{% endif %}</td></tr>
-<tr><th scope="row">Booted</th><td>{{ h.boot_time ?? '?' }}</td></tr>
-<tr><th scope="row">Reported</th><td>{{ host.updated_at|ts }}</td></tr>
-</tbody></table>{% endif %}
+<dl class="facts">
+    <div><dt>Operating system</dt><dd>{{ h.os ?? '?' }}</dd></div>
+    <div><dt>Podman</dt><dd>{{ h.podman ?? '?' }} · rootless: {{ h.rootless is defined ? (h.rootless ? 'yes' : 'NO') : '?' }}</dd></div>
+    <div><dt>Memory</dt><dd>{{ h.memory.available_mb ?? '?' }} MB available of {{ h.memory.total_mb ?? '?' }} MB</dd></div>
+    <div><dt>Clock synchronised</dt><dd>{{ h.clock_synchronized is defined ? (h.clock_synchronized ? 'yes' : 'NO') : '?' }}</dd></div>
+</dl>
+{% if h.os_supported is defined and not h.os_supported %}<p class="warn"><span class="res res-warn">WARN</span> catto-mail is tested on Ubuntu Server 26.04 LTS</p>{% endif %}
+<dl class="rows">
+<dt>Service user</dt><dd>{{ h.user ?? '?' }} (uid {{ h.uid ?? '?' }}) · lingering: {{ h.linger is defined ? (h.linger ? 'on' : 'OFF') : '?' }}</dd>
+<dt>Automatic start</dt><dd>{% for name, u in h.units ?? {} %}{{ name }}: {{ u.enabled ?? '?' }}/{{ u.active ?? '?' }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>
+<dt>Disk</dt><dd>{% for d in h.disk ?? [] %}{{ d.path }}: {{ d.free_gb }} GB free of {{ d.total_gb }} GB ({{ d.free_percent }} %)<br>{% endfor %}</dd>
+<dt>Public IPv4 (configured)</dt><dd>{{ h.config.SMARTHOST_PUBLIC_IPV4 ?? '?' }}</dd>
+<dt>Release</dt><dd>{{ h.release.tag ?? '?' }} {% if h.release.commit is defined %}<small class="muted">({{ h.release.commit }})</small>{% endif %}</dd>
+<dt>Booted</dt><dd>{{ h.boot_time ?? '?' }}</dd>
+<dt>Reported</dt><dd>{{ host.updated_at|ts }}</dd>
+</dl>{% endif %}
+</section>

@@ -13,6 +13,7 @@ use App\Entity\Client;
 use App\Enum\BillingReconciliationStatus;
 use App\Enum\BillingStatementStatus;
 use App\Enum\UsageType;
+use App\Util\InstallationTime;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -40,6 +41,7 @@ final class BillingStatementService
         private readonly AuditLogger $audit,
         private readonly UsageReporting $reporting,
         private readonly UsageReconciliation $reconciliation,
+        private readonly InstallationTime $time,
     ) {
     }
 
@@ -166,7 +168,7 @@ final class BillingStatementService
 
     public function periodOf(BillingStatement $statement): UsagePeriod
     {
-        return UsagePeriod::custom($statement->getPeriodStart()->format('Y-m-d'), $statement->getPeriodEnd()->format('Y-m-d'));
+        return UsagePeriod::custom($statement->getPeriodStart()->format('Y-m-d'), $statement->getPeriodEnd()->format('Y-m-d'), $this->time->zone);
     }
 
     /** @param callable(): array{action: string, detail: array<string, mixed>} $change */

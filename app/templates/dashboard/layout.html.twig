@@ -1,94 +1,114 @@
-{% import 'dashboard/_macros.html.twig' as ui %}<!DOCTYPE html>
+{% import 'dashboard/_macros.html.twig' as ui %}{% import 'dashboard/_icons.html.twig' as icon %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="same-origin">
-    <title>{% block title %}Dashboard{% endblock %} · Catto Mail Smarthost</title>
+    <title>{% block title %}Dashboard{% endblock %} · Catto Mail</title>
     <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
     {{ importmap('app', {nonce: csp_nonce()}) }}
 </head>
-<body>
+<body{% if not app.user %} class="bare"{% endif %}>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top">
-    <div class="brand"><a href="{{ path('dashboard_home') }}">Catto Mail Smarthost</a></div>
-    {% if app.user %}
-        <div class="who">
-            Signed in as <strong>{{ app.user.displayName ?? app.user.email }}</strong>
-            {% for r in app.user.roleKeys %}<span class="tag">{{ r|lower }}</span>{% endfor %}
-            <form method="post" action="{{ path('dashboard_logout') }}" class="inline">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
-                <button type="submit" class="link">Sign out</button>
-            </form>
-        </div>
-    {% endif %}
-</header>
 {% if app.user %}
-<nav class="nav" aria-label="Main">
-    {% if client is defined %}
-        {% set cid = client.id.toRfc4122 %}
-        <span class="nav-title">{{ client.companyName }}</span>
-        <ul>
-            <li><a href="{{ path('dashboard_client_overview', {clientId: cid}) }}"{% if section == 'overview' %} aria-current="page"{% endif %}>Overview</a></li>
-            <li><a href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}"{% if section == 'validation' %} aria-current="page"{% endif %}>Validation</a></li>
-            <li><a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}"{% if section == 'sending' %} aria-current="page"{% endif %}>Sending</a></li>
-            <li><a href="{{ path('dashboard_client_suppressions', {clientId: cid}) }}"{% if section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>
-            <li><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}"{% if section == 'domains' %} aria-current="page"{% endif %}>Sending domains</a></li>
-            <li><a href="{{ path('dashboard_client_usage', {clientId: cid}) }}"{% if section == 'usage' and client is defined %} aria-current="page"{% endif %}>Usage</a></li>
-            <li><a href="{{ path('dashboard_client_api_keys', {clientId: cid}) }}"{% if section == 'api_keys' %} aria-current="page"{% endif %}>API keys</a></li>
-            <li><a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}"{% if section == 'webhooks' and client is defined %} aria-current="page"{% endif %}>Webhooks</a></li>
-        </ul>
-    {% endif %}
-    {% if app.user.platformUser %}
-        <span class="nav-title">Operator</span>
-        <ul>
-            {% if is_granted('PLATFORM.OVERVIEW.VIEW') %}<li><a href="{{ path('dashboard_operator_overview') }}"{% if client is not defined and section == 'overview' %} aria-current="page"{% endif %}>System overview</a></li>{% endif %}
-            {% if is_granted('PLATFORM.CLIENT.VIEW') %}<li><a href="{{ path('dashboard_operator_clients') }}"{% if section == 'clients' %} aria-current="page"{% endif %}>Clients</a></li>{% endif %}
-            {% if is_granted('PLATFORM.ABUSE.VIEW') %}<li><a href="{{ path('dashboard_operator_alerts') }}"{% if section == 'alerts' %} aria-current="page"{% endif %}>Abuse &amp; reputation</a></li>{% endif %}
-            {% if is_granted('PLATFORM.USAGE.VIEW') %}<li><a href="{{ path('dashboard_operator_usage') }}"{% if section == 'usage' and client is not defined %} aria-current="page"{% endif %}>Usage &amp; billing</a></li>{% endif %}
-            {% if is_granted('PLATFORM.USER.VIEW') %}<li><a href="{{ path('dashboard_operator_users') }}"{% if section == 'users' %} aria-current="page"{% endif %}>Users</a></li>{% endif %}
-            {% if is_granted('SYSTEM.ROLE.VIEW') %}<li><a href="{{ path('dashboard_operator_roles') }}"{% if section == 'roles' %} aria-current="page"{% endif %}>Roles &amp; permissions</a></li>{% endif %}
-            {% if is_granted('PLATFORM.DSN.VIEW') %}<li><a href="{{ path('dashboard_operator_dsns') }}"{% if section == 'dsns' %} aria-current="page"{% endif %}>Unmatched DSNs</a></li>{% endif %}
-            {% if is_granted('PLATFORM.SUPPRESSION.VIEW') %}<li><a href="{{ path('dashboard_operator_suppressions') }}"{% if client is not defined and section == 'suppressions' %} aria-current="page"{% endif %}>Suppressions</a></li>{% endif %}
-            {% if is_granted('PLATFORM.AUDIT.VIEW') %}<li><a href="{{ path('dashboard_operator_audit') }}"{% if section == 'audit' %} aria-current="page"{% endif %}>Audit log</a></li>{% endif %}
-            {% if is_granted('PLATFORM.WEBHOOK.VIEW') %}<li><a href="{{ path('dashboard_operator_webhooks') }}"{% if section == 'webhooks' and client is not defined %} aria-current="page"{% endif %}>Webhooks</a></li>{% endif %}
-        </ul>
-        {% if is_granted('PLATFORM.SYSTEM.VIEW') or is_granted('SYSTEM.SETUP.MANAGE') or is_granted('PLATFORM.HELP.VIEW') %}
-        <span class="nav-title">System</span>
-        <ul>
-            {% if is_granted('PLATFORM.SYSTEM.VIEW') %}<li><a href="{{ path('dashboard_operator_system') }}"{% if section == 'system' %} aria-current="page"{% endif %}>Health &amp; delivery</a></li>
-            <li><a href="{{ path('dashboard_operator_diagnostics') }}"{% if section == 'diagnostics' %} aria-current="page"{% endif %}>Diagnostics</a></li>{% endif %}
-            {% if is_granted('SYSTEM.SETUP.MANAGE') %}<li><a href="{{ path('dashboard_operator_setup') }}"{% if section == 'setup' %} aria-current="page"{% endif %}>System setup</a></li>{% endif %}
-            {% if is_granted('SYSTEM.ADDRESS_BATCH.MANAGE') %}<li><a href="{{ path('dashboard_operator_batches') }}"{% if section == 'batches' %} aria-current="page"{% endif %}>Address batches</a></li>{% endif %}
-            {% if is_granted('PLATFORM.HELP.VIEW') %}<li><a href="{{ path('dashboard_operator_help') }}"{% if section == 'help' %} aria-current="page"{% endif %}>Help</a></li>{% endif %}
-        </ul>
+{# The client workspace navigation only on client pages (some operator pages also pass a client). #}
+{% set nav_client = client is defined and client and (app.request.attributes.get('_route') ?? '') starts with 'dashboard_client_' ? client : null %}
+{% set nav = navigation(nav_client, section ?? '') %}
+{% set platform = app.user.platformUser %}
+{% set ds = platform and is_granted('PLATFORM.SYSTEM.VIEW') ? delivery_status() : null %}
+<header class="topbar">
+    <a class="brand" href="{{ path('dashboard_home') }}">{{ icon.logo() }}<span>Catto Mail</span></a>
+    {% block pills %}
+        {% if nav.pills|length > 0 %}
+        <nav class="pills" aria-label="Pages in this area">
+            {% for p in nav.pills %}<a class="pill" href="{{ p.href }}"{% if p.current %} aria-current="page"{% endif %}>{{ p.label }}{% if p.badge %} <span class="count count-{{ p.badge[1] }}">{{ p.badge[0] }}</span>{% endif %}</a>{% endfor %}
+        </nav>
         {% endif %}
-    {% endif %}
-</nav>
-{% if app.user.platformUser and is_granted('PLATFORM.SYSTEM.VIEW') %}
-    {% set ds = delivery_status() %}
-    <div class="modebar" role="status">
-        <span>Delivery: <a class="mode mode-{{ ds.mode }}" href="{{ path('dashboard_operator_system') }}">{{ ds.mode }}</a></span>
-        <span class="muted">{{ ds.explanation }}</span>
-        {% if is_granted('SYSTEM.DELIVERY.CONTROL') and not ds.emergency_stop %}
-        <form method="post" action="{{ path('dashboard_operator_stop') }}" class="inline" data-controller="confirm" data-confirm-message-value="Stop sending all email now? Nothing new is submitted and the Postfix queue is held until an administrator resumes.">
-            {{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ app.request.pathInfo starts with '/dashboard/operator/' ? app.request.pathInfo : '' }}">
-            <label class="sr" for="stop-note">Reason</label>
-            <input id="stop-note" name="note" required minlength="3" maxlength="1000" placeholder="Reason (kept in the audit log)" size="28">
-            <button type="submit" class="danger">STOP SENDING EMAIL NOW</button>
-        </form>
+    {% endblock %}
+    <div class="topright">
+        {% set search_action = nav.context == 'client' ? path('dashboard_client_search', {clientId: nav_client.id.toRfc4122}) : (platform ? path('dashboard_search') : null) %}
+        {% if search_action %}
+            <details class="dropdown searchdrop" data-controller="dropdown">
+                <summary class="iconbtn" aria-label="Search{{ nav.context == 'client' ? ' this client' : '' }}">{{ icon.i('search') }}</summary>
+                <form class="dropdown-panel topsearch" role="search" method="get" action="{{ search_action }}">
+                    <label for="top-search">{{ nav.context == 'client' ? 'Search ' ~ nav_client.companyName : 'Search the installation' }}</label>
+                    <span class="topsearch-row"><input id="top-search" type="search" name="q" minlength="2" maxlength="200" placeholder="An ID, address, domain, reference or name"{% if (section ?? '') == 'search' %} value="{{ app.request.query.get('q') }}"{% endif %}><button type="submit">Search</button></span>
+                </form>
+            </details>
         {% endif %}
+        {% if ds %}
+            <a class="modepill mode-{{ ds.mode }}" href="{{ path('dashboard_operator_system') }}" title="{{ ds.explanation }}"><span class="dot" aria-hidden="true"></span>Delivery: {{ ds.mode }}</a>
+            {% if is_granted('SYSTEM.DELIVERY.CONTROL') and not ds.emergency_stop %}
+            <details class="dropdown stopbox" data-controller="dropdown">
+                <summary class="btn btn-danger">{{ icon.i('stop', 18) }}Stop sending</summary>
+                <form method="post" action="{{ path('dashboard_operator_stop') }}" class="dropdown-panel stack" data-controller="confirm" data-confirm-message-value="Stop sending all email now? Nothing new is submitted and the Postfix queue is held until an administrator resumes.">
+                    {{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ app.request.pathInfo starts with '/dashboard/operator/' ? app.request.pathInfo : '' }}">
+                    <p><strong>Stop sending all email now?</strong> Nothing new is submitted and the Postfix queue is held until an administrator resumes. Nothing is lost.</p>
+                    <label>Reason (kept in the audit log)<input name="note" required minlength="3" maxlength="1000" autocomplete="off"></label>
+                    <button type="submit" class="danger">STOP SENDING EMAIL NOW</button>
+                </form>
+            </details>
+            {% endif %}
+        {% endif %}
+        {% if nav.context == 'client' %}
+            <a class="chip" href="{{ nav.switch.href }}" title="{{ nav.switch.label }}"><span class="avatar av-{{ nav_client.companyName|tone_slot }}" aria-hidden="true">{{ nav_client.companyName|initials }}</span>{{ nav_client.companyName }}{{ icon.i('switch', 16) }}<span class="sr">: {{ nav.switch.label }}</span></a>
+        {% endif %}
+        {% if platform and is_granted('PLATFORM.OVERVIEW.VIEW') %}
+            <a class="iconbtn" href="{{ path('dashboard_operator_overview') }}#attention" aria-label="Needs attention: {{ nav.attention }}">{{ icon.i('bell') }}{% if nav.attention > 0 %}<span class="iconbtn-dot" aria-hidden="true"></span>{% endif %}</a>
+        {% endif %}
+        <details class="dropdown account" data-controller="dropdown">
+            <summary class="avatar-btn" aria-label="Account menu">{{ (app.user.displayName ?? (app.user.email|split('@')|first))|initials }}</summary>
+            <div class="dropdown-panel">
+                <p class="muted">Signed in as</p>
+                <p class="account-name">{{ app.user.displayName ?? app.user.email }}</p>
+                {% if app.user.roleKeys is not empty %}<p>{% for r in app.user.roleKeys %}<span class="tag">{{ r|lower }}</span>{% endfor %}</p>{% endif %}
+                <form method="post" action="{{ path('dashboard_logout') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+                    <button type="submit" class="secondary">Sign out</button>
+                </form>
+            </div>
+        </details>
     </div>
-{% endif %}
-{% endif %}
-<main id="main">
+</header>
+<div class="shell">
+    {% if nav.areas is not empty or nav.help or nav.switch %}
+    <nav class="orbs" aria-label="Main">
+        <ul>
+            {% for a in nav.areas %}
+            <li><a class="orb" href="{{ a.href }}"{% if a.current %} aria-current="page"{% endif %}>{{ icon.i(a.icon, 24) }}<span class="orb-label">{{ a.label }}</span>{% if a.badge %}<span class="orb-badge count-{{ a.badge[1] }}" aria-hidden="true">{{ a.badge[0] }}</span><span class="sr">, {{ a.badge[0] }} to look at</span>{% endif %}</a></li>
+            {% endfor %}
+        </ul>
+        <ul class="orbs-end">
+            {% if nav.help %}<li><a class="orb" href="{{ nav.help }}"{% if (section ?? '') == 'help' %} aria-current="page"{% endif %}>{{ icon.i('help', 24) }}<span class="orb-label">Help</span></a></li>{% endif %}
+            {% if nav.switch %}<li><a class="orb" href="{{ nav.switch.href }}">{{ icon.i('switch', 24) }}<span class="orb-label">{{ nav.switch.label }}</span></a></li>{% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+    <main id="main" class="content">
+        {% if nav.context == 'client' and platform %}
+            <p class="viewing">You are viewing the workspace of <strong>{{ nav_client.companyName }}</strong> as an operator. <a href="{{ nav.switch.href }}">Back to the operator console</a></p>
+        {% endif %}
+        {% for type, messages in app.flashes %}
+            {% for message in messages %}
+                <p class="flash flash-{{ type }}" role="{{ type == 'error' ? 'alert' : 'status' }}"><strong>{{ type == 'error' ? 'Error' : (type == 'success' ? 'Done' : 'Note') }}:</strong> {{ message }}</p>
+            {% endfor %}
+        {% endfor %}
+        {% block body %}{% endblock %}
+        <footer class="foot">catto-mail v{{ app_version() }} · Times are shown in {{ time_zone_label() }}</footer>
+    </main>
+</div>
+{% else %}
+<header class="topbar topbar-bare">
+    <span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span>
+</header>
+<main id="main" class="content content-bare">
     {% for type, messages in app.flashes %}
         {% for message in messages %}
             <p class="flash flash-{{ type }}" role="{{ type == 'error' ? 'alert' : 'status' }}"><strong>{{ type == 'error' ? 'Error' : (type == 'success' ? 'Done' : 'Note') }}:</strong> {{ message }}</p>
         {% endfor %}
     {% endfor %}
-    {% block body %}{% endblock %}
+    {% block body_bare %}{{ block('body') }}{% endblock %}
 </main>
-<footer class="foot">Times are shown in UTC.</footer>
+{% endif %}
 </body>
 </html>

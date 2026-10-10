@@ -3,28 +3,42 @@
 {% block title %}API keys{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
-<h1>API keys</h1>
-<p class="muted">Your applications authenticate to the API with these keys (<code>Authorization: Bearer shk_…</code>). Smarthost stores only a hash: a key is shown once, when it is created. Revoked and expired keys fail with 401.</p>
 {% set max = limits.limits|filter(l => l.column == 'max_api_keys')|first %}
-<p>Usable keys: {{ keys|filter(k => k.usable)|length }} of at most {{ max.effective }}.</p>
-{% if keys is empty %}<p class="empty">No API keys yet.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Name</th><th scope="col">Prefix</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">State</th>{% if may_manage %}<th scope="col"></th>{% endif %}</tr></thead>
-    <tbody>{% for k in keys %}<tr><td>{{ k.name ?? '—' }}</td><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.created_at|ts }}</td><td>{{ k.last_used_at|ts }}</td><td>{{ k.expires_at|ts }}</td>
-        <td>{{ k.revoked_at ? 'Revoked ' ~ k.revoked_at|ts : (k.usable ? 'Usable' : 'Expired') }}</td>
-        {% if may_manage %}<td>{% if k.usable %}<form method="post" action="{{ path('dashboard_client_api_key_revoke', {clientId: cid, keyId: k.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Revoke {{ k.key_prefix }}…? Requests with it fail at once.">{{ ui.csrf() }}<button type="submit">Revoke</button></form>{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody>
-</table>
-{% endif %}
-{% if may_manage and client.status.value != 'closed' %}
-<section class="card">
-    <h2>Create an API key</h2>
-    <form method="post" action="{{ path('dashboard_client_api_key_create', {clientId: cid}) }}" class="stack">
-        {{ ui.csrf() }}
-        <label>Descriptive name <input type="text" name="name" maxlength="100" placeholder="e.g. production server, rotation 2026-10"></label>
-        <label>Expires after (optional, UTC date) <input type="date" name="expires_on"></label>
-        <button type="submit">Create key (shown once)</button>
-    </form>
-    <p class="muted">Rotation without downtime: create the replacement, deploy it, check that its “last used” time appears, then revoke the old key.</p>
-</section>
-{% elseif not may_manage %}<p class="muted">Client admins create and revoke keys.</p>{% endif %}
+<div class="pagehead">
+    <div>
+        <h1>API keys</h1>
+        <p class="sub">Your applications authenticate to the API with these keys (<code>Authorization: Bearer shk_…</code>). Smarthost stores only a hash: a key is shown once, when it is created. Revoked and expired keys fail with 401.</p>
+    </div>
+    <div class="actions"><a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a></div>
+</div>
+
+<div class="row-2 row-wide-left">
+    <section class="card card-flush" aria-labelledby="keys-h">
+        <div class="card-head"><h2 id="keys-h">Keys</h2><p class="muted small">Usable keys: {{ keys|filter(k => k.usable)|length }} of at most {{ max.effective }}.</p></div>
+        {% if keys is empty %}<p class="empty">No API keys yet.</p>{% else %}
+        <div class="scroll">
+        <table>
+            <thead><tr><th scope="col">Name</th><th scope="col">Prefix</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">State</th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
+            <tbody>{% for k in keys %}<tr><td><strong>{{ k.name ?? '—' }}</strong></td><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.created_at|ts }}</td><td>{{ k.last_used_at|ts }}</td><td>{{ k.expires_at|ts }}</td>
+                <td>{% if k.revoked_at %}<span class="st st-disabled">Revoked</span> <small>{{ k.revoked_at|ts }}</small>{% elseif k.usable %}<span class="st st-active">Usable</span>{% else %}<span class="st st-pending">Expired</span>{% endif %}</td>
+                {% if may_manage %}<td>{% if k.usable %}<form method="post" action="{{ path('dashboard_client_api_key_revoke', {clientId: cid, keyId: k.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Revoke {{ k.key_prefix }}…? Requests with it fail at once.">{{ ui.csrf() }}<button type="submit" class="danger">Revoke</button></form>{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody>
+        </table>
+        </div>
+        {% endif %}
+    </section>
+    {% if may_manage and client.status.value != 'closed' %}
+    <section class="card card-accent" aria-labelledby="create-h">
+        <h2 id="create-h">Create an API key</h2>
+        <form method="post" action="{{ path('dashboard_client_api_key_create', {clientId: cid}) }}" class="stack">
+            {{ ui.csrf() }}
+            <label>Descriptive name <input type="text" name="name" maxlength="100" placeholder="e.g. production server, rotation 2026-10"></label>
+            <label>Expires after (optional; the key stops working at the end of that day, {{ time_zone_abbreviation() }}) <input type="date" name="expires_on"></label>
+            <button type="submit">Create key (shown once)</button>
+        </form>
+        <p class="muted small">Rotation without downtime: create the replacement, deploy it, check that its “last used” time appears, then revoke the old key.</p>
+    </section>
+    {% elseif not may_manage %}
+    <section class="card"><p class="muted">Client admins create and revoke keys.</p></section>
+    {% endif %}
+</div>
 {% endblock %}

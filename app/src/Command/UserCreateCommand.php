@@ -14,7 +14,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Creates a dashboard user (passwordless: they sign in with an emailed link).
- * Usually done in the dashboard (Operator › Users); this is the scripted path.
+ * Usually done in the dashboard (Access › Users); this is the scripted path.
  */
 #[AsCommand('smarthost:user:create', 'Create a dashboard user (signs in with an emailed link)')]
 final class UserCreateCommand extends AdminCommand

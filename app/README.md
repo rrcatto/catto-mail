@@ -48,7 +48,7 @@ link (`App\Security\LoginLinkService`, Symfony Mailer through Postfix submission
 development; `App\Security\LoginLinkAuthenticator` redeems it). `APP_ADMIN_EMAIL` always receives
 ADMIN. Operator pages require permission keys (`App\Access\PermissionCatalog`) granted by roles
 (`App\Access\AccessControl`, `PermissionVoter`); users, roles and memberships are managed under
-*Operator › Users* and *Roles & permissions*. There are no passwords. Migration
+*Access › Users* and *Access › Roles & permissions*. There are no passwords. Migration
 `Version20261006000200`.
 
 **Phase 7 (Smarthost side, v0.1.7, specification 2.8):** the **webhook worker**, `bin/console
@@ -57,7 +57,8 @@ smarthost:webhook:work` (container `smarthost-webhook-worker`, same image, datab
 webhooks: it fans out the `webhook_events` outbox, claims deliveries with leases and fencing,
 signs and sends them concurrently with SSRF protection, and retries or fails them by the
 documented policy (`App\Webhook\WebhookDispatcher`). Client admins manage endpoints under
-*Client › Webhooks*, and operators see deliveries and workers under *Operator › Webhooks*.
+*Settings › Webhooks* in their workspace, and operators see deliveries and workers under
+*Mail flow › Webhooks*.
 Migration `Version20261007000100`.
 
 **Phase 8 (repository-side production readiness, v0.1.8, specification 2.9):**
@@ -82,27 +83,41 @@ Migration `Version20261007000100`.
 - Per-client limits (`ClientLimitPolicy`) under installation ceilings. `QuotaEnforcer` admits
   volume quotas in the creating transaction: `429 quota-exceeded` with `Retry-After` and a
   `quota` member.
-- API keys have names and optional expiry; client admins manage their own under *Client › API
-  keys*.
+- API keys have names and optional expiry; client admins manage their own under *Settings › API
+  keys* in their workspace.
 - `App\Usage`: period summaries, reconciliation, provider-neutral billing statements and
   export.
 - `App\Reputation`: metrics and alerts, never automatic action. `smarthost:reputation
   evaluate` runs from the production timer every 15 minutes; in development, run it by hand or
-  from *Operator › Alerts*.
+  from *Clients › Abuse & reputation*.
 - Public API documentation at `/docs/api`.
 - Migration `Version20261009000100`. Operator procedures: `docs/production/onboarding.md`.
 
 **Phase 10 (operator self-service, v0.1.9, specification 2.11):**
-- `App\System`: the setup wizard (Operator › System setup), diagnostics with history
-  (Operator › Diagnostics), the health dashboard with the delivery mode, the emergency stop
+- `App\System`: the setup wizard (System › System setup), diagnostics with history
+  (System › Diagnostics), Mail flow › Delivery with the delivery mode, the emergency stop
   (`delivery_controls`), and the host-agent request queue (`system_requests`; the web
   application never runs host commands).
 - `App\AddressBatch`: administrator address batches (up to 10,000 addresses), separate state
   dimensions, staged sends, and the public re-permission page `/p/{token}` with the webhook
   event `repermission.responded`.
-- `App\Help`: Operator › Help.
+- `App\Help`: Help (the round question-mark button).
 - Console: `smarthost:system:agent`, `smarthost:admin:login-link`,
   `smarthost:delivery:emergency-stop`. Migration `Version20261010000100`.
+
+**Dashboard redesign (v0.2.2):**
+- One shell for the operator console and the client workspaces (`templates/dashboard/layout.html.twig`):
+  round area buttons, the area's pages as pills, and at the top right the search, the delivery
+  mode, *Stop sending*, the attention bell and the account menu. `App\Dashboard\Navigation`
+  builds the areas, pills and badges from the permission keys.
+- Both overviews have a period choice (`OverviewPeriod`); `OperatorOverview` and `TrendCharts`
+  assemble their figures. Charts are Chart.js (`assets/controllers/chart_controller.js`, loaded
+  only on pages with a chart). The Content-Security-Policy allows no inline styles: data-driven
+  widths are SVG attributes.
+- `App\Dashboard\Search`: the global search, tenant-scoped in a client workspace.
+- `App\Util\InstallationTime`: the installation time zone (`APP_TIMEZONE`) for dashboard times,
+  overview buckets, date filters, API key expiry, quota days and months, usage and billing.
+- Migration `Version20261011000100` (the submission-rate index).
 
 **Later phases:** retention commands; a public registration workflow (owner decision).
 

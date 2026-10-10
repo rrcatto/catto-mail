@@ -54,17 +54,17 @@ final class UsageReporting
             'message_submitted' => (int) $r['message_submitted']] + $r, $rows);
     }
 
-    /** @return list<array{day: string, validation_address: int, message_submitted: int}> per UTC day of the period */
+    /** @return list<array{day: string, validation_address: int, message_submitted: int}> per day of the period, in its time zone */
     public function daily(string $clientId, UsagePeriod $period): array
     {
         return array_map(static fn (array $r): array => ['day' => $r['day'], 'validation_address' => (int) $r['validation_address'],
             'message_submitted' => (int) $r['message_submitted']], $this->connection->fetchAllAssociative(<<<'SQL'
-            SELECT to_char(date_trunc('day', occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+            SELECT to_char(date_trunc('day', occurred_at AT TIME ZONE CAST(? AS text)), 'YYYY-MM-DD') AS day,
                    COALESCE(sum(quantity) FILTER (WHERE usage_type = 'validation_address'), 0) AS validation_address,
                    COALESCE(sum(quantity) FILTER (WHERE usage_type = 'message_submitted'), 0) AS message_submitted
               FROM usage_records WHERE client_id = ? AND occurred_at >= ? AND occurred_at < ?
              GROUP BY 1 ORDER BY 1
-            SQL, [$clientId, $period->startSql(), $period->endSql()]));
+            SQL, [$period->zone->getName(), $clientId, $period->startSql(), $period->endSql()]));
     }
 
     /**

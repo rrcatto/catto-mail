@@ -2,22 +2,44 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Diagnostics{% endblock %}
 {% block body %}
-<h1>Diagnostics</h1>
-<p>Every check of every subsystem, with what it proves and what to do. PASS works; WARN works but needs attention; FAIL does not work or is unsafe; SKIPPED did not run (a prerequisite is missing, or it does not apply); INFO is a fact.
-    {{ ui.help('troubleshooting') }}</p>
+{% set counts = {pass: 0, warn: 0, fail: 0} %}
+{% for comp, s in by_component %}{% if s.result in ['pass', 'warn', 'fail'] %}{% set counts = counts|merge({(s.result): counts[s.result] + 1}) %}{% endif %}{% endfor %}
+<div class="pagehead">
+    <div>
+        <h1>Diagnostics</h1>
+        <p class="sub">Every check of every subsystem, with what it proves and what to do. PASS works; WARN works but needs attention; FAIL does not work or is unsafe; SKIPPED did not run (a prerequisite is missing, or it does not apply); INFO is a fact.
+            {{ ui.help('troubleshooting') }}</p>
+    </div>
+    <div class="actions">
+        <a class="btn btn-secondary" href="{{ path('dashboard_operator_diagnostics_history') }}">Test-result history</a>
+        <a class="btn btn-secondary" href="{{ path('dashboard_operator_system_requests') }}">Host requests</a>
+        {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
+        <form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}">
+            {{ ui.csrf() }}<button type="submit">Run all checks now</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
 {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
-<form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}" class="filters">
-    {{ ui.csrf() }}
-    <span>The application checks run at once; the host agent runs its checks within a minute{% if agent_age is null %} <strong>(it has never reported: see the Host agent check)</strong>{% endif %}.
-    {% if last_run %}Last host run: {{ last_run.status }} {{ last_run.finished_at|ts }}.{% endif %}</span>
-    <button type="submit">Run all checks now</button>
-</form>
+<p class="muted">The application checks run at once; the host agent runs its checks within a minute{% if agent_age is null %} <strong>(it has never reported: see the Host agent check)</strong>{% endif %}.
+    {% if last_run %}Last host run: {{ last_run.status }} {{ last_run.finished_at|ts }}.{% endif %}</p>
 {% endif %}
-<p><a href="{{ path('dashboard_operator_diagnostics_history') }}">Test-result history</a> · <a href="{{ path('dashboard_operator_system_requests') }}">Host requests</a></p>
-<nav aria-label="Components"><p>{% for comp, s in by_component %}<a href="#c-{{ comp }}">{{ comp }}</a> {{ ui.result(s.result) }}{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>
+
+{% if by_component is not empty %}
+<dl class="facts">
+    <div><dt>Components</dt><dd class="lg">{{ by_component|length }}</dd></div>
+    <div><dt>Pass</dt><dd class="lg">{{ counts.pass }}</dd></div>
+    <div><dt>Warning</dt><dd class="lg">{{ counts.warn }}</dd></div>
+    <div><dt>Fail</dt><dd class="lg{{ counts.fail > 0 ? ' text-bad' : '' }}">{{ counts.fail }}</dd></div>
+</dl>
+<nav class="seg" aria-label="Components">{% for comp, s in by_component %}<a href="#c-{{ comp }}">{{ comp }}&nbsp;{{ ui.result(s.result) }}</a>{% endfor %}</nav>
+{% endif %}
+
 {% for comp, checks in grouped %}
-    <h2 id="c-{{ comp }}">{{ comp|capitalize }}</h2>
-    {{ ui.checks(checks) }}
+    <section class="card card-flush" aria-labelledby="c-{{ comp }}">
+        <div class="card-head"><h2 id="c-{{ comp }}">{{ comp|capitalize }}</h2>{% if by_component[comp] is defined %}{{ ui.result(by_component[comp].result) }}{% endif %}</div>
+        {{ ui.checks(checks) }}
+    </section>
 {% else %}
     <p class="empty">No check has run yet. {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}Use "Run all checks now".{% endif %}</p>
 {% endfor %}

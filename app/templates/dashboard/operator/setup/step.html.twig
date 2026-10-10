@@ -3,27 +3,57 @@
 {% block title %}Setup {{ step.n }}: {{ title }}{% endblock %}
 {% block body %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_setup') }}">System setup</a> › Step {{ step.n }} of {{ steps|length }}</p>
-<h1>{{ step.n }}. {{ title }}</h1>
-<p>{{ purpose }}</p>
-<p>{% for t in topics %}{{ ui.help(t, 'Help: ' ~ t|replace({'-': ' '})) }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
-{% include 'dashboard/operator/setup/steps/' ~ step.key ~ '.html.twig' %}
-{% if checks is not empty or step.key not in ['welcome', 'seed_test', 'bounce_test', 'readiness'] %}
-<h2>Checks</h2>
-{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}<form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}" class="inline">{{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ path('dashboard_operator_setup_step', {step: step.key}) }}"><button type="submit" class="secondary">Run the checks again</button></form>
-    <small class="muted">The host agent's results arrive within a minute; reload the page.</small>{% endif %}
-{{ ui.checks(checks) }}
-{% endif %}
-<h2>This step</h2>
-<p>State: {% if step.state == 'done' %}{{ ui.result('pass') }} done {{ step.updated_at|ts }}{% elseif step.state == 'skipped' %}{{ ui.result('skipped') }} skipped — come back to it{% else %}{{ ui.result('waiting') }} not done yet{% endif %}{% if step.note %} — {{ step.note }}{% endif %}</p>
-<form method="post" action="{{ path('dashboard_operator_setup_state', {step: step.key}) }}" class="stack">
-    {{ ui.csrf() }}
-    <label>Note (optional, kept with the step) <input name="note" maxlength="1000" value="{{ step.note }}"></label>
-    <p class="row">
-        <button type="submit" name="state" value="done">Mark done and continue</button>
-        <button type="submit" name="state" value="skipped" class="secondary">Skip for now</button>
-        {% if step.state %}<button type="submit" name="state" value="" class="secondary">Mark not done</button>{% endif %}
-    </p>
-</form>
-<p>{% if prev %}<a href="{{ path('dashboard_operator_setup_step', {step: prev}) }}">« {{ steps[prev].title }}</a>{% endif %}
-   {% if next %} · <a href="{{ path('dashboard_operator_setup_step', {step: next}) }}">{{ steps[next].title }} »</a>{% endif %}</p>
+<div class="pagehead">
+    <div>
+        <div class="titleline"><h1>{{ step.n }}. {{ title }}</h1>{% if step.state == 'done' %}{{ ui.result('pass') }}{% elseif step.state == 'skipped' %}{{ ui.result('skipped') }}{% else %}{{ ui.result('waiting') }}{% endif %}</div>
+        <p class="sub">{{ purpose }}</p>
+    </div>
+    <div class="actions">{% for t in topics %}{{ ui.help(t, 'Help: ' ~ t|replace({'-': ' '})) }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+</div>
+
+<div class="with-aside with-aside-left">
+    <aside class="card" aria-labelledby="steps-h">
+        <h2 id="steps-h">Steps</h2>
+        <ol class="stepper">
+        {% for s in steps %}
+            <li class="{{ s.state == 'done' ? 'done' : (s.state == 'skipped' ? 'skipped' : '') }}{{ s.key == step.key ? ' current' : '' }}"{% if s.key == step.key %} aria-current="step"{% endif %}>
+                <a href="{{ path('dashboard_operator_setup_step', {step: s.key}) }}">{{ s.title }}</a>
+                <span class="step-state">{{ s.state == 'done' ? 'done' : (s.state == 'skipped' ? 'skipped' : 'to do') }}</span>
+            </li>
+        {% endfor %}
+        </ol>
+        <p class="small"><a href="{{ path('dashboard_operator_setup') }}">Overview of all steps</a></p>
+    </aside>
+
+    <div class="step-main">
+        {% include 'dashboard/operator/setup/steps/' ~ step.key ~ '.html.twig' %}
+
+        {% if checks is not empty or step.key not in ['welcome', 'seed_test', 'bounce_test', 'readiness'] %}
+        <section class="card card-flush" aria-labelledby="checks-h">
+            <div class="card-head">
+                <h2 id="checks-h">Checks</h2>
+                {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}<form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}" class="inline">{{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ path('dashboard_operator_setup_step', {step: step.key}) }}"><button type="submit" class="secondary">Run the checks again</button></form>{% endif %}
+            </div>
+            {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}<p class="muted small">The host agent's results arrive within a minute; reload the page.</p>{% endif %}
+            {{ ui.checks(checks) }}
+        </section>
+        {% endif %}
+
+        <section class="card card-accent" aria-labelledby="this-h">
+            <h2 id="this-h">This step</h2>
+            <p>State: {% if step.state == 'done' %}{{ ui.result('pass') }} done {{ step.updated_at|ts }}{% elseif step.state == 'skipped' %}{{ ui.result('skipped') }} skipped — come back to it{% else %}{{ ui.result('waiting') }} not done yet{% endif %}{% if step.note %} — {{ step.note }}{% endif %}</p>
+            <form method="post" action="{{ path('dashboard_operator_setup_state', {step: step.key}) }}" class="stack">
+                {{ ui.csrf() }}
+                <label>Note (optional, kept with the step) <input name="note" maxlength="1000" value="{{ step.note }}"></label>
+                <p class="form-actions">
+                    <button type="submit" name="state" value="done">Mark done and continue</button>
+                    <button type="submit" name="state" value="skipped" class="secondary">Skip for now</button>
+                    {% if step.state %}<button type="submit" name="state" value="" class="secondary">Mark not done</button>{% endif %}
+                </p>
+            </form>
+            <p class="step-nav">{% if prev %}<a href="{{ path('dashboard_operator_setup_step', {step: prev}) }}">« {{ steps[prev].title }}</a>{% endif %}
+                {% if next %}{% if prev %} · {% endif %}<a href="{{ path('dashboard_operator_setup_step', {step: next}) }}">{{ steps[next].title }} »</a>{% endif %}</p>
+        </section>
+    </div>
+</div>
 {% endblock %}

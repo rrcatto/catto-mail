@@ -126,16 +126,19 @@ final class Phase9DashboardTest extends DashboardTestCase
         self::assertSame('throttled the client', Db::owner()->fetchOne('SELECT acknowledgement_note FROM client_alerts WHERE id = ?', [$alert]));
 
         $usage = self::text($this->page('/dashboard/operator/usage?period=current_month'));
+        // Usage periods are calendar days of the installation's time zone (APP_TIMEZONE).
+        $local = new \DateTimeImmutable('now', $this->container()->get(\App\Util\InstallationTime::class)->zone);
+        $month = ['from' => $local->format('Y-m-01'), 'to' => $local->modify('first day of next month')->format('Y-m-d')];
         self::assertStringContainsString('Metered Co', $usage);
         $r = $this->submit('/dashboard/operator/usage?period=current_month', "/dashboard/operator/usage/clients/$id/export",
-            ['from' => gmdate('Y-m-01'), 'to' => gmdate('Y-m-d', strtotime('first day of next month')), 'format' => 'csv']);
+            $month + ['format' => 'csv']);
         self::assertSame(200, $r->getStatusCode());
         self::assertStringContainsString("$id,", (string) $r->getContent());
         self::assertStringContainsString('message_submitted,120,120,usage_records,consistent', (string) $r->getContent());
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'usage.exported' AND target_id = ? AND actor_id = ?",
             [$id, $operator->getId()->toRfc4122()]));
         $r = $this->submit('/dashboard/operator/usage?period=current_month', "/dashboard/operator/usage/clients/$id/reconcile",
-            ['from' => gmdate('Y-m-01'), 'to' => gmdate('Y-m-d', strtotime('first day of next month'))]);
+            $month);
         self::assertStringContainsString('Consistent', self::text($r));
     }
 

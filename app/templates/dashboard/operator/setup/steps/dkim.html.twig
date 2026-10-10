@@ -1,17 +1,22 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
-<p>DKIM puts a cryptographic signature on every message so receivers can verify that it really comes from the sending domain and was not changed.
-The private key stays inside the OpenDKIM container; you publish the public key as a TXT record. Every sending domain (and the domain of the sign-in mail sender) needs one active key. {{ ui.help('dkim') }}</p>
-<h2>Keys</h2>
+<section class="card card-flush" aria-labelledby="dkim-keys-h">
+<div class="card-head"><div><h2 id="dkim-keys-h">Keys</h2>
+<p class="muted small">DKIM puts a cryptographic signature on every message so receivers can verify that it really comes from the sending domain and was not changed.
+The private key stays inside the OpenDKIM container; you publish the public key as a TXT record. Every sending domain (and the domain of the sign-in mail sender) needs one active key. {{ ui.help('dkim') }}</p></div></div>
 <div class="scroll"><table class="dense">
 <thead><tr><th scope="col">Domain</th><th scope="col">Selector</th><th scope="col">Signing</th><th scope="col">Key</th><th scope="col">DNS record to publish</th></tr></thead>
 <tbody>{% for k in host.value.dkim_keys ?? [] %}<tr><td>{{ k.domain }}</td><td>{{ k.selector }}</td><td>{{ k.active ? 'ACTIVE' : 'not yet' }}</td><td>{{ k.key_present ? 'present' : 'MISSING' }}{% if k.bits is defined %}, {{ k.bits }} bits{% endif %}</td>
 <td class="url">{% if k.record is defined %}<code>{{ k.record.name }}</code> TXT <code>{{ k.record.value }}</code>{% endif %}</td></tr>
-{% else %}<tr><td colspan="5" class="empty">No key reported yet.</td></tr>{% endfor %}</tbody></table></div>
-<h2>Sending domains in the database</h2>
-<table class="dense"><thead><tr><th scope="col">Domain</th><th scope="col">Client</th><th scope="col">DKIM status</th><th scope="col">Selector</th></tr></thead>
-<tbody>{% for d in domains ?? [] %}<tr><td>{{ d.domain }}</td><td>{{ d.company_name }}</td><td>{{ d.dkim_status }}</td><td>{{ d.dkim_selector ?? '—' }}</td></tr>{% else %}<tr><td colspan="4" class="empty">No verified sending domain yet: a client adds its domain (API or console) and proves it with a TXT record.</td></tr>{% endfor %}</tbody></table>
+{% else %}<tr><td colspan="5"><span class="muted">No key reported yet.</span></td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="card card-flush" aria-labelledby="dkim-dom-h">
+<div class="card-head"><h2 id="dkim-dom-h">Sending domains in the database</h2></div>
+<div class="scroll"><table class="dense"><thead><tr><th scope="col">Domain</th><th scope="col">Client</th><th scope="col">DKIM status</th><th scope="col">Selector</th></tr></thead>
+<tbody>{% for d in domains ?? [] %}<tr><td>{{ d.domain }}</td><td>{{ d.company_name }}</td><td>{{ d.dkim_status }}</td><td>{{ d.dkim_selector ?? '—' }}</td></tr>{% else %}<tr><td colspan="4"><span class="muted">No verified sending domain yet: a client adds its domain (API or console) and proves it with a TXT record.</span></td></tr>{% endfor %}</tbody></table></div>
+</section>
 {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
-<h2>Generate, publish, test, activate</h2>
+<section class="card" aria-labelledby="dkim-gen-h">
+<h2 id="dkim-gen-h">Generate, publish, test, activate</h2>
 <ol class="plain">
 <li>Generate a key (choose a new selector, e.g. <code>s2026a</code>). It does not sign yet.</li>
 <li>Publish the TXT record shown above at the domain's DNS host.</li>
@@ -25,4 +30,5 @@ The private key stays inside the OpenDKIM container; you publish the public key 
     <button type="submit" name="action" value="dkim.activate" class="secondary">Activate (after DNS matches)</button>
 </form>
 <p class="muted"><strong>Rotation:</strong> generate a new selector, publish it, activate it once DNS shows it, keep the old record published for a week, then retire the old selector (<code>smarthostctl prod dkim retire</code>).</p>
+</section>
 {% endif %}

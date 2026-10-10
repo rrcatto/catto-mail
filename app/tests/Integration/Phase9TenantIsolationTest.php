@@ -37,7 +37,7 @@ final class Phase9TenantIsolationTest extends DashboardTestCase
         $bSend = Phase9Fixtures::meteredSendJob($o, $bId, $bDomain->getId()->toRfc4122(), 3, $last);
         $this->container()->get(ClientLimitAdministration::class)->set($this->reload($b), ['send_recipients_per_day' => 777, 'validation_jobs_per_day' => 1], self::actor(), 'B plan');
         $this->container()->get(\App\Client\ClientLifecycle::class)->addNote($this->reload($b), 'B private operator note', self::actor());
-        $statement = $this->container()->get(BillingStatementService::class)->prepare($this->reload($b), UsagePeriod::named('previous_month'), AuditActor::system('test'));
+        $statement = $this->container()->get(BillingStatementService::class)->prepare($this->reload($b), UsagePeriod::named('previous_month', $this->container()->get(\App\Util\InstallationTime::class)->zone), AuditActor::system('test'));
         $this->container()->get(BillingStatementService::class)->finalize($this->reload($statement), AuditActor::system('test'));
         $bEndpoint = $this->container()->get(\App\Webhook\WebhookEndpointService::class)->create($this->reload($b), 'https://hooks.b.example/x', ['send.completed'], self::actor())[0];
         $bKeyId = $o->fetchOne('SELECT id FROM api_keys WHERE client_id = ?', [$bId]);

@@ -2,7 +2,12 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Validation jobs{% endblock %}
 {% block body %}
-<h1>Validation jobs</h1>
+<div class="pagehead">
+    <div>
+        <h1>Validation jobs</h1>
+        <p class="sub">The address lists your application submitted for validation, newest first. Validation estimates deliverability; it does not prove that a mailbox will accept a message.</p>
+    </div>
+</div>
 <form method="get" class="filters" role="search" aria-label="Filter validation jobs">
     {{ ui.select('status', 'Status', label_options('validation_job_status'), filters.status) }}
     <label>External reference <input type="text" name="external_reference" value="{{ filters.external_reference }}"></label>
@@ -12,6 +17,9 @@
     <button type="submit">Apply</button>
     <a href="{{ path('dashboard_client_validation_jobs', {clientId: client.id.toRfc4122}) }}">Reset</a>
 </form>
-{% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: page.rows} %}
+<section class="card card-flush" aria-labelledby="vj-h">
+    <div class="card-head"><h2 id="vj-h">Jobs</h2><span class="muted small">Dates are days in {{ time_zone_label() }}</span></div>
+    {% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: page.rows} %}
+</section>
 {{ ui.pager(page, 'jobs') }}
 {% endblock %}

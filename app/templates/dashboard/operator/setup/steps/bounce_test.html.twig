@@ -1,4 +1,6 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
+<section class="card" aria-labelledby="bounce-h">
+<h2 id="bounce-h">Send a bounce test</h2>
 <p>Send to an address that does <strong>not exist</strong> at a domain <strong>you control</strong> (for example <code>no-such-user-1@your-own-domain</code>; its mail server must reject unknown users).
 The receiving server refuses it, the refusal (a DSN) comes back to the bounce domain, Postfix receives it on port 25, the delivery daemon matches it to the message, records a hard bounce, and creates a global suppression for the address. {{ ui.help('bounces') }}</p>
 {% if clients is empty %}<p class="warn">No active client has a verified sending domain yet.</p>{% else %}
@@ -9,5 +11,6 @@ The receiving server refuses it, the refusal (a DSN) comes back to the bounce do
     <label class="check"><input type="checkbox" name="i_own_these" value="1" required> The domain is mine and the mailbox does not exist.</label>
     <button type="submit">Send the bounce test</button>
 </form>{% endif %}
-<p class="muted">Afterwards lift the test suppression under Operator › Suppressions (it is global: catto-mail would never mail that address again).</p>
+<p class="muted">Afterwards lift the test suppression under Mail flow › Suppressions (it is global: catto-mail would never mail that address again).</p>
+</section>
 {% include 'dashboard/operator/setup/steps/_test_reports.html.twig' %}

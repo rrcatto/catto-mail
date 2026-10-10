@@ -2,46 +2,60 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Webhooks{% endblock %}
 {% block body %}
-<h1>Webhooks</h1>
-<p>The Symfony webhook worker turns outbox events into one delivery per subscribed, enabled endpoint and sends them as signed HTTPS POST requests. Delivery is at-least-once; a delivery is <em>delivered</em> only when the endpoint answered 2xx. Signing secrets are never shown here.</p>
-<dl class="inline-dl">
-    <dt>Events awaiting fan-out</dt><dd>{{ summary.events_awaiting_fanout|number_format }}</dd>
-    {% for k in ['pending', 'retrying', 'delivered', 'failed'] %}<dt>Deliveries {{ k }}{% if k in ['delivered', 'failed'] %} (24 h){% endif %}</dt><dd>{{ (summary.deliveries[k] ?? 0)|number_format }}</dd>{% endfor %}
+<div class="pagehead">
+    <div>
+        <h1>Webhooks</h1>
+        <p class="sub">The Symfony webhook worker turns outbox events into one delivery per subscribed, enabled endpoint and sends them as signed HTTPS POST requests. Delivery is at-least-once; a delivery is <em>delivered</em> only when the endpoint answered 2xx. Signing secrets are never shown here.</p>
+    </div>
+    <div class="actions">{{ ui.help('webhooks', 'Help: webhooks') }}</div>
+</div>
+
+<dl class="facts">
+    <div><dt>Events awaiting fan-out</dt><dd class="lg">{{ summary.events_awaiting_fanout|number_format }}</dd></div>
+    {% for k in ['pending', 'retrying', 'delivered', 'failed'] %}<div><dt>Deliveries {{ k }}{% if k in ['delivered', 'failed'] %} (24 h){% endif %}</dt><dd class="lg{% if k == 'failed' and (summary.deliveries[k] ?? 0) > 0 %} text-bad{% endif %}">{{ (summary.deliveries[k] ?? 0)|number_format }}</dd></div>{% endfor %}
 </dl>
 
-<h2>Workers</h2>
-{% if summary.workers is empty %}<p class="warn" role="status">No webhook worker has reported in the last day.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Worker</th><th scope="col">Version</th><th scope="col">State</th><th scope="col">Started</th><th scope="col">Last seen</th><th scope="col" class="num">Attempts</th><th scope="col" class="num">Delivered</th><th scope="col" class="num">Events fanned out</th></tr></thead>
-    <tbody>{% for w in summary.workers %}
-        <tr><td><code>{{ w.worker_id }}</code></td><td>{{ w.version }}</td><td>{{ w.alive ? 'Running' : (w.stopped_at ? 'Stopped' : 'Not responding') }}</td><td>{{ w.started_at|ts }}</td><td>{{ w.last_seen_at|ts }}</td>
-            <td class="num">{{ w.attempts|number_format }}</td><td class="num">{{ w.delivered|number_format }}</td><td class="num">{{ w.events_fanned_out|number_format }}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
+<section class="card card-flush" aria-labelledby="workers-h">
+    <div class="card-head"><h2 id="workers-h">Workers</h2><span class="count count-dark">{{ summary.workers|length }}</span></div>
+    {% if summary.workers is empty %}<p class="warn" role="status">No webhook worker has reported in the last day.</p>{% else %}
+    <div class="scroll"><table>
+        <thead><tr><th scope="col">Worker</th><th scope="col">Version</th><th scope="col">State</th><th scope="col">Started</th><th scope="col">Last seen</th><th scope="col" class="num">Attempts</th><th scope="col" class="num">Delivered</th><th scope="col" class="num">Events fanned out</th></tr></thead>
+        <tbody>{% for w in summary.workers %}
+            <tr><td><code>{{ w.worker_id }}</code></td><td>{{ w.version }}</td>
+                <td><span class="st st-{{ w.alive ? 'active' : (w.stopped_at ? 'disabled' : 'failed') }}">{{ w.alive ? 'Running' : (w.stopped_at ? 'Stopped' : 'Not responding') }}</span></td>
+                <td>{{ w.started_at|ts }}</td><td>{{ w.last_seen_at|ts }}</td>
+                <td class="num">{{ w.attempts|number_format }}</td><td class="num">{{ w.delivered|number_format }}</td><td class="num">{{ w.events_fanned_out|number_format }}</td></tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 
-<h2 id="deliveries">Deliveries</h2>
 <form method="get" class="filters" role="search" aria-label="Filter deliveries" action="#deliveries">
     {{ ui.select('status', 'State', {pending: 'Pending', retrying: 'Retrying', delivered: 'Delivered', failed: 'Failed'}, filters.status, 'All') }}
     {{ ui.select('event_type', 'Event', {'validation.completed': 'validation.completed', 'validation.failed': 'validation.failed', 'send.completed': 'send.completed', 'send.failed': 'send.failed', 'message.hard_bounced': 'message.hard_bounced', 'message.complained': 'message.complained', 'webhook.test': 'webhook.test'}, filters.event_type) }}
     <label>Client id <input type="text" name="client" value="{{ filters.client }}" pattern="[0-9a-fA-F-]{36}"></label>
     <button type="submit">Apply</button>
 </form>
-{% include 'dashboard/_webhook_deliveries.html.twig' with {rows: page.rows, show_client: true} %}
+<section class="card card-flush" aria-labelledby="deliveries">
+    <div class="card-head"><h2 id="deliveries">Deliveries</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
+    {% include 'dashboard/_webhook_deliveries.html.twig' with {rows: page.rows, show_client: true} %}
+</section>
 {{ ui.pager(page, 'deliveries') }}
 
-<h2>Outbox events</h2>
 <form method="get" class="filters" role="search" aria-label="Filter outbox events">
     {{ ui.select('state', 'State', {awaiting_fanout: 'Awaiting fan-out', fanned_out: 'Fanned out'}, filters.state, 'All') }}
     <button type="submit">Apply</button>
 </form>
-{% if events.rows is empty %}<p class="empty">No outbox events match.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Created</th><th scope="col">Client</th><th scope="col">Event</th><th scope="col">Subject</th><th scope="col">Fanned out</th><th scope="col" class="num">Deliveries</th></tr></thead>
-    <tbody>{% for w in events.rows %}
-        <tr><td>{{ w.created_at|ts }}</td><td>{{ w.company_name }}</td><td><code>{{ w.event_type }}</code></td><td>{{ w.subject_type }} <code>{{ w.subject_id }}</code></td><td>{{ w.fanned_out_at ? w.fanned_out_at|ts : 'Pending' }}</td><td class="num">{{ w.deliveries }}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
-{% if events.next %}<p><a href="{{ path('dashboard_operator_webhooks', app.request.query.all|merge({events_cursor: events.next})) }}">More outbox events »</a></p>{% endif %}
+<section class="card card-flush" aria-labelledby="outbox-h">
+    <div class="card-head"><h2 id="outbox-h">Outbox events</h2><span class="count count-dark">{{ events.rows|length }}</span>
+        {% if events.next %}<a class="more" href="{{ path('dashboard_operator_webhooks', app.request.query.all|merge({events_cursor: events.next})) }}">More outbox events »</a>{% endif %}</div>
+    {% if events.rows is empty %}<p class="empty">No outbox events match.</p>{% else %}
+    <div class="scroll"><table>
+        <thead><tr><th scope="col">Created</th><th scope="col">Client</th><th scope="col">Event</th><th scope="col">Subject</th><th scope="col">Fanned out</th><th scope="col" class="num">Deliveries</th></tr></thead>
+        <tbody>{% for w in events.rows %}
+            <tr><td>{{ w.created_at|ts }}</td><td>{{ w.company_name }}</td><td><code>{{ w.event_type }}</code></td><td>{{ w.subject_type }} <code>{{ w.subject_id }}</code></td><td>{{ w.fanned_out_at ? w.fanned_out_at|ts : 'Pending' }}</td><td class="num">{{ w.deliveries }}</td></tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 {% endblock %}

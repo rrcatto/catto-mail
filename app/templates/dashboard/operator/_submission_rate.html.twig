@@ -1,0 +1,16 @@
+{# The submission-rate card (Overview and Mail flow › Delivery). Variables: rate (OperatorOverview::submissionChart), period (OverviewPeriod);
+   optional period_route: the card then offers its own period links (pages whose pills are not the period). #}
+<section class="card chart-card" aria-labelledby="rate-h">
+    <div class="card-head">
+        <h2 id="rate-h">Submission rate</h2>
+        <p class="muted small">Typical to peak messages submitted to Postfix per minute, each {{ period.unit }}{% if rate.ceiling %}, against the rate ceiling of {{ rate.ceiling }} per minute{% endif %}</p>
+        {% if period_route is defined %}<nav class="seg" aria-label="Period">{% for key, label in periods %}<a href="{{ path(period_route, {period: key}) }}"{% if key == period.key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>{% endif %}
+    </div>
+    {% if rate.busiest is null %}
+        <p class="empty">Nothing was submitted to Postfix in the period.</p>
+    {% else %}
+        <div class="chart chart-tall"><canvas data-controller="chart" data-chart-kind-value="band" data-chart-config-value="{{ rate.chart|json_encode }}" role="img"
+            aria-label="Submissions per minute each {{ period.unit }}: the busiest was {{ rate.busiest.title }}, with a peak of {{ rate.busiest.peak }} per minute{% if rate.ceiling %} against a ceiling of {{ rate.ceiling }}{% endif %}."></canvas></div>
+        <p class="muted small">The typical rate is the median of the minutes in which something was submitted. The ceiling is <code>DELIVERY_GLOBAL_RATE_PER_MINUTE</code>; raising it is a step of the warm-up runbook.</p>
+    {% endif %}
+</section>

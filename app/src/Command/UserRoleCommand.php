@@ -10,7 +10,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-/** Grants or revokes an installation-wide role (audited as "system"). The dashboard does the same under Operator › Users. */
+/** Grants or revokes an installation-wide role (audited as "system"). The dashboard does the same under Access › Users. */
 #[AsCommand('smarthost:user:role', 'Grant or revoke an installation-wide role (e.g. OPERATOR, ADMIN)')]
 final class UserRoleCommand extends AdminCommand
 {

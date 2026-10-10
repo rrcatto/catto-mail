@@ -2014,7 +2014,7 @@ schema:
         - max_sending_domains
     client_quota_usage:
       purpose: >-
-        admitted-work counters per client, metric and UTC day/month, incremented in the
+        admitted-work counters per client, metric and day/month (APP_TIMEZONE), incremented in the
         transaction that admits the work (concurrency-safe quota enforcement, Phase 9)
       key_fields:
         - client_id
@@ -2387,7 +2387,7 @@ saas_operations:
       client limit can only lower them. Volume quotas have no installation ceiling.
     enforcement: >-
       Volume quotas are counters in client_quota_usage per client, metric, period (day, month;
-      UTC) admitted with a single INSERT ... ON CONFLICT DO UPDATE ... RETURNING inside the
+      calendar periods of the installation's time zone, APP_TIMEZONE) admitted with a single INSERT ... ON CONFLICT DO UPDATE ... RETURNING inside the
       transaction that creates the work, so concurrent requests can never jointly exceed a quota
       and a rolled-back request releases its admission. Recipients are counted when added to a
       send job. Count limits (keys, endpoints, domains) are re-checked under a row lock on the
@@ -2407,7 +2407,7 @@ saas_operations:
       job (written by the validator) and one message_submitted unit per message accepted by
       Postfix (written by the Go daemon); usage_records_message_once_uq guarantees at most one
       unit per message.
-    periods: current_day, current_month, previous_month, custom (UTC dates, at most 366 days); daily breakdowns
+    periods: current_day, current_month, previous_month, custom (dates in APP_TIMEZONE, at most 366 days); daily breakdowns
     reconciliation: >-
       smarthost:usage:reconcile (and the operator usage page) compares metered units with
       validation jobs (done addresses) and accepted messages for a client and period; findings:
@@ -2521,7 +2521,7 @@ operator_self_service:
     application_checks: database role, schema version, web health, tracking endpoints, a deterministic validation job (syntax-invalid addresses only, no network), delivery and webhook heartbeats, the host agent, bounce processing, the emergency stop
     host_checks: host, boot, containers, security, backups, TLS renewal, and the preflight sections config, host, runtime, exposure, ingress, tls, dns, dkim, postfix, delivery
   setup_wizard: >-
-    Operator › System setup (SYSTEM.SETUP.MANAGE): welcome, host, web identity, SMTP identity, DNS,
+    System › System setup (SYSTEM.SETUP.MANAGE): welcome, host, web identity, SMTP identity, DNS,
     TLS, DKIM, database, web application, validator, delivery daemon, Postfix, OpenDKIM, webhook
     worker, backups, seed delivery test, bounce test, reboot test, production readiness. Progress
     is stored (setup_steps), the wizard is resumable, an administrator is taken to it after sign-in
@@ -2550,7 +2550,7 @@ operator_self_service:
     renewal). Expiry and renewal failures are diagnostics.
   logs: "`smarthostctl prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent [lines|-f]`"
   help: >-
-    Operator › Help (PLATFORM.HELP.VIEW): topics on the system, components, flows, validation and its
+    Help (PLATFORM.HELP.VIEW): topics on the system, components, flows, validation and its
     results, lists, re-permission, suppressions, sending and rollout, delivery states, tracking,
     bounces, complaints, emergency controls, DNS, PTR, SPF, DKIM, DMARC, TLS, each component in depth,
     clients, sending domains, backups, logs, upgrades, security and troubleshooting; linked in context
@@ -2852,6 +2852,33 @@ user_interfaces:
     - clear distinction between validation certainty and delivery certainty
     - no claim that recorded open equals proven human read
     - outcome_unknown is never presented as delivered
+  dashboard_layout: >-
+    Owner decision (2026-10-10). One shell for both workspaces, using the full page width: round
+    area buttons on the left (operator console: Overview, Mail flow, Clients, System, Access;
+    client workspace: Overview, Sending, Validation, Settings, Usage; Help and the workspace switch
+    below), the current area's pages as pills at the top (on the operator Overview the pills choose
+    the period: 24 hours, 7 days, 30 days, 90 days), and at the top right the delivery mode, the
+    STOP SENDING EMAIL NOW control (a reason is required), what needs attention and the account
+    menu. Areas, pills and badges appear only where the user's permission keys allow. The operator
+    Overview shows KPI cards against the previous period, send jobs by hard-bounce rate, mail flow
+    per hour or day, workers and queues, what needs attention, per-client rates, validation results,
+    component health, suppressions and recent activity, all from the per-job counters and other
+    durable signals. The submission-rate chart (Overview and Mail flow › Delivery) shows the typical
+    and peak messages submitted to Postfix per minute in each hour or day against the
+    DELIVERY_GLOBAL_RATE_PER_MINUTE ceiling (partial index message_events_submitted_idx). The client
+    Overview has the same period choice, with messages per hour or day, KPI cards, quota rings,
+    validation results, sending domains and engagement, from that client's jobs only. The global
+    search (the round search button at the top right) finds clients, send and validation jobs,
+    messages, suppressions, sending domains and users by an id, an email address, a domain, an
+    external reference or a name, with exact or prefix lookups on indexed columns: operators within
+    their permission keys (/dashboard/search), and in a client workspace only that client
+    (/dashboard/c/{client}/search, through ClientAccess). Charts are drawn with Chart.js 4, vendored through the AssetMapper import map
+    and loaded only on pages with a chart; the Outfit font is served by the application (SIL Open
+    Font License); every style lives in the stylesheet (the Content-Security-Policy allows no inline
+    styles). APP_TIMEZONE (default Africa/Johannesburg, SAST) is the installation's time zone: the
+    dashboard shows times in it, and the Overview's hours and days and the quota, usage and billing
+    calendar days and months are its own (owner decision, 2026-10-10); storage, the API, webhooks
+    and exports carry UTC timestamps.
   phase_6_implementation:
     # Specification 2.6: what the Phase 6 dashboards provide and how.
     authentication: >-

@@ -92,9 +92,9 @@ final class LoginLinkService
         $url = rtrim($this->publicBaseUrl, '/').'/dashboard/login/verify?token='.$token;
         try {
             $this->mailer->send((new TemplatedEmail())
-                ->from(new Address($this->mailFrom, 'Catto Mail Smarthost'))
+                ->from(new Address($this->mailFrom, 'Catto Mail'))
                 ->to(new Address(null === $user ? $email : $user->getEmail(), (string) $user?->getDisplayName()))
-                ->subject('Your sign-in link for Catto Mail Smarthost')
+                ->subject('Your sign-in link for Catto Mail')
                 ->textTemplate('email/login_link.txt.twig')
                 ->htmlTemplate('email/login_link.html.twig')
                 ->context(['url' => $url, 'minutes' => intdiv($this->ttlSeconds, 60)]));

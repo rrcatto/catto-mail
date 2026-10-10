@@ -3,11 +3,17 @@
 {% block title %}Unmatched DSN{% endblock %}
 {% block body %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_dsns') }}">Unmatched DSNs</a> › DSN</p>
-<h1>Unmatched DSN received {{ dsn.receivedAt|ts }}</h1>
-<div class="cards">
-    <section class="card">
-        <h2>Parsed evidence</h2>
-        <dl>
+<div class="pagehead">
+    <div>
+        <div class="titleline"><h1>Unmatched DSN received {{ dsn.receivedAt|ts }}</h1>{{ ui.status(dsn.status.value, 'dsn_status') }}</div>
+        <p class="sub">{{ dsn.classification.value|replace({'_': ' '})|capitalize }} · {{ dsn.finalRecipient ?? dsn.originalRecipient ?? 'no recipient reported' }}</p>
+    </div>
+</div>
+
+<div class="row-2">
+    <section class="card" aria-labelledby="evidence-h">
+        <h2 id="evidence-h">Parsed evidence</h2>
+        <dl class="rows">
             <dt>Status</dt><dd>{{ ui.status(dsn.status.value, 'dsn_status') }}</dd>
             <dt>Classification</dt><dd>{{ dsn.classification.value|replace({'_': ' '})|capitalize }}</dd>
             <dt>Original recipient</dt><dd>{{ dsn.originalRecipient ?? '—' }}</dd>
@@ -19,9 +25,9 @@
             {% for k, v in detail %}<dt>{{ k|replace({'_': ' '})|capitalize }}</dt><dd>{{ v is iterable ? v|json_encode : v }}</dd>{% endfor %}
         </dl>
     </section>
-    <section class="card">
-        <h2>Resolution</h2>
-        <dl>
+    <section class="card" aria-labelledby="resolution-h">
+        <h2 id="resolution-h">Resolution</h2>
+        <dl class="rows">
             <dt>Requested by</dt><dd>{{ dsn.resolutionRequestedBy ? dsn.resolutionRequestedBy.email : '—' }}</dd>
             <dt>Requested at</dt><dd>{{ dsn.resolutionRequestedAt|ts }}</dd>
             <dt>Resolved at</dt><dd>{{ dsn.resolvedAt|ts }}</dd>
@@ -30,26 +36,29 @@
         </dl>
         {% if failures is not empty %}
             <h3>Earlier match attempts the daemon could not apply</h3>
-            <ul>{% for f in failures %}<li>{{ f is iterable ? f|json_encode : f }}</li>{% endfor %}</ul>
+            <ul class="plain">{% for f in failures %}<li>{{ f is iterable ? f|json_encode : f }}</li>{% endfor %}</ul>
         {% endif %}
     </section>
 </div>
 
-<h2>Candidate messages</h2>
-<p class="muted">Recent messages to the same recipient, recorded by the delivery daemon as hints only. A recipient address (even with a matching sender) is never enough to apply a DSN automatically.</p>
-{% if candidates is empty %}<p class="empty">No candidates were recorded.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Message</th><th scope="col">Client</th><th scope="col">Sender</th><th scope="col">Status</th><th scope="col">Queue id</th><th scope="col">Created</th></tr></thead>
-    <tbody>{% for m in candidates %}
-        <tr><td><code>{{ m.id }}</code><br><small>{{ m.recipient_address }}</small></td><td>{{ m.company_name }}</td><td>{{ m.sender_email }}</td><td>{{ m.current_status|label('message_status') }}</td><td>{{ m.postfix_queue_id ?? '—' }}</td><td>{{ m.created_at|ts }}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
+<section class="card card-flush" aria-labelledby="cand-h">
+    <div class="card-head"><div><h2 id="cand-h">Candidate messages</h2>
+        <p class="muted small">Recent messages to the same recipient, recorded by the delivery daemon as hints only. A recipient address (even with a matching sender) is never enough to apply a DSN automatically.</p></div>
+        <span class="count count-dark">{{ candidates|length }}</span></div>
+    {% if candidates is empty %}<p class="empty">No candidates were recorded.</p>{% else %}
+    <div class="scroll"><table>
+        <thead><tr><th scope="col">Message</th><th scope="col">Client</th><th scope="col">Sender</th><th scope="col">Status</th><th scope="col">Queue id</th><th scope="col">Created</th></tr></thead>
+        <tbody>{% for m in candidates %}
+            <tr><td><code>{{ m.id }}</code><br><small>{{ m.recipient_address }}</small></td><td>{{ m.company_name }}</td><td>{{ m.sender_email }}</td><td>{{ ui.status(m.current_status, 'message_status') }}</td><td>{{ m.postfix_queue_id ?? '—' }}</td><td>{{ m.created_at|ts }}</td></tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 
 {% if dsn.status.value == 'open' and is_granted('PLATFORM.DSN.MANAGE') %}
-<div class="cards">
-    <section class="card">
-        <h2>Request a match</h2>
+<div class="row-2">
+    <section class="card card-accent" aria-labelledby="match-h">
+        <h2 id="match-h">Request a match</h2>
         <form method="post" action="{{ path('dashboard_operator_dsn_match', {id: dsn.id.toRfc4122}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Request this match? The delivery daemon will apply the DSN to that message, which may create a suppression.">
             {{ ui.csrf() }}
             <label>Message id <input type="text" name="message_id" required pattern="[0-9a-fA-F-]{36}" list="candidate-ids" autocomplete="off"></label>
@@ -57,21 +66,23 @@
             <label>Note (optional) <input type="text" name="note"></label>
             <button type="submit">Request match</button>
         </form>
-        <p class="muted">The request is queued for the delivery daemon, which re-reads the stored DSN and records the outcome. This page never creates message events.</p>
+        <p class="muted small">The request is queued for the delivery daemon, which re-reads the stored DSN and records the outcome. This page never creates message events.</p>
     </section>
-    <section class="card">
-        <h2>Dismiss</h2>
+    <section class="card card-danger" aria-labelledby="dismiss-h">
+        <h2 id="dismiss-h">Dismiss</h2>
         <form method="post" action="{{ path('dashboard_operator_dsn_dismiss', {id: dsn.id.toRfc4122}) }}" class="stack">
             {{ ui.csrf() }}
             <label>Reason (required) <textarea name="reason" required minlength="3" rows="3"></textarea></label>
-            <button type="submit">Dismiss DSN</button>
+            <button type="submit" class="secondary">Dismiss DSN</button>
         </form>
     </section>
 </div>
 {% endif %}
 
-<details>
-    <summary>Raw DSN as received</summary>
-    <pre class="raw">{{ dsn.rawMessage }}</pre>
-</details>
+<section class="card" aria-labelledby="raw-h">
+    <details>
+        <summary id="raw-h">Raw DSN as received</summary>
+        <pre class="raw">{{ dsn.rawMessage }}</pre>
+    </details>
+</section>
 {% endblock %}

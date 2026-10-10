@@ -1,10 +1,12 @@
 {% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}Check your email{% endblock %}
 {% block body %}
-<section class="narrow">
-    <h1>Check your email</h1>
+<section class="narrow" aria-labelledby="sent-h">
+    <span class="att-mark att-info" aria-hidden="true">{{ icon.i('mail', 20) }}</span>
+    <h1 id="sent-h">Check your email</h1>
     <p>If that address may sign in, a sign-in link is on its way. It works once and expires in {{ minutes }} minutes.</p>
-    <p class="muted">In development every message, including this one, is captured by Mailpit.</p>
+    <p class="muted small">In development every message, including this one, is captured by Mailpit.</p>
     <p><a href="{{ path('dashboard_login') }}">Use a different address</a></p>
 </section>
 {% endblock %}

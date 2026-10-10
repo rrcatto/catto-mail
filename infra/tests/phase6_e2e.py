@@ -297,7 +297,8 @@ def dashboard(t: dict[str, str]) -> None:
         s, _, body = op.get(f"/dashboard/operator{path}")
         check(s == 200, f"operator page /dashboard/operator{path}")
     s, _, body = op.get("/dashboard/operator")
-    check(b"Validation (Python worker)" in body and b"Delivery (Go daemon)" in body, "operator overview shows worker health from the database")
+    check(b"Workers and queues" in body and b"Postfix queue" in body and b'data-chart-kind-value="trend"' in body,
+          "operator overview shows worker health from the database and its KPI charts")
 
     # Unmatched DSN workflow: the dashboard records the request; no event is made here.
     dsn = str(uuid.uuid4())

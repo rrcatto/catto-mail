@@ -1,17 +1,22 @@
 {% set b = boot.value ?? {} %}
+<section class="card" aria-labelledby="rb-h">
+<h2 id="rb-h">Prove a restart</h2>
 <p>catto-mail must come back by itself after the server restarts: Ubuntu → the catto-mail user's systemd (lingering) → Podman → the containers → the ingress socket → nginx. Prove it once.</p>
 <ol class="plain">
 <li>Make sure nothing important is being sent (or press <em>Stop sending email now</em> first).</li>
 <li>On the server, as root: <code>reboot</code>.</li>
 <li>Wait two or three minutes, sign in again and reload this page.</li>
 </ol>
-<h2>Last boot</h2>
+</section>
+<section class="card" aria-labelledby="rb-last-h">
+<h2 id="rb-last-h">Last boot</h2>
 {% if boot is null %}<p class="empty">No boot report yet: the host agent writes one shortly after each start of the server.</p>{% else %}
-<table class="kv dense"><tbody>
-<tr><th scope="row">Server booted</th><td>{{ b.boot_time ?? '?' }}</td></tr>
-<tr><th scope="row">catto-mail started automatically</th><td>{{ b.started_automatically is defined ? (b.started_automatically ? 'yes' : 'NO') : '?' }} {% if b.unit_started_at is defined %}<small class="muted">(smarthost.service at {{ b.unit_started_at }})</small>{% endif %}</td></tr>
-<tr><th scope="row">All containers healthy</th><td>{{ b.containers_healthy is defined ? (b.containers_healthy ? 'yes' : 'NO: ' ~ (b.unhealthy ?? [])|join(', ')) : '?' }}</td></tr>
-<tr><th scope="row">Ingress socket (ports 443 and 25)</th><td>{{ b.ingress_active is defined ? (b.ingress_active ? 'active' : 'NOT active') : '?' }}</td></tr>
-<tr><th scope="row">Delivery mode after boot</th><td>{{ b.live_delivery is defined ? (b.live_delivery ? 'LIVE' : 'HELD') : '?' }}{% if b.paused is defined and b.paused %}, PAUSED (preserved){% endif %}</td></tr>
-<tr><th scope="row">Recorded</th><td>{{ boot.updated_at|ts }}</td></tr>
-</tbody></table>{% endif %}
+<dl class="rows">
+<dt>Server booted</dt><dd>{{ b.boot_time ?? '?' }}</dd>
+<dt>catto-mail started automatically</dt><dd>{{ b.started_automatically is defined ? (b.started_automatically ? 'yes' : 'NO') : '?' }} {% if b.unit_started_at is defined %}<small class="muted">(smarthost.service at {{ b.unit_started_at }})</small>{% endif %}</dd>
+<dt>All containers healthy</dt><dd>{{ b.containers_healthy is defined ? (b.containers_healthy ? 'yes' : 'NO: ' ~ (b.unhealthy ?? [])|join(', ')) : '?' }}</dd>
+<dt>Ingress socket (ports 443 and 25)</dt><dd>{{ b.ingress_active is defined ? (b.ingress_active ? 'active' : 'NOT active') : '?' }}</dd>
+<dt>Delivery mode after boot</dt><dd>{{ b.live_delivery is defined ? (b.live_delivery ? 'LIVE' : 'HELD') : '?' }}{% if b.paused is defined and b.paused %}, PAUSED (preserved){% endif %}</dd>
+<dt>Recorded</dt><dd>{{ boot.updated_at|ts }}</dd>
+</dl>{% endif %}
+</section>

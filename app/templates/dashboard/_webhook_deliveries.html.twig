@@ -1,4 +1,4 @@
-{% import 'dashboard/_macros.html.twig' as ui %}
+{# Webhook deliveries table (operator Mail flow › Webhooks and the client's Settings › Webhooks). Variables: rows, show_client. #}
 {% if rows is empty %}<p class="empty">No deliveries match.</p>{% else %}
 <div class="scroll">
 <table class="dense">
@@ -8,7 +8,7 @@
         <tr><td>{{ d.created_at|ts }}</td>{% if show_client %}<td>{{ d.company_name }}</td>{% endif %}
             <td><code>{{ d.event_type }}</code><br><small><code>{{ d.event_id }}</code></small></td>
             <td class="url">{{ d.url }}</td>
-            <td>{{ ui.status(state == 'delivered' ? 'completed' : (state == 'failed' ? 'failed' : 'deferred'), 'none') }} {{ state|capitalize }}</td>
+            <td><span class="st st-{{ state == 'delivered' ? 'completed' : (state == 'failed' ? 'failed' : 'deferred') }}">{{ state|capitalize }}</span></td>
             <td class="num">{{ d.attempt_count }}</td>
             <td>{{ d.last_response_status ?? '—' }}{% if d.last_error %}<br><small>{{ d.last_error }}</small>{% endif %}</td>
             <td>{{ d.next_attempt_at|ts }}</td>

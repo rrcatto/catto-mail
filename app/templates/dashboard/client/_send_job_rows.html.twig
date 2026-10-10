@@ -1,5 +1,8 @@
+{# Send job rows (the job list and the client overview, inside a card-flush card). Variables: rows, listing (or null).
+   The bar shows messages by current status: remote accepted, in flight or deferred, bounced, complained or failed, and suppressed (not sent). #}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% if rows is empty %}<p class="empty">No send jobs match.</p>{% else %}
+<div class="scroll">
 <table>
     <thead><tr>
         <th scope="col">{% if listing %}{{ ui.sort(listing, 'created', 'Created') }}{% else %}Created{% endif %}</th>
@@ -13,6 +16,12 @@
     </tr></thead>
     <tbody>
     {% for j in rows %}
+        {% set c = j.summary_counts_json|json_counts %}
+        {% set acc = c.remote_accepted ?? 0 %}
+        {% set fly = (c.created ?? 0) + (c.queued ?? 0) + (c.submitted ?? 0) + (c.deferred ?? 0) + (c.outcome_unknown ?? 0) %}
+        {% set bad = (c.soft_bounced ?? 0) + (c.hard_bounced ?? 0) + (c.complained ?? 0) + (c.failed ?? 0) %}
+        {% set sup = c.suppressed ?? 0 %}
+        {% set tot = acc + fly + bad + sup %}
         <tr>
             <td><a href="{{ path('dashboard_client_send_job', {clientId: client.id.toRfc4122, jobId: j.id}) }}">{{ j.created_at|ts }}</a></td>
             <td>{{ ui.status(j.status, 'send_job_status') }}</td>
@@ -21,9 +30,11 @@
             <td class="num">{{ j.total_recipients|number_format }}</td>
             <td>{{ j.queued_at|ts }}</td>
             <td>{{ j.dispatch_completed_at|ts }}<br>{{ j.completed_at|ts }}</td>
-            <td>{{ ui.counts(j.summary_counts_json, 'message_status') }}</td>
+            <td>{% if tot > 0 %}<svg class="stackbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/><rect class="seg-ok" width="{{ (100 * acc / tot)|round(2) }}" height="8"/><rect class="seg-hatch" x="{{ (100 * acc / tot)|round(2) }}" width="{{ (100 * fly / tot)|round(2) }}" height="8"/><rect class="seg-bad" x="{{ (100 * (acc + fly) / tot)|round(2) }}" width="{{ (100 * bad / tot)|round(2) }}" height="8"/><rect class="wf-mid" x="{{ (100 * (acc + fly + bad) / tot)|round(2) }}" width="{{ (100 * sup / tot)|round(2) }}" height="8"/></svg>{% endif %}
+                {{ ui.counts(j.summary_counts_json, 'message_status') }}</td>
         </tr>
     {% endfor %}
     </tbody>
 </table>
+</div>
 {% endif %}

@@ -4,29 +4,45 @@
 {% block body %}
 {% set manage = is_granted('SYSTEM.ROLE.MANAGE') and not is_admin_role %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_roles') }}">Roles &amp; permissions</a> › {{ role.roleKey }}</p>
-<h1><code>{{ role.roleKey }}</code> {{ role.name }}</h1>
-<p>{{ role.builtin ? 'Built-in role.' : 'Custom role.' }} Held by {{ holders }} user{{ holders == 1 ? '' : 's' }} (<a href="{{ path('dashboard_operator_users', {role: role.roleKey}) }}">list them</a>).</p>
+<div class="pagehead">
+    <div>
+        <div class="titleline"><h1><code>{{ role.roleKey }}</code> {{ role.name }}</h1><span class="tag">{{ role.builtin ? 'Built-in' : 'Custom' }}</span></div>
+        <p class="sub">{{ role.builtin ? 'Built-in role.' : 'Custom role.' }} Held by {{ holders }} user{{ holders == 1 ? '' : 's' }} (<a href="{{ path('dashboard_operator_users', {role: role.roleKey}) }}">list them</a>).</p>
+    </div>
+</div>
 {% if is_admin_role %}<p class="caveat">ADMIN always holds every permission and cannot be changed. The account whose email is <code>APP_ADMIN_EMAIL</code> receives it at every sign-in.</p>{% endif %}
 <form method="post" action="{{ path('dashboard_operator_role_update', {id: role.id.toRfc4122}) }}">
     {{ ui.csrf() }}
-    <div class="filters">
-        <label>Name <input type="text" name="name" value="{{ role.name }}" required maxlength="100"{% if not manage %} disabled{% endif %}></label>
-        <label>Description <input type="text" name="description" value="{{ role.description }}" maxlength="300"{% if not manage %} disabled{% endif %}></label>
-    </div>
-    {% for group, permissions in groups %}
-        <fieldset class="perms">
-            <legend>{{ group }}</legend>
-            {% for p in permissions %}
-                <label class="check"><input type="checkbox" name="permissions[]" value="{{ p.key }}"{% if p.key in granted %} checked{% endif %}{% if not manage %} disabled{% endif %}> <code>{{ p.key }}</code> – {{ p.description }}</label>
-            {% endfor %}
-        </fieldset>
-    {% endfor %}
-    {% if manage %}<p><button type="submit">Save role</button></p>{% endif %}
+    <section class="card" aria-labelledby="role-details-h">
+        <h2 id="role-details-h">Name and description</h2>
+        <div class="form-grid">
+            <label>Name <input type="text" name="name" value="{{ role.name }}" required maxlength="100"{% if not manage %} disabled{% endif %}></label>
+            <label>Description <input type="text" name="description" value="{{ role.description }}" maxlength="300"{% if not manage %} disabled{% endif %}></label>
+        </div>
+    </section>
+    <section class="card" aria-labelledby="role-perms-h">
+        <h2 id="role-perms-h">Permissions</h2>
+        <div class="cards">
+        {% for group, permissions in groups %}
+            <fieldset class="perms">
+                <legend>{{ group }}</legend>
+                {% for p in permissions %}
+                    <label class="check"><input type="checkbox" name="permissions[]" value="{{ p.key }}"{% if p.key in granted %} checked{% endif %}{% if not manage %} disabled{% endif %}> <span><code>{{ p.key }}</code> – {{ p.description }}</span></label>
+                {% endfor %}
+            </fieldset>
+        {% endfor %}
+        </div>
+        {% if manage %}<div class="form-actions"><button type="submit">Save role</button></div>{% endif %}
+    </section>
 </form>
 {% if is_granted('SYSTEM.ROLE.MANAGE') and not role.builtin %}
-<form method="post" action="{{ path('dashboard_operator_role_delete', {id: role.id.toRfc4122}) }}" data-controller="confirm" data-confirm-message-value="Delete the role {{ role.roleKey }}?">
-    {{ ui.csrf() }}<button type="submit"{% if holders > 0 %} disabled title="Revoke it from every user first"{% endif %}>Delete role</button>
-</form>
+<section class="card card-danger" aria-labelledby="role-delete-h">
+    <h2 id="role-delete-h">Delete this role</h2>
+    <form method="post" action="{{ path('dashboard_operator_role_delete', {id: role.id.toRfc4122}) }}" class="form-actions" data-controller="confirm" data-confirm-message-value="Delete the role {{ role.roleKey }}?">
+        {{ ui.csrf() }}<button type="submit" class="danger"{% if holders > 0 %} disabled title="Revoke it from every user first"{% endif %}>Delete role</button>
+        {% if holders > 0 %}<span class="muted small">Revoke it from every user first.</span>{% endif %}
+    </form>
+</section>
 {% endif %}
-<p class="muted">System permissions (roles and ADMIN) belong to ADMIN alone. Client pages are governed by client memberships, not by these permissions, except PLATFORM.CLIENT.VIEW / PLATFORM.CLIENT.MANAGE, which give access to every client.</p>
+<p class="muted small">System permissions (roles and ADMIN) belong to ADMIN alone. Client pages are governed by client memberships, not by these permissions, except PLATFORM.CLIENT.VIEW / PLATFORM.CLIENT.MANAGE, which give access to every client.</p>
 {% endblock %}

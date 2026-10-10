@@ -3,32 +3,46 @@
 {% block title %}Preview upload{% endblock %}
 {% block body %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › Preview</p>
-<h1>Preview: {{ filename }}</h1>
-<p>Nothing is stored yet. For <strong>{{ batch_client.companyName }}</strong>, batch “{{ form.name }}” ({{ form.purpose }}).</p>
-<table class="kv dense narrow"><tbody>
-<tr><th scope="row">Format</th><td>{{ parsed.format|upper }}{% if parsed.format == 'csv' %} (delimiter “{{ parsed.delimiter == "\t" ? 'tab' : parsed.delimiter }}”){% endif %}</td></tr>
-<tr><th scope="row">Rows with content</th><td>{{ parsed.counts.data_rows|number_format }}</td></tr>
-<tr><th scope="row">Addresses to import (unique)</th><td>{{ parsed.counts.imported|number_format }}</td></tr>
-<tr><th scope="row">Exact duplicates (kept in the report, not validated twice)</th><td>{{ parsed.counts.duplicate|number_format }}</td></tr>
-<tr><th scope="row">Malformed input (not an address; reported)</th><td>{{ parsed.counts.malformed|number_format }}</td></tr>
-<tr><th scope="row">Blank rows (ignored)</th><td>{{ parsed.counts.blank|number_format }}</td></tr>
-</tbody></table>
+<div class="pagehead">
+    <div>
+        <h1>Preview: {{ filename }}</h1>
+        <p class="sub">Nothing is stored yet. For <strong>{{ batch_client.companyName }}</strong>, batch “{{ form.name }}” ({{ form.purpose }}).</p>
+    </div>
+</div>
+<dl class="facts">
+    <div><dt>Format</dt><dd>{{ parsed.format|upper }}{% if parsed.format == 'csv' %} (delimiter “{{ parsed.delimiter == "\t" ? 'tab' : parsed.delimiter }}”){% endif %}</dd></div>
+    <div><dt>Rows with content</dt><dd class="lg">{{ parsed.counts.data_rows|number_format }}</dd></div>
+    <div><dt>Addresses to import (unique)</dt><dd class="lg">{{ parsed.counts.imported|number_format }}</dd></div>
+    <div><dt>Exact duplicates (kept in the report, not validated twice)</dt><dd class="lg">{{ parsed.counts.duplicate|number_format }}</dd></div>
+    <div><dt>Malformed input (not an address; reported)</dt><dd class="lg">{{ parsed.counts.malformed|number_format }}</dd></div>
+    <div><dt>Blank rows (ignored)</dt><dd class="lg">{{ parsed.counts.blank|number_format }}</dd></div>
+</dl>
 <form method="post" action="{{ path('dashboard_operator_batch_import') }}">
     {{ ui.csrf() }}
     <input type="hidden" name="upload_id" value="{{ upload_id }}">
     {% for k, v in form %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     {% if parsed.format == 'csv' %}
-    <p><label>Address column <select name="column" formaction="{{ path('dashboard_operator_batch_preview') }}">{% for c in parsed.columns %}<option{% if c == parsed.column %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
-       <button type="submit" formaction="{{ path('dashboard_operator_batch_preview') }}" class="secondary">Preview with this column</button></p>
+    <div class="filters">
+        <label>Address column <select name="column" formaction="{{ path('dashboard_operator_batch_preview') }}">{% for c in parsed.columns %}<option{% if c == parsed.column %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+        <button type="submit" formaction="{{ path('dashboard_operator_batch_preview') }}" class="secondary">Preview with this column</button>
+    </div>
     {% endif %}
-    <h2>First rows</h2>
-    <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Will be imported as</th><th scope="col">Outcome</th><th scope="col">Note</th></tr></thead>
-    <tbody>{% for r in sample %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.normalized ?? '—' }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
-    {% if problems is not empty %}<h2>Duplicates and malformed rows (first {{ problems|length }})</h2>
-    <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
-    <tbody>{% for r in problems %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    <section class="card card-flush" aria-labelledby="rows-h">
+        <div class="card-head"><h2 id="rows-h">First rows</h2></div>
+        <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Will be imported as</th><th scope="col">Outcome</th><th scope="col">Note</th></tr></thead>
+        <tbody>{% for r in sample %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.normalized ?? '—' }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
+    </section>
+    {% if problems is not empty %}
+    <section class="card card-flush" aria-labelledby="prob-h">
+        <div class="card-head"><h2 id="prob-h">Duplicates and malformed rows (first {{ problems|length }})</h2></div>
+        <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
+        <tbody>{% for r in problems %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
+    </section>
+    {% endif %}
     <p class="muted">Cleanup applied: surrounding spaces removed, <code>mailto:</code> and <code>Name &lt;address&gt;</code> forms reduced to the address, the domain lower-cased (the part before @ is kept exactly). Nothing else is changed; the validator judges the rest.</p>
-    <button type="submit">Import {{ parsed.counts.data_rows|number_format }} rows</button>
-    <a href="{{ path('dashboard_operator_batches') }}">Cancel</a>
+    <div class="form-actions">
+        <button type="submit">Import {{ parsed.counts.data_rows|number_format }} rows</button>
+        <a href="{{ path('dashboard_operator_batches') }}">Cancel</a>
+    </div>
 </form>
 {% endblock %}

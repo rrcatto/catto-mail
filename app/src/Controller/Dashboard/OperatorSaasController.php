@@ -20,6 +20,7 @@ use App\Usage\UsageExporter;
 use App\Usage\UsagePeriod;
 use App\Usage\UsageReconciliation;
 use App\Usage\UsageReporting;
+use App\Util\InstallationTime;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -43,6 +44,7 @@ final class OperatorSaasController extends AbstractController
         private readonly OperatorReadModel $read,
         private readonly ClientAccess $access,
         private readonly EntityManagerInterface $em,
+        private readonly InstallationTime $time,
     ) {
     }
 
@@ -93,10 +95,10 @@ final class OperatorSaasController extends AbstractController
     public function usage(Request $request, UsageReporting $reporting): Response
     {
         try {
-            $period = self::period($request);
+            $period = $this->period($request);
         } catch (DomainRuleViolation $e) {
             $this->addFlash('error', $e->getMessage());
-            $period = UsagePeriod::named('current_month');
+            $period = UsagePeriod::named('current_month', $this->time->zone);
         }
         $statements = $this->em->getConnection()->fetchAllAssociative(<<<'SQL'
             SELECT s.id::text AS id, s.client_id::text AS client_id, c.company_name, s.status, s.reconciliation_status,
@@ -127,7 +129,7 @@ final class OperatorSaasController extends AbstractController
         $this->assertCsrf($request);
         $client = $this->loadClient($id);
         try {
-            $period = self::period($request, true);
+            $period = $this->period($request, true);
         } catch (DomainRuleViolation $e) {
             $this->addFlash('error', $e->getMessage());
 
@@ -145,7 +147,7 @@ final class OperatorSaasController extends AbstractController
         $this->assertCsrf($request);
         $client = $this->loadClient($id);
         try {
-            $period = self::period($request, true);
+            $period = $this->period($request, true);
         } catch (DomainRuleViolation $e) {
             $this->addFlash('error', $e->getMessage());
 
@@ -167,7 +169,7 @@ final class OperatorSaasController extends AbstractController
     {
         $this->assertCsrf($request);
         try {
-            $period = UsagePeriod::month($request->request->getString('month'));
+            $period = UsagePeriod::month($request->request->getString('month'), $this->time->zone);
             $ids = $this->em->getConnection()->fetchFirstColumn(
                 'SELECT DISTINCT client_id::text FROM usage_records WHERE occurred_at >= ? AND occurred_at < ? ORDER BY 1',
                 [$period->startSql(), $period->endSql()]);
@@ -215,17 +217,18 @@ final class OperatorSaasController extends AbstractController
             'to' => $statement->getPeriodEnd()->format('Y-m-d')]);
     }
 
-    private static function period(Request $request, bool $post = false): UsagePeriod
+    private function period(Request $request, bool $post = false): UsagePeriod
     {
         $bag = $post ? $request->request : $request->query;
+        $zone = $this->time->zone;
         if ('' !== $bag->getString('from') || '' !== $bag->getString('to')) {
-            return UsagePeriod::custom($bag->getString('from'), $bag->getString('to'));
+            return UsagePeriod::custom($bag->getString('from'), $bag->getString('to'), $zone);
         }
         if ('' !== $bag->getString('month')) {
-            return UsagePeriod::month($bag->getString('month'));
+            return UsagePeriod::month($bag->getString('month'), $zone);
         }
 
-        return UsagePeriod::named('' === $bag->getString('period') ? 'current_month' : $bag->getString('period'));
+        return UsagePeriod::named('' === $bag->getString('period') ? 'current_month' : $bag->getString('period'), $zone);
     }
 
     private function loadClient(string $id): Client

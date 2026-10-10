@@ -3,61 +3,75 @@
 {% block title %}Webhooks{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
-<h1>Webhooks</h1>
-<p>Smarthost sends signed HTTPS POST requests to these endpoints when your validation jobs, send jobs and messages change state. Each request carries a <code>Smarthost-Signature</code> (HMAC-SHA256 over <code>&lt;t&gt;.&lt;body&gt;</code> with the endpoint's signing secret) and a <code>Smarthost-Event-Id</code>. Delivery is at-least-once: de-duplicate on the event id. Failed requests are retried with backoff; endpoints are never disabled automatically.</p>
-
-{% if endpoints is empty %}<p class="empty">No webhook endpoints yet.</p>{% endif %}
-{% for e in endpoints %}
-<section class="card endpoint">
-    <h2 class="url">{{ e.url }}</h2>
-    <dl>
-        <dt>Status</dt><dd>{{ ui.status(e.status == 'enabled' ? 'active' : 'disabled', 'none') }} {{ e.status|capitalize }}</dd>
-        <dt>Events</dt><dd>{{ e.subscribed_event_types|json_counts|join(', ') }}</dd>
-        <dt>Signing secret created</dt><dd>{{ e.signing_secret_created_at|ts }}{% if e.rotation_overlap %} (previous secret still signs until {{ e.previous_signing_secret_expires_at|ts }}){% endif %}</dd>
-        <dt>Deliveries</dt><dd>{{ e.pending }} pending or retrying; last 7 days: {{ e.delivered }} delivered, {{ e.failed }} failed</dd>
-        <dt>Last successful delivery</dt><dd>{{ e.last_delivered_at|ts }}</dd>
-        {% if e.failures_since_success > 0 %}<dt>Failed since the last success</dt><dd><strong>{{ e.failures_since_success }}</strong> deliveries failed permanently: check the endpoint (the failed deliveries below show the last response).</dd>{% endif %}
-    </dl>
-    {% if may_manage %}
-    <details>
-        <summary>Edit</summary>
-        <form method="post" action="{{ path('dashboard_client_webhook_update', {clientId: cid, id: e.id}) }}" class="stack">
-            {{ ui.csrf() }}
-            <label>URL <input type="url" name="url" value="{{ e.url }}" required maxlength="2000"></label>
-            <fieldset class="perms"><legend>Events</legend>
-                {% for t in event_types %}<label class="check"><input type="checkbox" name="event_types[]" value="{{ t }}"{% if t in e.subscribed_event_types|json_counts %} checked{% endif %}> <code>{{ t }}</code></label>{% endfor %}
-            </fieldset>
-            <label>Status <select name="status"><option value="enabled"{% if e.status == 'enabled' %} selected{% endif %}>Enabled</option><option value="disabled"{% if e.status == 'disabled' %} selected{% endif %}>Disabled</option></select></label>
-            <button type="submit">Save</button>
-        </form>
-    </details>
-    <div class="row">
-        <form method="post" action="{{ path('dashboard_client_webhook_test', {clientId: cid, id: e.id}) }}">{{ ui.csrf() }}<button type="submit">Send test event</button></form>
-        <form method="post" action="{{ path('dashboard_client_webhook_rotate', {clientId: cid, id: e.id}) }}" data-controller="confirm" data-confirm-message-value="Rotate the signing secret? The new secret is shown once; the old one keeps signing during the overlap period.">{{ ui.csrf() }}<button type="submit">Rotate signing secret</button></form>
+<div class="pagehead">
+    <div>
+        <h1>Webhooks</h1>
+        <p class="sub">Smarthost sends signed HTTPS POST requests to these endpoints when your validation jobs, send jobs and messages change state. Each request carries a <code>Smarthost-Signature</code> (HMAC-SHA256 over <code>&lt;t&gt;.&lt;body&gt;</code> with the endpoint's signing secret) and a <code>Smarthost-Event-Id</code>. Delivery is at-least-once: de-duplicate on the event id. Failed requests are retried with backoff; endpoints are never disabled automatically.</p>
     </div>
+</div>
+
+<div class="row-2 row-wide-left">
+    <section aria-labelledby="ep-h">
+        <h2 id="ep-h">Endpoints</h2>
+        {% if endpoints is empty %}<p class="empty">No webhook endpoints yet.</p>{% endif %}
+        {% for e in endpoints %}
+        <section class="card endpoint">
+            <div class="card-head"><h3 class="url">{{ e.url }}</h3><span class="st st-{{ e.status == 'enabled' ? 'active' : 'disabled' }}">{{ e.status|capitalize }}</span></div>
+            <dl class="facts">
+                <div><dt>Events</dt><dd>{{ e.subscribed_event_types|json_counts|join(', ') }}</dd></div>
+                <div><dt>Signing secret created</dt><dd>{{ e.signing_secret_created_at|ts }}{% if e.rotation_overlap %} <small>(previous secret still signs until {{ e.previous_signing_secret_expires_at|ts }})</small>{% endif %}</dd></div>
+                <div><dt>Deliveries</dt><dd>{{ e.pending }} pending or retrying; last 7 days: {{ e.delivered }} delivered, {{ e.failed }} failed</dd></div>
+                <div><dt>Last successful delivery</dt><dd>{{ e.last_delivered_at|ts }}</dd></div>
+            </dl>
+            {% if e.failures_since_success > 0 %}<p class="warn"><strong>{{ e.failures_since_success }}</strong> deliveries failed permanently since the last success: check the endpoint (the failed deliveries below show the last response).</p>{% endif %}
+            {% if may_manage %}
+            <details>
+                <summary>Edit</summary>
+                <form method="post" action="{{ path('dashboard_client_webhook_update', {clientId: cid, id: e.id}) }}" class="stack">
+                    {{ ui.csrf() }}
+                    <label>URL <input type="url" name="url" value="{{ e.url }}" required maxlength="2000"></label>
+                    <fieldset class="perms"><legend>Events</legend>
+                        {% for t in event_types %}<label class="check"><input type="checkbox" name="event_types[]" value="{{ t }}"{% if t in e.subscribed_event_types|json_counts %} checked{% endif %}> <code>{{ t }}</code></label>{% endfor %}
+                    </fieldset>
+                    <label>Status <select name="status"><option value="enabled"{% if e.status == 'enabled' %} selected{% endif %}>Enabled</option><option value="disabled"{% if e.status == 'disabled' %} selected{% endif %}>Disabled</option></select></label>
+                    <button type="submit">Save</button>
+                </form>
+            </details>
+            <div class="form-actions">
+                <form method="post" action="{{ path('dashboard_client_webhook_test', {clientId: cid, id: e.id}) }}">{{ ui.csrf() }}<button type="submit" class="secondary">Send test event</button></form>
+                <form method="post" action="{{ path('dashboard_client_webhook_rotate', {clientId: cid, id: e.id}) }}" data-controller="confirm" data-confirm-message-value="Rotate the signing secret? The new secret is shown once; the old one keeps signing during the overlap period.">{{ ui.csrf() }}<button type="submit" class="secondary">Rotate signing secret</button></form>
+            </div>
+            {% endif %}
+        </section>
+        {% endfor %}
+    </section>
+
+    {% if may_manage %}
+    <section class="card card-accent" aria-labelledby="add-h">
+        <h2 id="add-h">Add an endpoint</h2>
+        <form method="post" action="{{ path('dashboard_client_webhook_create', {clientId: cid}) }}" class="stack">
+            {{ ui.csrf() }}
+            <label>HTTPS URL <input type="url" name="url" required maxlength="2000" placeholder="https://app.example/webhooks/smarthost"></label>
+            <fieldset class="perms"><legend>Events</legend>
+                {% for t in event_types %}<label class="check"><input type="checkbox" name="event_types[]" value="{{ t }}" checked> <code>{{ t }}</code></label>{% endfor %}
+            </fieldset>
+            <button type="submit">Add endpoint</button>
+        </form>
+        <p class="muted small">The signing secret is shown once, right after the endpoint is created or its secret rotated. Store it in your application's secret configuration.</p>
+    </section>
     {% endif %}
+</div>
+
+<section aria-labelledby="deliveries">
+    <h2 id="deliveries">Deliveries</h2>
+    <form method="get" class="filters" role="search" aria-label="Filter deliveries" action="#deliveries">
+        {{ ui.select('status', 'Status', {pending: 'Pending', retrying: 'Retrying', delivered: 'Delivered', failed: 'Failed'}, filters.status, 'All') }}
+        <label>Endpoint <select name="endpoint"><option value="">All</option>{% for e in endpoints %}<option value="{{ e.id }}"{% if filters.endpoint == e.id %} selected{% endif %}>{{ e.url }}</option>{% endfor %}</select></label>
+        <button type="submit">Apply</button>
+    </form>
+    <div class="card card-flush">
+        {% include 'dashboard/_webhook_deliveries.html.twig' with {rows: deliveries.rows, show_client: false} %}
+    </div>
+    {{ ui.pager(deliveries, 'deliveries') }}
 </section>
-{% endfor %}
-
-{% if may_manage %}
-<h2>Add an endpoint</h2>
-<form method="post" action="{{ path('dashboard_client_webhook_create', {clientId: cid}) }}" class="stack">
-    {{ ui.csrf() }}
-    <label>HTTPS URL <input type="url" name="url" required maxlength="2000" placeholder="https://app.example/webhooks/smarthost"></label>
-    <fieldset class="perms"><legend>Events</legend>
-        {% for t in event_types %}<label class="check"><input type="checkbox" name="event_types[]" value="{{ t }}" checked> <code>{{ t }}</code></label>{% endfor %}
-    </fieldset>
-    <button type="submit">Add endpoint</button>
-</form>
-<p class="muted">The signing secret is shown once, right after the endpoint is created or its secret rotated. Store it in your application's secret configuration.</p>
-{% endif %}
-
-<h2 id="deliveries">Deliveries</h2>
-<form method="get" class="filters" role="search" aria-label="Filter deliveries" action="#deliveries">
-    {{ ui.select('status', 'Status', {pending: 'Pending', retrying: 'Retrying', delivered: 'Delivered', failed: 'Failed'}, filters.status, 'All') }}
-    <label>Endpoint <select name="endpoint"><option value="">All</option>{% for e in endpoints %}<option value="{{ e.id }}"{% if filters.endpoint == e.id %} selected{% endif %}>{{ e.url }}</option>{% endfor %}</select></label>
-    <button type="submit">Apply</button>
-</form>
-{% include 'dashboard/_webhook_deliveries.html.twig' with {rows: deliveries.rows, show_client: false} %}
-{{ ui.pager(deliveries, 'deliveries') }}
 {% endblock %}

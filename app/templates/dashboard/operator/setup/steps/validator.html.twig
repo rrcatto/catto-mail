@@ -1,7 +1,10 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% set probe = host.value.config.VALIDATOR_SMTP_PROBE_ENABLED ?? null %}
+<section class="card" aria-labelledby="val-h">
+<h2 id="val-h">The validator</h2>
 <p>The validator claims validation work from the database and checks each address: normalisation, syntax, domain and mail servers (MX, null MX), typos, disposable domains, role accounts and — only if enabled — an SMTP mailbox probe. {{ ui.help('validator') }}</p>
 <p><strong>SMTP mailbox probing: {{ probe is null ? 'unknown' : (probe == 'true' ? 'ENABLED' : 'DISABLED') }}.</strong>
 {% if probe == 'true' %}The validator connects to recipients' mail servers and asks whether a mailbox exists (without sending a message). This gives more evidence but creates SMTP traffic from your sending IP, which some providers dislike.
 {% else %}The validator does not contact recipients' mail servers. A "valid" result then means the domain accepts mail and nothing contradicts the address — the mailbox itself was not checked. This protects your sending IP's reputation; enabling probing is a deliberate decision (<code>VALIDATOR_SMTP_PROBE_ENABLED</code>).{% endif %}</p>
 <p>The deterministic test submits two syntax-invalid addresses (no DNS lookup, no SMTP) and expects both back as invalid: it proves the validator claims and finishes work. Run the checks twice: the first run starts the test, the next one judges it.</p>
+</section>

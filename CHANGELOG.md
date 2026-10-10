@@ -6,6 +6,84 @@ the *specification* version, which is 2.11.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-10
+
+The dashboard redesign: every page of the operator console, the client workspaces, the sign-in
+pages, the error page, the re-permission page and the public API documentation, with charts,
+global search and a period choice on both overviews; times, quota days and billing months in the
+installation's time zone. Software version 0.2.2 (Symfony application, Go delivery daemon,
+validator, production image tag). One new migration (an index); no API, vocabulary or webhook
+change.
+
+**Upgrading from 0.2.1:** add `APP_TIMEZONE=Africa/Johannesburg` (or your zone) to `infra/.env`,
+then upgrade as usual (`prod upgrade 0.2.2`, which runs the migration).
+
+### Added
+- Screenshots of every page in `docs/screenshots/`, shown in the README.
+- The installer warns when the administrator's address cannot receive the sign-in mail: when
+  mail for its domain would come to this server (whose Postfix receives only bounce-domain mail
+  and refuses every other address), or when the domain has no mail server. The same check runs in
+  the preflight's DNS section (`mailbox … (administrator)`, shown in System setup › DNS and the
+  diagnostics) and as `prod preflight --admin-mailbox`.
+- A redesigned dashboard (owner decision; specification `user_interfaces.dashboard_layout`).
+  One shell for the operator console and the client workspaces, using the full page width: round
+  area buttons on the left, the area's pages as pills at the top, and the delivery mode, the
+  *Stop sending* control (a reason is still required), an attention bell and the account menu at
+  the top right. Areas, pills and badges follow the permission keys.
+- A new operator Overview with a period choice (24 hours, 7, 30 or 90 days): KPI cards compared
+  with the previous period, send jobs by hard-bounce rate against the warning threshold, mail flow
+  per hour or day, workers and queues, a *Needs attention* list (stalled workers, reputation
+  alerts, failed webhooks, failing checks, unmatched DSNs, the approval queue, an unfinished
+  setup), per-client rates with threshold meters, validation results, component health,
+  suppressions and recent activity. Everything comes from the per-job counters and other durable
+  signals, in fewer queries than before.
+- Charts with Chart.js 4.5.0, vendored through the import map and loaded only on pages with a
+  chart; the Outfit font (SIL Open Font License) is served by the application itself.
+- Global search (the round search button at the top right): operators find clients, send and
+  validation jobs, messages, suppressions, sending domains and users by an ID, an email address,
+  a domain, an external reference or a name, within their permission keys; in a client
+  workspace the search covers only that client.
+- A submission-rate chart (Overview and Mail flow › Delivery): the typical and peak messages
+  submitted to Postfix per minute in each hour or day, against the warm-up rate ceiling. A new
+  partial index (`message_events_submitted_idx`, migration `Version20261011000100`) keeps it cheap.
+- The client overview has the same period choice and new figures: messages per hour or day, KPI
+  cards against the previous period, quota rings, validation results, sending domains and
+  engagement of the period's jobs.
+- Mail flow › Delivery shows the delivery mode with its controls, the delivery daemon, what each
+  mode means, the submission rate, the Postfix queue, recent host requests and component health.
+- `APP_TIMEZONE` (default `Africa/Johannesburg`), the installation's time zone (owner decision):
+  the dashboard shows times in it (SAST, UTC+2, instead of UTC), groups the Overview's hours and
+  days by it, and reads date filters and API key expiry dates as its days.
+  **Upgrading:** add `APP_TIMEZONE=Africa/Johannesburg` (or your zone) to `infra/.env`;
+  `prod check` names it until you do.
+
+### Changed
+- Quotas, usage summaries and billing statements use the calendar days and months of
+  `APP_TIMEZONE` instead of UTC: a daily quota now resets at midnight SAST (it reset at 02:00
+  SAST), and the API's `quota-exceeded` problem and `Retry-After` follow. Counters are keyed by
+  date, so on the day of the upgrade only the first two hours after midnight SAST may count
+  against the previous day. Billing statements already prepared keep their figures; a
+  statement prepared afterwards for an earlier month uses that month's SAST boundaries.
+- Dashboard navigation names: Mail flow › Delivery (was Health & delivery), Suppressions,
+  Unmatched DSNs, Webhooks; Clients › Clients, Abuse & reputation, Usage & billing, Address
+  batches (was under System); System › System setup, Diagnostics, Audit log; Access › Users,
+  Roles & permissions. The help pages, the setup wizard, the README, the production guides and
+  the specification use the new names. Client members choose a client on *Your workspaces*.
+- The sign-in email comes from "Catto Mail" with the subject "Your sign-in link for Catto Mail"
+  (was "Catto Mail Smarthost").
+- The installer asks for the administrator's address as an existing mailbox at a mail provider.
+- `VPS-INSTALL.md`: catto-mail has no mailboxes or webmail, and the administrator needs a mailbox
+  at a mail provider (§1); the main domain's MX stays with that provider, and one SPF record
+  covers both (§4); a troubleshooting entry for sign-in mail that never arrives. The DNS help
+  page says the same. §5 explains how to install a certificate bought or issued elsewhere
+  (`prod tls set`), and that it is not renewed automatically.
+
+### Fixed
+- `VPS-INSTALL.md` §11 asked for the seed and bounce tests to pass before live activation, but
+  in HELD mode their messages cannot leave the server. They now follow activation, at warm-up
+  stage 0, with a return to HELD if either fails (as the runbook already had it); §7 explains
+  that steps 16 and 17 send only once live delivery is enabled.
+
 ## [0.2.1] - 2026-10-09
 
 An installer fix found on the first real Ubuntu Server 26.04 VPS installation. Software version

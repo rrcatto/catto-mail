@@ -1,12 +1,13 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% for t in tests %}{% set r = reports[t.job_id] ?? null %}
-<section class="card"><h3>{{ t.kind|capitalize }} test {{ t.started_at }} by {{ t.started_by }} — {% if r %}<strong>{{ r.verdict }}</strong>{% endif %}</h3>
-{% if r %}<table class="dense"><tbody>{% for s in r.stages %}<tr><td>{{ ui.result(s.result) }}</td><th scope="row">{{ s.stage }}</th><td>{{ s.detail }}</td></tr>{% endfor %}</tbody></table>
-<form method="post" action="{{ path('dashboard_operator_setup_test_confirm', {jobId: t.job_id}) }}" class="filters">{{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ app.request.pathInfo }}">
+<section class="card card-flush" aria-label="{{ t.kind|capitalize }} test {{ t.started_at }}">
+<div class="card-head"><h3>{{ t.kind|capitalize }} test {{ t.started_at }} by {{ t.started_by }}{% if r %} — <strong>{{ r.verdict }}</strong>{% endif %}</h3>
+    <a class="more" href="{{ path('dashboard_client_send_job', {clientId: t.client_id, jobId: t.job_id}) }}">Send job, messages and timelines</a></div>
+{% if r %}<div class="scroll"><table class="dense"><tbody>{% for s in r.stages %}<tr><td>{{ ui.result(s.result) }}</td><th scope="row">{{ s.stage }}</th><td>{{ s.detail }}</td></tr>{% endfor %}</tbody></table></div>
+<form method="post" action="{{ path('dashboard_operator_setup_test_confirm', {jobId: t.job_id}) }}" class="form-actions card-foot">{{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ app.request.pathInfo }}">
     <span>In the message you received:</span>
     <button type="submit" name="what" value="dkim_pass" class="secondary">I see dkim=pass</button>
     {% if t.kind == 'seed' %}<button type="submit" name="what" value="inbox_seen" class="secondary">It arrived in my inbox</button>{% endif %}
 </form>{% endif %}
-<p><a href="{{ path('dashboard_client_send_job', {clientId: t.client_id, jobId: t.job_id}) }}">Send job, messages and timelines</a></p>
 </section>
 {% else %}<p class="empty">No test yet.</p>{% endfor %}

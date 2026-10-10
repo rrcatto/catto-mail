@@ -1,0 +1,12 @@
+{# KPI cards against the previous period (TrendCharts::kpis). Variables: kpis. #}
+{% import 'dashboard/_icons.html.twig' as icon %}
+<div class="grid grid-4">
+{% for k in kpis %}
+    <section class="card kpi" aria-labelledby="kpi-{{ loop.index }}">
+        <h2 id="kpi-{{ loop.index }}">{{ k.label }}</h2>
+        <div class="kpi-chart" aria-hidden="true"><canvas data-controller="chart" data-chart-kind-value="trend" data-chart-config-value="{{ k.chart|json_encode }}"></canvas></div>
+        <p class="kpi-value">{{ k.value }}</p>
+        <p class="kpi-delta"><span class="delta delta-{{ k.delta.tone }}" aria-hidden="true">{{ icon.i(k.delta.dir, 13) }}</span><strong>{{ k.delta.text }}</strong> <span class="muted">{{ k.note }}</span></p>
+    </section>
+{% endfor %}
+</div>

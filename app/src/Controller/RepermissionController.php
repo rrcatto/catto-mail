@@ -26,7 +26,7 @@ final class RepermissionController extends AbstractController
         'X-Content-Type-Options' => 'nosniff',
         'Referrer-Policy' => 'no-referrer',
         'X-Frame-Options' => 'DENY',
-        'Content-Security-Policy' => "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        'Content-Security-Policy' => "default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     ];
 
     public function __construct(

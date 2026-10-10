@@ -89,7 +89,7 @@ Act on `status` and the last segment of `type` (the problem slug). Common slugs:
 | Recipients per batch | 500 (or lower if configured) | `422` (`batch-too-large`) |
 | Recipients per send job | 10,000, or your account's lower limit | `422` (`recipient-limit-exceeded`) |
 | Requests per minute | per key, and for all keys of your account together; lower while `throttled` | `429` (`rate-limited`) with `Retry-After` |
-| Quotas per UTC day or month | validation jobs, validation addresses, send jobs, recipients, as agreed for your account | `429` (`quota-exceeded`) with `Retry-After` |
+| Quotas per calendar day or month in the installation's time zone (Africa/Johannesburg by default; the problem's `resets_at` says when) | validation jobs, validation addresses, send jobs, recipients, as agreed for your account | `429` (`quota-exceeded`) with `Retry-After` |
 
 A quota refusal happens before any work is created and names the quota:
 

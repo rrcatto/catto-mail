@@ -1,9 +1,12 @@
 {% set c = host.value.config ?? {} %}
+<section class="card" aria-labelledby="si-h">
+<h2 id="si-h">SMTP identity</h2>
 <p>How this server introduces itself to other mail servers. Receivers check that these names, the IP address and its reverse DNS agree.</p>
-<table class="kv dense"><tbody>
-<tr><th scope="row">Mail host name (EHLO, PTR)</th><td><code>{{ c.POSTFIX_MYHOSTNAME ?? '?' }}</code> — Postfix greets other servers with this name; the PTR of the IP must be this name, and its A record must be this IP.</td></tr>
-<tr><th scope="row">Public IPv4</th><td><code>{{ c.SMARTHOST_PUBLIC_IPV4 ?? '?' }}</code> — the sending address. catto-mail sends over IPv4 only.</td></tr>
-<tr><th scope="row">Bounce domain</th><td><code>{{ c.SMARTHOST_BOUNCE_DOMAIN ?? '?' }}</code> — the envelope sender of every message (<code>bounce+&lt;token&gt;@…</code>); bounces and complaints return here. Its MX must point at the mail host name.</td></tr>
-<tr><th scope="row">Sign-in mail sender</th><td><code>{{ c.APP_MAIL_FROM ?? '?' }}</code> — its domain needs a DKIM key too.</td></tr>
-</tbody></table>
+<dl class="rows">
+<dt>Mail host name (EHLO, PTR)</dt><dd><code>{{ c.POSTFIX_MYHOSTNAME ?? '?' }}</code> — Postfix greets other servers with this name; the PTR of the IP must be this name, and its A record must be this IP.</dd>
+<dt>Public IPv4</dt><dd><code>{{ c.SMARTHOST_PUBLIC_IPV4 ?? '?' }}</code> — the sending address. catto-mail sends over IPv4 only.</dd>
+<dt>Bounce domain</dt><dd><code>{{ c.SMARTHOST_BOUNCE_DOMAIN ?? '?' }}</code> — the envelope sender of every message (<code>bounce+&lt;token&gt;@…</code>); bounces and complaints return here. Its MX must point at the mail host name.</dd>
+<dt>Sign-in mail sender</dt><dd><code>{{ c.APP_MAIL_FROM ?? '?' }}</code> — its domain needs a DKIM key too.</dd>
+</dl>
 <p>Change them in <code>infra/.env</code> as for the web identity. The PTR is set at your VPS provider, not in your DNS zone.</p>
+</section>

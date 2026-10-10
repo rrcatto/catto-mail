@@ -335,6 +335,32 @@ def org_domain(domain: str) -> str:
     return ".".join(labels[-2:])
 
 
+def admin_mailbox(values: dict[str, str], resolver: Resolver) -> tuple[str, str]:
+    """Where mail for the administrator's address goes, as (level, detail); DnsError if DNS fails.
+
+    Sign-in links are e-mailed, and catto-mail receives only bounce-domain mail, refusing every
+    other recipient. The administrator's address must therefore be a mailbox at a mail provider:
+    a domain whose MX (or, without an MX, whose A record) is this server cannot receive them.
+    """
+    admin = values.get("APP_ADMIN_EMAIL", "")
+    domain = admin.rpartition("@")[2].lower()
+    ip = values.get("SMARTHOST_PUBLIC_IPV4", "")
+    ours = {values.get(k, "").lower() for k in ("PROXY_SERVER_NAME", "POSTFIX_MYHOSTNAME", "SMARTHOST_BOUNCE_DOMAIN")} - {""}
+    hosts = [h.lower().rstrip(".") for _p, h in sorted(resolver.query(domain, "MX"))]
+    if hosts == [""]:   # null MX (RFC 7505)
+        return "WARN", f"{domain} accepts no mail (null MX): sign-in links to {admin} cannot be delivered"
+    if not hosts:
+        if not resolver.query(domain, "A"):
+            return "WARN", f"{domain} has no mail server (no MX or A record): sign-in links to {admin} cannot be delivered"
+        hosts = [domain]
+    here = [h for h in hosts if h in ours or ip in resolver.query(h, "A")]
+    if here:
+        return "WARN", (f"mail for {domain} goes to this server ({', '.join(here)}), which receives only bounce-domain mail, "
+                        f"so sign-in links to {admin} would be refused; point {domain}'s MX at a mail provider "
+                        "(e.g. the registrar's e-mail forwarding) or use another address")
+    return "PASS", f"mail for {domain} goes to {', '.join(hosts)}"
+
+
 # ========================================================================== TLS
 @dataclass
 class CertInfo:
@@ -960,6 +986,11 @@ class Preflight:
         mail_from_domain = v["APP_MAIL_FROM"].rpartition("@")[2].lower()
         if mail_from_domain not in {row["domain"] for row in rows}:
             self.check_dmarc(mail_from_domain)
+        admin = f"mailbox {v.get('APP_ADMIN_EMAIL', '')} (administrator)"
+        try:
+            self.add("dns", admin, *admin_mailbox(v, r))
+        except DnsError as exc:
+            self.add("dns", admin, "WARN", str(exc))
         if not self.host.podman_remote() and v.get("SMARTHOST_EGRESS_ENABLED") == "true":
             try:
                 mx = sorted(r.query(bounce, "MX"))
@@ -1264,6 +1295,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--resolver", action="append", metavar="IP", help="DNS server(s) to ask instead of the system resolver")
     p.add_argument("--checklist", action="store_true")
     p.add_argument("--firewall", action="store_true")
+    p.add_argument("--admin-mailbox", action="store_true",
+                   help="print a warning if the administrator's address cannot receive the sign-in mail (the installer)")
     a = p.parse_args(argv)
     env = Path(os.environ.get("SMARTHOST_DOTENV") or ROOT / "infra/.env")
     values = render.parse_dotenv(env)
@@ -1280,6 +1313,15 @@ def main(argv: list[str]) -> int:
         return 0
     if a.firewall:
         print(firewall_ruleset(values, os.getuid()), end="")
+        return 0
+    if a.admin_mailbox:
+        try:
+            level, detail = admin_mailbox(values, Resolver(a.resolver))
+        except DnsError as exc:
+            print(f"administrator mailbox not checked: {exc}", file=sys.stderr)
+            return 0
+        if level != "PASS":
+            print(f"{values.get('APP_ADMIN_EMAIL', '')}: {detail}")
         return 0
     pf = Preflight(values, host, Resolver(a.resolver), activation=a.activation, egress_probe=a.smtp_egress_probe,
                    pre_upgrade=a.pre_upgrade)

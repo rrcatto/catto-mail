@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import io
 import re
 import subprocess
 import tempfile
@@ -161,6 +162,7 @@ def good_zone(values: dict[str, str], dkim_key: str) -> dict:
         ("_dmarc.cattomail-ops.net", "TXT"): ["v=DMARC1; p=quarantine"],
         ("s1._domainkey.client-a.net", "TXT"): [f"v=DKIM1; k=rsa; p={dkim_key}"],
         ("ops1._domainkey.cattomail-ops.net", "TXT"): [f"v=DKIM1; k=rsa; p={dkim_key}"],
+        ("cattomail-ops.net", "MX"): [(10, "mx1.mailbox-provider.net")],   # the administrator's mailbox
     }
 
 
@@ -245,6 +247,54 @@ class DnsAndDkimChecksTest(unittest.TestCase):
         values = production_values()
         res = pf.Preflight(values, host_for(values), FakeResolver({}, broken={values["PROXY_SERVER_NAME"]})).run(("dns",))
         self.assertEqual("WARN", levels(res)[f"A {values['PROXY_SERVER_NAME']}"])
+
+
+class AdminMailboxTest(unittest.TestCase):
+    """Sign-in links are e-mailed, and catto-mail receives only bounce-domain mail."""
+
+    def check(self, zone: dict, broken: set[str] | None = None) -> tuple[str, str]:
+        return pf.admin_mailbox(production_values(), FakeResolver(zone, broken))
+
+    def test_a_mailbox_at_a_mail_provider_passes(self) -> None:
+        level, detail = self.check({("cattomail-ops.net", "MX"): [(10, "mx1.mailbox-provider.net")]})
+        self.assertEqual("PASS", level, detail)
+
+    def test_mail_for_the_domain_coming_to_this_server_is_a_warning(self) -> None:
+        values = production_values()
+        for zone in ({("cattomail-ops.net", "MX"): [(10, values["PROXY_SERVER_NAME"])]},          # MX named after this server
+                     {("cattomail-ops.net", "MX"): [(10, "mx.cattomail-ops.net")],                 # MX resolving to its IP
+                      ("mx.cattomail-ops.net", "A"): [PUBLIC_IP]},
+                     {("cattomail-ops.net", "A"): [PUBLIC_IP]}):                                   # no MX: the A record is used
+            level, detail = self.check(zone)
+            self.assertEqual("WARN", level, zone)
+            self.assertIn("goes to this server", detail)
+            self.assertIn(values["APP_ADMIN_EMAIL"], detail)
+
+    def test_a_domain_without_a_mail_server_is_a_warning(self) -> None:
+        self.assertIn("no mail server", self.check({})[1])
+        self.assertIn("null MX", self.check({("cattomail-ops.net", "MX"): [(0, ".")]})[1])
+
+    def test_the_dns_section_reports_it_and_a_dns_failure_is_a_warning(self) -> None:
+        values = production_values()
+        name = f"mailbox {values['APP_ADMIN_EMAIL']} (administrator)"
+        res = pf.Preflight(values, host_for(values), FakeResolver(good_zone(values, KEY))).run(("dns",))
+        self.assertEqual("PASS", levels(res)[name])
+        res = pf.Preflight(values, host_for(values), FakeResolver({}, broken={"cattomail-ops.net"})).run(("dns",))
+        self.assertEqual("WARN", levels(res)[name])
+
+    def test_the_installer_flag_prints_only_a_warning(self) -> None:
+        values = production_values()
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d) / ".env"
+            env.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+            for zone, broken, printed in (({("cattomail-ops.net", "MX"): [(10, "mx1.mailbox-provider.net")]}, None, False),
+                                          ({("cattomail-ops.net", "A"): [PUBLIC_IP]}, None, True),
+                                          ({}, {"cattomail-ops.net"}, False)):
+                with mock.patch.dict("os.environ", {"SMARTHOST_DOTENV": str(env)}), \
+                        mock.patch.object(pf, "Resolver", lambda servers=None, z=zone, b=broken: FakeResolver(z, b)), \
+                        mock.patch("sys.stdout", new_callable=io.StringIO) as out, mock.patch("sys.stderr", new_callable=io.StringIO):
+                    self.assertEqual(0, pf.main(["--admin-mailbox"]))
+                self.assertEqual(printed, out.getvalue().startswith(values["APP_ADMIN_EMAIL"] + ": "), out.getvalue())
 
 
 class PostfixDeliveryExposureChecksTest(unittest.TestCase):

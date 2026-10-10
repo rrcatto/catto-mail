@@ -200,7 +200,7 @@ CREATE TABLE client_quota_usage (
     client_id     uuid        NOT NULL REFERENCES clients (id),
     metric        text        NOT NULL CHECK (metric IN ('validation_jobs', 'validation_addresses', 'send_jobs', 'send_recipients')),
     period        text        NOT NULL CHECK (period IN ('day', 'month')),
-    period_start  date        NOT NULL,                          -- UTC calendar day or first day of the UTC month
+    period_start  date        NOT NULL,                          -- calendar day or first day of the month in APP_TIMEZONE
     used          bigint      NOT NULL CHECK (used >= 0),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (client_id, metric, period, period_start),
@@ -487,6 +487,9 @@ CREATE INDEX message_events_engagement_idx ON message_events (message_id, occurr
 -- Phase 9: reputation evaluation counts these events per client in a time window across all messages.
 CREATE INDEX message_events_reputation_idx ON message_events (occurred_at)
     WHERE event_type IN ('hard_bounce', 'soft_bounce', 'deferred', 'complaint', 'transport_outcome_unknown', 'message_suppressed');
+-- Dashboard (owner decision 2026-10-10): submissions per minute for the submission-rate chart.
+CREATE INDEX message_events_submitted_idx ON message_events (occurred_at)
+    WHERE event_type = 'submitted_to_postfix';
 
 -- DSNs that resolve to no message (D-05). Operator-scoped; retained after resolution.
 CREATE TABLE unmatched_dsns (

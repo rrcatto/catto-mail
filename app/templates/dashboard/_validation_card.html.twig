@@ -1,0 +1,10 @@
+{# Validation results of the period (TrendCharts::validation). Variables: validation; optional validation_link. #}
+<section class="card" aria-labelledby="val-h">
+    <div class="card-head"><h2 id="val-h">Validation results</h2>{% if validation_link is defined %}<a class="more" href="{{ validation_link }}">All jobs</a>{% endif %}</div>
+    <p class="big">{{ validation.checked|number_format }} <span>addresses checked · {{ validation.jobs|number_format }} job{{ validation.jobs == 1 ? '' : 's' }}</span></p>
+    {% if validation.classified > 0 %}
+    <svg class="waffle" viewBox="0 0 101 101" role="img" aria-label="Of every 100 classified addresses: {% for g in validation.groups %}{{ g.pct }} {{ g.label|lower }}{% if not loop.last %}, {% endif %}{% endfor %}">{% for q in validation.squares %}<rect class="wf-{{ q.class }}" x="{{ q.x }}" y="{{ q.y }}" width="8" height="8" rx="2"/>{% endfor %}</svg>
+    {% endif %}
+    <ul class="keyed">{% for g in validation.groups %}<li><span class="swatch wf-{{ g.class }}" aria-hidden="true"></span><span>{{ g.label }}</span><strong>{{ g.pct }}</strong></li>{% endfor %}</ul>
+    <p class="muted small">Validation estimates deliverability; it does not prove that a mailbox will accept a message.</p>
+</section>

@@ -1,4 +1,7 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
+<section class="card" aria-labelledby="od-h">
+<h2 id="od-h">OpenDKIM</h2>
 <p>OpenDKIM is the signing service Postfix calls for every outgoing message (a "milter"). It is the only component that holds DKIM private keys; they never leave its storage except in an encrypted backup.
 The checks confirm a key exists for every sending domain, the signing tables match the database, and the published DNS key matches the private key. {{ ui.help('dkim') }}</p>
 <p>A signed message carries <code>DKIM-Signature: … d=&lt;your domain&gt;; s=&lt;selector&gt;</code>; the seed test asks you to confirm <code>dkim=pass</code> in the received copy.</p>
+</section>

@@ -14,6 +14,7 @@ use App\Entity\ApiKey;
 use App\Enum\PolicyAcceptanceSource;
 use App\Security\ApiKeyManager;
 use App\Security\ClientVoter;
+use App\Util\InstallationTime;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -52,12 +53,12 @@ final class ClientApiKeyController extends AbstractController
     }
 
     #[Route('/api-keys', name: 'dashboard_client_api_key_create', methods: ['POST'])]
-    public function create(string $clientId, Request $request, ApiKeyManager $keys): Response
+    public function create(string $clientId, Request $request, ApiKeyManager $keys, InstallationTime $time): Response
     {
         $client = $this->access->client($clientId, ClientVoter::KEYS);
         $this->assertCsrf($request);
         try {
-            [$key, $raw] = $keys->create($client, $request->request->getString('name'), $this->actor(), OperatorClientController::expiry($request));
+            [$key, $raw] = $keys->create($client, $request->request->getString('name'), $this->actor(), OperatorClientController::expiry($request, $time->zone));
         } catch (DomainRuleViolation $e) {
             $this->addFlash('error', $e->getMessage());
 

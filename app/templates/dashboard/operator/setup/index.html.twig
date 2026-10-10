@@ -2,20 +2,44 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}System setup{% endblock %}
 {% block body %}
-<h1>System setup</h1>
-<p>This wizard takes you through everything catto-mail needs, in the order the parts depend on each other. You can leave at any time and continue later:
-    progress is saved. It stays here after setup as a checklist you can revisit. {{ ui.help('overview', 'What catto-mail is') }}</p>
-{% if complete %}<p class="flash flash-success">Setup is complete. Live delivery is a separate decision: see <a href="{{ path('dashboard_operator_system') }}">Health &amp; delivery</a>.</p>
-{% elseif current %}<p><a href="{{ path('dashboard_operator_setup_step', {step: current}) }}"><strong>Continue with step {{ steps[current].n }}: {{ steps[current].title }} »</strong></a></p>{% endif %}
+{% set total = steps|length %}
+{% set done = steps|filter(s => s.state == 'done')|length %}
+{% set skipped = steps|filter(s => s.state == 'skipped')|length %}
+<div class="pagehead">
+    <div>
+        <h1>System setup</h1>
+        <p class="sub">This wizard takes you through everything catto-mail needs, in the order the parts depend on each other. You can leave at any time and continue later:
+            progress is saved. It stays here after setup as a checklist you can revisit. {{ ui.help('overview', 'What catto-mail is') }}</p>
+    </div>
+    {% if not complete and current %}<div class="actions"><a class="btn" href="{{ path('dashboard_operator_setup_step', {step: current}) }}">Continue with step {{ steps[current].n }}: {{ steps[current].title }} »</a></div>{% endif %}
+</div>
+{% if complete %}<p class="flash flash-success">Setup is complete. Live delivery is a separate decision: see <a href="{{ path('dashboard_operator_system') }}">Mail flow › Delivery</a>.</p>{% endif %}
 {% if agent_age is null %}<p class="warn">The host agent has not reported yet, so the host, DNS, TLS, Postfix and backup checks are missing. It is installed by <code>smarthostctl prod install</code> and reports within a minute of starting.</p>{% endif %}
-<ol class="steps">
-{% for s in steps %}
-    <li{% if s.key == current %} class="current" aria-current="step"{% endif %}>
-        <span class="num">{{ s.n }}.</span>
-        <span><a href="{{ path('dashboard_operator_setup_step', {step: s.key}) }}">{{ s.title }}</a><br><small class="muted">{{ s.purpose }}</small></span>
-        <span>{% if s.state == 'done' %}{{ ui.result('pass') }} done{% elseif s.state == 'skipped' %}{{ ui.result('skipped') }} skipped{% else %}{{ ui.result('waiting') }} to do{% endif %}
-            {% if s.checks != 'none' %}<small>· checks {{ ui.result(s.checks) }}</small>{% endif %}</span>
-    </li>
-{% endfor %}
-</ol>
+
+<div class="with-aside">
+    <section class="card" aria-labelledby="steps-h">
+        <div class="card-head"><h2 id="steps-h">Steps</h2><span class="muted small">{{ done }} of {{ total }} done</span></div>
+        <ol class="stepper">
+        {% for s in steps %}
+            <li class="{{ s.state == 'done' ? 'done' : (s.state == 'skipped' ? 'skipped' : '') }}{{ s.key == current ? ' current' : '' }}"{% if s.key == current %} aria-current="step"{% endif %}>
+                <span class="step-text"><a href="{{ path('dashboard_operator_setup_step', {step: s.key}) }}">{{ s.title }}</a><br><small class="muted">{{ s.purpose }}</small></span>
+                <span class="step-state">{% if s.state == 'done' %}{{ ui.result('pass') }} done{% elseif s.state == 'skipped' %}{{ ui.result('skipped') }} skipped{% else %}{{ ui.result('waiting') }} to do{% endif %}
+                    {% if s.checks != 'none' %}<br><small>checks {{ ui.result(s.checks) }}</small>{% endif %}</span>
+            </li>
+        {% endfor %}
+        </ol>
+    </section>
+    <aside class="card" aria-labelledby="progress-h">
+        <h2 id="progress-h">Progress</h2>
+        <p class="big">{{ done }} of {{ total }} <span>steps done</span></p>
+        <progress max="{{ total }}" value="{{ done }}" aria-label="{{ done }} of {{ total }} steps done">{{ done }} of {{ total }}</progress>
+        <dl class="facts">
+            <div><dt>Done</dt><dd class="lg">{{ done }}</dd></div>
+            <div><dt>Skipped</dt><dd class="lg">{{ skipped }}</dd></div>
+            <div><dt>To do</dt><dd class="lg">{{ total - done - skipped }}</dd></div>
+        </dl>
+        {% if current and not complete %}<p><a href="{{ path('dashboard_operator_setup_step', {step: current}) }}">Next: step {{ steps[current].n }}, {{ steps[current].title }}</a></p>{% endif %}
+        <p class="muted small">Skipped steps stay on the list: come back to them. The last step summarises every subsystem; live delivery stays a separate, deliberate action under <a href="{{ path('dashboard_operator_system') }}">Mail flow › Delivery</a>.</p>
+    </aside>
+</div>
 {% endblock %}

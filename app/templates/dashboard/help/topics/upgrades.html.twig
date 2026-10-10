@@ -5,9 +5,9 @@
 git fetch --tags
 git tag --sort=-v:refname | head        # available releases
 git describe --tags                     # the installed one
-git checkout v0.2.1                     # the new release (read its CHANGELOG first)
+git checkout v0.2.2                     # the new release (read its CHANGELOG first)
 infra/bin/smarthostctl prod check       # names any new setting you must add to infra/.env
-infra/bin/smarthostctl prod upgrade 0.2.1</pre>
+infra/bin/smarthostctl prod upgrade 0.2.2</pre>
 <p><code>prod upgrade</code> checks the running system, takes a backup, builds the new images, recreates the containers (migrations and grants run at start), and checks again. Then run all diagnostics.</p>
 <h2>Rollback</h2>
 <pre class="cmd">git checkout v0.2.0

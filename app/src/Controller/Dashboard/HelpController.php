@@ -11,7 +11,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
-/** Operator › Help (specification 2.11): how catto-mail works, explained without the source code. */
+/** Help (specification 2.11): how catto-mail works, explained without the source code. */
 #[Route('/dashboard/operator/help')]
 #[IsGranted('PLATFORM.HELP.VIEW')]
 final class HelpController extends AbstractController

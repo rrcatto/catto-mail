@@ -2,61 +2,119 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Usage{% endblock %}
 {% block body %}
-<h1>Usage</h1>
-<p class="muted">Units are counted separately: a validation address is metered when it reaches a final result; a message when Postfix accepts it. Periods are UTC.</p>
-<table>
-    <thead><tr><th scope="col">Period</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
-    <tbody>{% for name, t in periods %}<tr><td>{{ name|replace({'_': ' '})|capitalize }}</td><td class="num">{{ t.validation_address.quantity|number_format }}</td><td class="num">{{ t.message_submitted.quantity|number_format }}</td></tr>{% endfor %}</tbody>
-</table>
-<form method="get" class="filters" aria-label="Custom period">
-    <label>From <input type="date" name="from" value="{{ range.from }}"></label><label>to (exclusive) <input type="date" name="to" value="{{ range.to }}"></label>
-    <button type="submit">Show period</button>
-</form>
-{% if custom %}
-<h2>{{ custom.period.label }}</h2>
-<p>Validation addresses processed: <strong>{{ custom.totals.validation_address.quantity|number_format }}</strong> · Messages submitted: <strong>{{ custom.totals.message_submitted.quantity|number_format }}</strong></p>
-{% if custom.daily is not empty %}<table><thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="num">Validation addresses</th><th scope="col" class="num">Messages submitted</th></tr></thead>
-<tbody>{% for d in custom.daily %}<tr><td>{{ d.day }}</td><td class="num">{{ d.validation_address|number_format }}</td><td class="num">{{ d.message_submitted|number_format }}</td></tr>{% endfor %}</tbody></table>{% endif %}
-{% endif %}
+{% set cid = client.id.toRfc4122 %}
+<div class="pagehead">
+    <div>
+        <h1>Usage</h1>
+        <p class="sub">Units are counted separately: a validation address is metered when it reaches a final result; a message when Postfix accepts it. Days and months are those of {{ time_zone_label() }}.</p>
+    </div>
+</div>
 
-<h2>Limits and quotas</h2>
-<table>
-    <thead><tr><th scope="col">Limit</th><th scope="col" class="num">Effective</th></tr></thead>
-    <tbody>{% for l in limits.limits %}<tr><td>{{ l.column|label('limit') }}</td><td class="num">{{ l.effective ?? 'not limited' }}</td></tr>{% endfor %}</tbody>
-</table>
-<table>
-    <thead><tr><th scope="col">Admitted work</th><th scope="col">Period</th><th scope="col" class="num">Used</th><th scope="col" class="num">Quota</th></tr></thead>
-    <tbody>{% for q in limits.quotas %}<tr><td>{{ q.metric|label('quota_metric') }}</td><td>{{ q.period|label('quota_period') }}</td><td class="num">{{ q.used|number_format }}</td><td class="num">{{ q.limit is null ? '—' : q.limit|number_format }}</td></tr>{% endfor %}</tbody>
-</table>
-<p class="muted">Quotas count work as it is admitted (jobs created, addresses submitted, recipients accepted); usage counts work done. A request over a quota is refused with HTTP 429 and the problem type quota-exceeded, which names the quota, its limit, the amount used and when it resets.</p>
+<div class="panels">
+    {% for name, t in periods %}
+    <div class="panel">
+        <p class="panel-head"><span>{{ name|replace({'_': ' '})|capitalize }}</span></p>
+        <p class="panel-value">{{ t.message_submitted.quantity|number_format }} <span>messages submitted</span></p>
+        <p class="small">{{ t.validation_address.quantity|number_format }} validation addresses processed</p>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row-2 row-wide-left">
+    <section class="card" aria-labelledby="quota-h">
+        <h2 id="quota-h">Limits and quotas</h2>
+        {% set shown = limits.quotas|filter(q => q.limit is not null or q.used > 0) %}
+        {% if shown is not empty %}
+        <ul class="quotas">
+            {% for q in shown %}
+            {% set pct = q.limit ? min(100, 100 * q.used / q.limit) : null %}
+            <li>
+                <svg class="ring" viewBox="0 0 80 80" role="img" aria-label="{{ q.metric|label('quota_metric') }}, {{ q.period|label('quota_period')|lower }}: {{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}">
+                    <circle class="ring-track" cx="40" cy="40" r="32"/>
+                    {% if pct is not null %}<circle class="ring-fill ring-{{ pct >= 90 ? 'bad' : (pct >= 75 ? 'warn' : 'ok') }}" cx="40" cy="40" r="32" pathLength="100" stroke-dasharray="{{ max(0.5, pct)|round(1) }} 100" transform="rotate(-90 40 40)"/>{% endif %}
+                    <text class="ring-text" x="40" y="45" text-anchor="middle">{{ pct is null ? 'no limit' : pct|round ~ '%' }}</text>
+                </svg>
+                <span><span class="quota-name">{{ q.metric|label('quota_metric') }}</span>
+                    <span class="quota-period">{{ q.period|label('quota_period') }} ({{ time_zone_abbreviation() }})</span>
+                    <span class="quota-used">{{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}</span></span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="scroll"><table>
+            <thead><tr><th scope="col">Admitted work</th><th scope="col">Period</th><th scope="col" class="num">Used</th><th scope="col" class="num">Quota</th></tr></thead>
+            <tbody>{% for q in limits.quotas %}<tr><td>{{ q.metric|label('quota_metric') }}</td><td>{{ q.period|label('quota_period') }}</td><td class="num">{{ q.used|number_format }}</td><td class="num">{{ q.limit is null ? '—' : q.limit|number_format }}</td></tr>{% endfor %}</tbody>
+        </table></div>
+        <p class="muted small">Quotas count work as it is admitted (jobs created, addresses submitted, recipients accepted); usage counts work done. A request over a quota is refused with HTTP 429 and the problem type quota-exceeded, which names the quota, its limit, the amount used and when it resets.</p>
+    </section>
+    <section class="card card-flush" aria-labelledby="limits-h">
+        <div class="card-head"><h2 id="limits-h">Limits</h2></div>
+        <div class="scroll"><table>
+            <thead><tr><th scope="col">Limit</th><th scope="col" class="num">Effective</th></tr></thead>
+            <tbody>{% for l in limits.limits %}<tr><td>{{ l.column|label('limit') }}</td><td class="num">{{ l.effective ?? 'not limited' }}</td></tr>{% endfor %}</tbody>
+        </table></div>
+    </section>
+</div>
+
+<section aria-labelledby="custom-h">
+    <h2 id="custom-h">A period of your choice</h2>
+    <form method="get" class="filters" aria-label="Custom period">
+        <label>From <input type="date" name="from" value="{{ range.from }}"></label><label>to (exclusive) <input type="date" name="to" value="{{ range.to }}"></label>
+        <button type="submit">Show period</button>
+    </form>
+    {% if custom %}
+    <section class="card" aria-labelledby="custom-result-h">
+        <h3 id="custom-result-h">{{ custom.period.label }}</h3>
+        <dl class="facts facts-2">
+            <div><dt>Validation addresses processed</dt><dd class="lg">{{ custom.totals.validation_address.quantity|number_format }}</dd></div>
+            <div><dt>Messages submitted</dt><dd class="lg">{{ custom.totals.message_submitted.quantity|number_format }}</dd></div>
+        </dl>
+        {% if custom.daily is not empty %}<div class="scroll"><table><thead><tr><th scope="col">Day ({{ time_zone_abbreviation() }})</th><th scope="col" class="num">Validation addresses</th><th scope="col" class="num">Messages submitted</th></tr></thead>
+        <tbody>{% for d in custom.daily %}<tr><td>{{ d.day }}</td><td class="num">{{ d.validation_address|number_format }}</td><td class="num">{{ d.message_submitted|number_format }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    </section>
+    {% endif %}
+</section>
 
 {% if statements is not empty %}
-<h2>Billing statements</h2>
-<table><thead><tr><th scope="col">Period</th><th scope="col">Status</th><th scope="col">Totals</th></tr></thead>
-<tbody>{% for s in statements %}<tr><td>{{ s.period_start }} – {{ s.period_end }} (exclusive)</td><td>{{ s.status|label('statement_status') }}</td><td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>{% endfor %}</tbody></table>
+<section class="card card-flush" aria-labelledby="bill-h">
+    <div class="card-head"><h2 id="bill-h">Billing statements</h2></div>
+    <div class="scroll"><table><thead><tr><th scope="col">Period</th><th scope="col">Status</th><th scope="col">Totals</th></tr></thead>
+    <tbody>{% for s in statements %}<tr><td>{{ s.period_start }} – {{ s.period_end }} (exclusive)</td><td>{{ s.status|label('statement_status') }}</td><td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>{% endfor %}</tbody></table></div>
+</section>
 {% endif %}
 
-<h2>By month (last 12 months)</h2>
-{% if usage.months is empty %}<p class="empty">No usage recorded yet.</p>{% else %}
-<table id="usage-months">
-    <thead><tr><th scope="col">Month</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
-    <tbody>{% for m in usage.months %}<tr><td>{{ m.month }}</td><td class="num">{{ (m.validation_addresses ?? 0)|number_format }}</td><td class="num">{{ (m.messages_submitted ?? 0)|number_format }}</td></tr>{% endfor %}</tbody>
-</table>
-{% endif %}
-<h2>Usage records</h2>
-<form method="get" class="filters" role="search" aria-label="Filter usage records">
-    {{ ui.select('type', 'Type', label_options('usage_type'), filters.type) }}
-    <button type="submit">Apply</button>
-</form>
-{% if usage.records.rows is empty %}<p class="empty">No usage records match.</p>{% else %}
-<table id="usage-records">
-    <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Type</th><th scope="col" class="num">Quantity</th><th scope="col">For</th></tr></thead>
-    <tbody>{% for u in usage.records.rows %}
-        <tr><td>{{ u.occurred_at|ts }}</td><td>{{ u.usage_type|label('usage_type') }}</td><td class="num">{{ u.quantity|number_format }}</td>
-            <td>{% if u.reference_type == 'validation_job' %}<a href="{{ path('dashboard_client_validation_job', {clientId: client.id.toRfc4122, jobId: u.reference_id}) }}">Validation job</a>{% elseif u.reference_type == 'send_job' %}<a href="{{ path('dashboard_client_send_job', {clientId: client.id.toRfc4122, jobId: u.reference_id}) }}">Send job</a>{% elseif u.reference_type == 'message' %}<a href="{{ path('dashboard_client_message', {clientId: client.id.toRfc4122, messageId: u.reference_id}) }}">Message</a>{% else %}{{ u.reference_type }}{% endif %}</td></tr>
-    {% endfor %}</tbody>
-</table>
-{% endif %}
-{{ ui.pager(usage.records, 'records') }}
+<section class="card card-flush" aria-labelledby="months-h">
+    <div class="card-head"><h2 id="months-h">By month (last 12 months)</h2></div>
+    {% if usage.months is empty %}<p class="empty">No usage recorded yet.</p>{% else %}
+    <div class="scroll">
+    <table id="usage-months">
+        <thead><tr><th scope="col">Month</th><th scope="col" class="num">Validation addresses processed</th><th scope="col" class="num">Messages submitted</th></tr></thead>
+        <tbody>{% for m in usage.months %}<tr><td>{{ m.month }}</td><td class="num">{{ (m.validation_addresses ?? 0)|number_format }}</td><td class="num">{{ (m.messages_submitted ?? 0)|number_format }}</td></tr>{% endfor %}</tbody>
+    </table>
+    </div>
+    {% endif %}
+</section>
+
+<section aria-labelledby="records-h">
+    <h2 id="records-h">Usage records</h2>
+    <form method="get" class="filters" role="search" aria-label="Filter usage records">
+        {{ ui.select('type', 'Type', label_options('usage_type'), filters.type) }}
+        <button type="submit">Apply</button>
+    </form>
+    <div class="card card-flush">
+        {% if usage.records.rows is empty %}<p class="empty">No usage records match.</p>{% else %}
+        <div class="scroll">
+        <table id="usage-records">
+            <thead><tr><th scope="col">{{ ui.sort(listing, 'occurred', 'Time') }}</th><th scope="col">Type</th><th scope="col" class="num">Quantity</th><th scope="col">For</th></tr></thead>
+            <tbody>{% for u in usage.records.rows %}
+                <tr><td>{{ u.occurred_at|ts }}</td><td>{{ u.usage_type|label('usage_type') }}</td><td class="num">{{ u.quantity|number_format }}</td>
+                    <td>{% if u.reference_type == 'validation_job' %}<a href="{{ path('dashboard_client_validation_job', {clientId: cid, jobId: u.reference_id}) }}">Validation job</a>{% elseif u.reference_type == 'send_job' %}<a href="{{ path('dashboard_client_send_job', {clientId: cid, jobId: u.reference_id}) }}">Send job</a>{% elseif u.reference_type == 'message' %}<a href="{{ path('dashboard_client_message', {clientId: cid, messageId: u.reference_id}) }}">Message</a>{% else %}{{ u.reference_type }}{% endif %}</td></tr>
+            {% endfor %}</tbody>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+    {{ ui.pager(usage.records, 'records') }}
+</section>
 <p class="muted">Usage is recorded for billing; pricing and payment happen outside Smarthost.</p>
 {% endblock %}

@@ -1,9 +1,12 @@
 {% set c = host.value.config ?? {} %}
+<section class="card" aria-labelledby="wi-h">
+<h2 id="wi-h">Web identity</h2>
 <p>The address of this dashboard and of the client API, and the administrator's mailbox.</p>
-<table class="kv dense"><tbody>
-<tr><th scope="row">Public web host name</th><td><code>{{ c.PROXY_SERVER_NAME ?? '?' }}</code> — needs an A record pointing at this server, and the HTTPS certificate is for this name.</td></tr>
-<tr><th scope="row">Base URL</th><td><code>{{ c.SMARTHOST_PUBLIC_BASE_URL ?? '?' }}</code> — used in sign-in links, tracking links and re-permission links. Always <code>https://</code> + the host name.</td></tr>
-<tr><th scope="row">Administrator</th><td><code>{{ c.APP_ADMIN_EMAIL ?? '?' }}</code> — always gets the ADMIN role and receives sign-in links.</td></tr>
-</tbody></table>
+<dl class="rows">
+<dt>Public web host name</dt><dd><code>{{ c.PROXY_SERVER_NAME ?? '?' }}</code> — needs an A record pointing at this server, and the HTTPS certificate is for this name.</dd>
+<dt>Base URL</dt><dd><code>{{ c.SMARTHOST_PUBLIC_BASE_URL ?? '?' }}</code> — used in sign-in links, tracking links and re-permission links. Always <code>https://</code> + the host name.</dd>
+<dt>Administrator</dt><dd><code>{{ c.APP_ADMIN_EMAIL ?? '?' }}</code> — always gets the ADMIN role and receives sign-in links.</dd>
+</dl>
 <p><strong>To change them:</strong> edit <code>infra/.env</code> on the server as the catto-mail user, then run <code>infra/bin/smarthostctl prod check</code> and <code>infra/bin/smarthostctl prod recreate</code>.
 The web application cannot change server configuration itself (on purpose).</p>
+</section>

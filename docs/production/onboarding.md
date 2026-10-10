@@ -3,8 +3,8 @@
 Specification 2.10 (Phase 9, `saas_operations`). This is how an operator takes on, limits,
 watches, bills and, if necessary, stops a client. Commands are shown as production console
 commands (`smarthostctl prod console …`; in development `smarthostctl console …`). Every
-action also has a dashboard form under Operator › Clients › *client*, Operator › Alerts and
-Operator › Usage.
+action also has a dashboard form under Clients › Clients › *client*, Clients › Abuse & reputation and
+Clients › Usage & billing.
 
 Public self-service onboarding is **disabled** (`APP_PUBLIC_ONBOARDING_ENABLED=false`), and no
 public registration route exists. Every client is created and approved by an operator. See
@@ -45,7 +45,7 @@ Before approval:
 - [ ] **Client users invited**, with the client role each needs (admin or viewer).
 - [ ] **API key issued** with a name and, preferably, an expiry. The secret is shown once.
 - [ ] **Approval** with a reason (section 2).
-- [ ] **First week:** watch Operator › Alerts and the client's reputation figures; seed-test
+- [ ] **First week:** watch Clients › Abuse & reputation and the client's reputation figures; seed-test
       first sends where possible.
 
 The client's own guide is public at `https://<host>/docs/api` (the integration guide and the
@@ -110,7 +110,8 @@ smarthost:client:limits <id> --clear send_recipients_per_day --operator <you> --
 How they behave:
 
 - Empty means no client-specific limit; the ceiling still applies.
-- Quotas use UTC days and months.
+- Quotas, usage summaries and billing statements use the calendar days and months of the
+  installation's time zone (`APP_TIMEZONE`, Africa/Johannesburg by default).
 - A refused request is `429 quota-exceeded` with `Retry-After` (seconds until the period
   resets) and the client's own figures. Concurrent requests cannot exceed a quota together.
 - Lowering a limit below current usage refuses new work until the period resets; nothing
@@ -124,7 +125,7 @@ smarthost:api-key:list <id>
 smarthost:api-key:revoke <key-id>
 ```
 
-- Client admins manage their own keys in the dashboard (Client › API keys). Operators with
+- Client admins manage their own keys in the dashboard (in the client workspace: Settings › API keys). Operators with
   `PLATFORM.CLIENT_KEY.MANAGE` manage any client's keys.
 - The secret is shown once, never stored, and cannot be recovered.
 - Rotation: create a new key, deploy it, confirm its *last used* time, then revoke the old one.
@@ -155,7 +156,7 @@ How alerts work:
 1. Look at the client's page (reputation, recent send jobs, bounce and complaint details).
 2. Decide: no action, contact the client, throttle or suspend (section 2, with the alert in
    the reason).
-3. Acknowledge with what you did: Operator › Alerts, or
+3. Acknowledge with what you did: Clients › Abuse & reputation, or
    `smarthost:reputation acknowledge <alert-id> --operator <you> --note "…"`.
 
 The default thresholds are starting points. Calibrate them on real traffic.
@@ -164,7 +165,7 @@ The default thresholds are starting points. Calibrate them on real traffic.
 
 ```sh
 smarthost:usage:summary --period current_month              # every client
-smarthost:usage:summary --client <id> --month 2026-09     # daily figures: Operator › Usage › client
+smarthost:usage:summary --client <id> --month 2026-09     # daily figures: Clients › Usage & billing › client
 smarthost:usage:reconcile --period previous_month           # exit 1 when inconsistent
 smarthost:usage:export <id> --period previous_month --format csv --operator <you> > usage.csv
 smarthost:billing:statement prepare --period previous_month --operator <you>

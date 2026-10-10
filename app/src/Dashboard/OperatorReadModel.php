@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Dashboard;
 
+use App\Util\InstallationTime;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -50,6 +51,7 @@ final class OperatorReadModel
     public function __construct(
         private readonly Connection $connection,
         private readonly KeysetQuery $keyset,
+        private readonly InstallationTime $time,
     ) {
     }
 
@@ -114,8 +116,10 @@ final class OperatorReadModel
      *
      * @return list<array<string, mixed>>
      */
-    public function rates(): array
+    public function rates(?\DateTimeImmutable $since = null): array
     {
+        $since ??= new \DateTimeImmutable(\sprintf('-%d days', self::RATE_WINDOW_DAYS));
+
         return $this->connection->fetchAllAssociative(<<<'SQL'
             SELECT c.id::text AS client_id, c.company_name, c.status AS client_status, t.*,
                    round(100.0 * t.hard_bounced / NULLIF(t.reached_postfix, 0), 2) AS hard_bounce_rate,
@@ -135,10 +139,200 @@ final class OperatorReadModel
                            + COALESCE((summary_counts_json->>'outcome_unknown')::bigint, 0) + COALESCE((summary_counts_json->>'remote_accepted')::bigint, 0)
                            + COALESCE((summary_counts_json->>'soft_bounced')::bigint, 0) + COALESCE((summary_counts_json->>'hard_bounced')::bigint, 0)
                            + COALESCE((summary_counts_json->>'complained')::bigint, 0)), 0) AS reached_postfix
-                  FROM send_jobs sj WHERE sj.created_at >= now() - make_interval(days => ?) GROUP BY sj.client_id
+                  FROM send_jobs sj WHERE sj.created_at >= ? GROUP BY sj.client_id
               ) t JOIN clients c ON c.id = t.client_id
              ORDER BY hard_bounce_rate DESC NULLS LAST, complaint_rate DESC NULLS LAST, c.company_name
-            SQL, [self::RATE_WINDOW_DAYS]);
+            SQL, [$since->format(\DATE_ATOM)]);
+    }
+
+    /**
+     * The operator overview page's current-state figures in one statement (the page has a
+     * query budget; overview() above serves `smarthost:ops:status` with the same signals).
+     *
+     * @return array<string, mixed>
+     */
+    public function overviewSnapshot(): array
+    {
+        $r = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT v.*, s.*,
+                   (SELECT count(*) FROM validation_jobs WHERE status IN ('queued', 'processing')) AS validation_active_jobs,
+                   (SELECT min(submitted_at) FROM validation_jobs WHERE status IN ('queued', 'processing')) AS validation_oldest_active_job,
+                   (SELECT max(va.checked_at) FROM validation_addresses va
+                     WHERE va.job_id IN (SELECT id FROM validation_jobs WHERE status IN ('queued', 'processing'))) AS validation_last_result,
+                   (SELECT max(completed_at) FROM validation_jobs WHERE status = 'completed') AS validation_last_completed,
+                   (SELECT jsonb_object_agg(k, n) FROM (SELECT k, sum(v::bigint) AS n FROM send_jobs sj, jsonb_each_text(sj.summary_counts_json) AS x(k, v) GROUP BY k) t) AS statuses,
+                   (SELECT jsonb_agg(jsonb_build_object('source', source, 'updated_at', updated_at) ORDER BY source) FROM delivery_ingest_cursors) AS ingest,
+                   (SELECT jsonb_object_agg(reason, n) FROM (SELECT reason, count(*) AS n FROM suppressions
+                     WHERE lifted_at IS NULL AND (expires_at IS NULL OR expires_at > now()) GROUP BY reason) t) AS suppressions,
+                   (SELECT count(*) FROM suppressions WHERE client_id IS NULL AND lifted_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS global_suppressions,
+                   (SELECT jsonb_object_agg(status, n) FROM (SELECT status, count(*) AS n FROM unmatched_dsns
+                     WHERE status IN ('open', 'match_requested') GROUP BY status) t) AS unmatched_dsns,
+                   (SELECT count(*) FROM webhook_events WHERE fanned_out_at IS NULL) AS webhook_events_awaiting_fanout,
+                   (SELECT jsonb_object_agg(k, n) FROM (
+                        SELECT CASE WHEN attempt_count > 0 THEN 'retrying' ELSE 'pending' END AS k, count(*) AS n FROM webhook_deliveries WHERE status = 'pending' GROUP BY 1
+                        UNION ALL
+                        SELECT status, count(*) FROM webhook_deliveries WHERE status <> 'pending' AND created_at > now() - interval '24 hours' GROUP BY 1) t) AS webhook_deliveries,
+                   (SELECT count(*) FROM webhook_worker_heartbeats WHERE stopped_at IS NULL AND last_seen_at > now() - interval '2 minutes') AS webhook_workers,
+                   (SELECT jsonb_object_agg(status, n) FROM (SELECT status, count(*) AS n FROM clients GROUP BY status) t) AS clients,
+                   (SELECT jsonb_object_agg(severity, n) FROM (SELECT severity, count(*) AS n FROM client_alerts WHERE resolved_at IS NULL GROUP BY severity) t) AS alerts,
+                   (SELECT company_name FROM clients WHERE status = 'pending_approval' ORDER BY status_changed_at LIMIT 1) AS first_pending_client
+              FROM (SELECT count(*) FILTER (WHERE processing_state = 'pending') AS pending,
+                           count(*) FILTER (WHERE processing_state = 'retry_scheduled') AS retry_scheduled,
+                           count(*) FILTER (WHERE processing_state = 'claimed' AND lease_expires_at > now()) AS claimed,
+                           count(*) FILTER (WHERE processing_state = 'claimed' AND lease_expires_at <= now()) AS expired_leases,
+                           count(DISTINCT claimed_by) FILTER (WHERE processing_state = 'claimed' AND lease_expires_at > now()) AS validation_workers
+                      FROM validation_addresses WHERE processing_state <> 'done') v,
+                   (SELECT count(*) FILTER (WHERE status = 'queued') AS queued_jobs,
+                           count(*) FILTER (WHERE status = 'processing') AS processing_jobs,
+                           count(*) FILTER (WHERE status = 'dispatched') AS dispatched_jobs,
+                           count(*) FILTER (WHERE status IN ('queued', 'processing') AND lease_expires_at > now()) AS leased_jobs,
+                           count(DISTINCT claimed_by) FILTER (WHERE status IN ('queued', 'processing') AND lease_expires_at > now()) AS delivery_workers,
+                           min(queued_at) FILTER (WHERE status IN ('queued', 'processing')) AS oldest_queued
+                      FROM send_jobs WHERE status IN ('queued', 'processing', 'dispatched')) s
+            SQL) ?: [];
+        $json = static fn (string $key): array => \is_string($r[$key] ?? null) ? (json_decode($r[$key], true) ?: []) : [];
+        $ints = static fn (string $key): array => array_map('intval', $json($key));
+
+        return [
+            'validation' => [
+                'active_jobs' => (int) ($r['validation_active_jobs'] ?? 0), 'oldest_active_job' => $r['validation_oldest_active_job'] ?? null,
+                'pending' => (int) ($r['pending'] ?? 0), 'retry_scheduled' => (int) ($r['retry_scheduled'] ?? 0),
+                'claimed' => (int) ($r['claimed'] ?? 0), 'expired_leases' => (int) ($r['expired_leases'] ?? 0),
+                'active_workers' => (int) ($r['validation_workers'] ?? 0),
+                'last_result' => $r['validation_last_result'] ?? null, 'last_completed' => $r['validation_last_completed'] ?? null,
+            ],
+            'sending' => [
+                'queued_jobs' => (int) ($r['queued_jobs'] ?? 0), 'processing_jobs' => (int) ($r['processing_jobs'] ?? 0),
+                'dispatched_jobs' => (int) ($r['dispatched_jobs'] ?? 0), 'leased_jobs' => (int) ($r['leased_jobs'] ?? 0),
+                'active_workers' => (int) ($r['delivery_workers'] ?? 0), 'oldest_queued' => $r['oldest_queued'] ?? null,
+            ],
+            'statuses' => $ints('statuses'),
+            'ingest' => $json('ingest'),
+            'suppressions' => $ints('suppressions'),
+            'global_suppressions' => (int) ($r['global_suppressions'] ?? 0),
+            'unmatched_dsns' => $ints('unmatched_dsns'),
+            'webhooks' => ['events_awaiting_fanout' => (int) ($r['webhook_events_awaiting_fanout'] ?? 0),
+                'deliveries' => $ints('webhook_deliveries'), 'workers' => (int) ($r['webhook_workers'] ?? 0)],
+            'clients' => $ints('clients'),
+            'alerts' => $ints('alerts'),
+            'first_pending_client' => $r['first_pending_client'] ?? null,
+        ];
+    }
+
+    /**
+     * Figures of the overview period from the per-job counters the delivery daemon and the
+     * validator maintain (no message or address scan): messages per bucket by current status
+     * for this and the previous period, send jobs with their hard-bounce rate, validation
+     * results, and the per-client rates. Jobs count in the bucket in which they were created.
+     *
+     * @return array<string, mixed>
+     */
+    public function trends(OverviewPeriod $p): array
+    {
+        $sums = TrendCharts::countersSql();
+        $series = TrendCharts::bucketise($this->connection->fetchAllAssociative(
+            "SELECT to_char(date_trunc(CAST(? AS text), created_at AT TIME ZONE CAST(? AS text)), 'YYYY-MM-DD HH24:00') AS bucket, $sums
+               FROM send_jobs WHERE created_at >= ? GROUP BY 1",
+            [$p->unit, $p->zone->getName(), $p->previousSince->format(\DATE_ATOM)]), $p);
+
+        $jobs = $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT sj.id::text AS id, sj.client_id::text AS client_id, c.company_name, sj.external_reference, sj.created_at,
+                   COALESCE((sj.summary_counts_json->>'hard_bounced')::bigint, 0) AS hard_bounced,
+                   COALESCE((sj.summary_counts_json->>'submitted')::bigint, 0) + COALESCE((sj.summary_counts_json->>'deferred')::bigint, 0)
+                   + COALESCE((sj.summary_counts_json->>'outcome_unknown')::bigint, 0) + COALESCE((sj.summary_counts_json->>'remote_accepted')::bigint, 0)
+                   + COALESCE((sj.summary_counts_json->>'soft_bounced')::bigint, 0) + COALESCE((sj.summary_counts_json->>'hard_bounced')::bigint, 0)
+                   + COALESCE((sj.summary_counts_json->>'complained')::bigint, 0) AS reached_postfix
+              FROM send_jobs sj JOIN clients c ON c.id = sj.client_id
+             WHERE sj.created_at >= ? ORDER BY sj.created_at DESC LIMIT 500
+            SQL, [$p->since->format(\DATE_ATOM)]);
+
+        $validation = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT count(*) AS jobs, COALESCE(sum(processed_count), 0) AS checked,
+                   (SELECT jsonb_object_agg(k, n) FROM (SELECT k, sum(v::bigint) AS n FROM validation_jobs vj, jsonb_each_text(vj.classification_counts_json) AS x(k, v)
+                     WHERE vj.submitted_at >= ? GROUP BY k) t) AS classes
+              FROM validation_jobs WHERE submitted_at >= ?
+            SQL, [$p->since->format(\DATE_ATOM), $p->since->format(\DATE_ATOM)]) ?: [];
+
+        return $series + [
+            'jobs' => array_values(array_filter($jobs, static fn (array $j): bool => (int) $j['reached_postfix'] > 0)),
+            'validation' => ['jobs' => (int) ($validation['jobs'] ?? 0), 'checked' => (int) ($validation['checked'] ?? 0),
+                'classes' => array_map('intval', \is_string($validation['classes'] ?? null) ? (json_decode($validation['classes'], true) ?: []) : [])],
+            'rates' => $this->rates($p->since),
+        ];
+    }
+
+    /**
+     * Messages submitted to Postfix per minute, summarised per bucket of the period: the typical
+     * rate (the median of the minutes with a submission), the peak minute and the total. Reads
+     * only the submitted_to_postfix events of the period (message_events_submitted_idx).
+     *
+     * @return array<string, array{typical: float, peak: int, total: int}> bucket key => figures (buckets without submissions are absent)
+     */
+    public function submissionRate(OverviewPeriod $p): array
+    {
+        $rows = $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT to_char(date_trunc(CAST(? AS text), m AT TIME ZONE CAST(? AS text)), 'YYYY-MM-DD HH24:00') AS bucket,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY n) AS typical, max(n) AS peak, sum(n) AS total
+              FROM (SELECT date_trunc('minute', occurred_at) AS m, count(*) AS n
+                      FROM message_events WHERE event_type = 'submitted_to_postfix' AND occurred_at >= ?
+                     GROUP BY 1) per_minute
+             GROUP BY 1
+            SQL, [$p->unit, $p->zone->getName(), $p->since->format(\DATE_ATOM)]);
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(string) $r['bucket']] = ['typical' => round((float) $r['typical'], 1), 'peak' => (int) $r['peak'], 'total' => (int) $r['total']];
+        }
+
+        return $out;
+    }
+
+    /**
+     * The newest audit entries for the overview's activity list.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function recentActivity(int $limit = 5): array
+    {
+        return $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT a.actor_type, a.actor_id, a.action, a.target_type, a.occurred_at, u.email AS actor_email
+              FROM audit_log a LEFT JOIN users u ON a.actor_type = 'user' AND u.id::text = a.actor_id
+             ORDER BY a.occurred_at DESC LIMIT ?
+            SQL, [$limit], [\Doctrine\DBAL\ParameterType::INTEGER]);
+    }
+
+    /**
+     * Open reputation alerts, critical first, for the overview's attention list.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function openAlerts(int $limit = 3): array
+    {
+        return $this->connection->fetchAllAssociative(<<<'SQL'
+            SELECT a.client_id::text AS client_id, c.company_name, a.metric, a.severity, a.value, a.threshold, a.window_hours
+              FROM client_alerts a JOIN clients c ON c.id = a.client_id
+             WHERE a.resolved_at IS NULL
+             ORDER BY a.severity = 'critical' DESC, a.last_observed_at DESC LIMIT ?
+            SQL, [$limit], [\Doctrine\DBAL\ParameterType::INTEGER]);
+    }
+
+    /**
+     * Counts behind the navigation badges (one cheap statement per operator page).
+     *
+     * @return array{open_alerts: int, pending_clients: int, open_dsns: int, failed_webhooks: int, warn_checks: int, fail_checks: int}
+     */
+    public function navCounts(): array
+    {
+        $r = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT (SELECT count(*) FROM client_alerts WHERE resolved_at IS NULL) AS open_alerts,
+                   (SELECT count(*) FROM clients WHERE status = 'pending_approval') AS pending_clients,
+                   (SELECT count(*) FROM unmatched_dsns WHERE status = 'open') AS open_dsns,
+                   (SELECT count(*) FILTER (WHERE status = 'failed') FROM webhook_deliveries
+                     WHERE status <> 'pending' AND created_at > now() - interval '24 hours') AS failed_webhooks,
+                   (SELECT count(*) FROM system_checks WHERE result = 'warn') AS warn_checks,
+                   (SELECT count(*) FROM system_checks WHERE result = 'fail') AS fail_checks
+            SQL) ?: [];
+
+        return array_map('intval', $r + ['open_alerts' => 0, 'pending_clients' => 0, 'open_dsns' => 0, 'failed_webhooks' => 0, 'warn_checks' => 0, 'fail_checks' => 0]);
     }
 
     /**
@@ -394,8 +588,10 @@ final class OperatorReadModel
         foreach (['from' => '>=', 'to' => '<'] as $key => $op) {
             $day = $filters[$key] ?? '';
             if (1 === preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) && false !== \DateTimeImmutable::createFromFormat('!Y-m-d', $day)) {
-                $where[] = "a.occurred_at $op CAST(? AS date)".('to' === $key ? ' + 1' : '');
+                // Whole days in the dashboard's time zone, as the page shows the times.
+                $where[] = "a.occurred_at $op ((CAST(? AS date)".('to' === $key ? ' + 1' : '').")::timestamp AT TIME ZONE CAST(? AS text))";
                 $params[] = $day;
+                $params[] = $this->time->name();
             }
         }
         $page = $this->keyset->page(<<<'SQL'

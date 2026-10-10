@@ -1,0 +1,43 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% import 'dashboard/_icons.html.twig' as icon %}
+{% block title %}Search{% endblock %}
+{% block body %}
+{% set total = results|reduce((carry, s) => carry + s.rows|length, 0) %}
+<div class="pagehead">
+    <div>
+        <h1>Search</h1>
+        <p class="sub">{% if client is defined %}Within {{ client.companyName }}: send and validation jobs, messages and suppressions.{% else %}Clients, send and validation jobs, messages, suppressions, sending domains and users.{% endif %}
+            Search by an identifier, an email address, a domain, an external reference or a name.</p>
+    </div>
+</div>
+<form method="get" class="card searchbox" role="search">
+    <label class="sr" for="search-page-q">Search</label>
+    <span class="searchbox-icon" aria-hidden="true">{{ icon.i('search', 20) }}</span>
+    <input id="search-page-q" type="search" name="q" value="{{ q }}" minlength="2" maxlength="200" placeholder="An ID, an address, a domain, a reference or a name" autofocus>
+    <button type="submit">Search</button>
+</form>
+{% if q|length < 2 %}
+    <p class="empty">Type at least two characters.</p>
+{% elseif results is empty %}
+    <p class="empty">Nothing matches “{{ q }}”.</p>
+{% else %}
+    <p class="muted">{{ total }} result{{ total == 1 ? '' : 's' }} for “{{ q }}”{% if total >= 20 %} (at most 20 of each kind){% endif %}.</p>
+    <div class="results">
+    {% for s in results %}
+        <section class="card card-flush" aria-labelledby="res-{{ s.key }}">
+            <div class="card-head"><h2 id="res-{{ s.key }}">{{ s.title }}</h2><span class="count count-dark">{{ s.rows|length }}</span></div>
+            <ul class="result-list">
+                {% for r in s.rows %}
+                <li><a href="{{ r.href }}">
+                    <span class="result-text"><span class="result-title">{{ r.title }}</span><span class="result-meta">{{ r.meta }}{% if r.at is defined and r.at %} · {{ r.at|ts }}{% endif %}</span></span>
+                    {% if r.status %}{{ ui.status(r.status[0], r.status[1]) }}{% endif %}
+                    {{ icon.i('chevron', 16) }}
+                </a></li>
+                {% endfor %}
+            </ul>
+        </section>
+    {% endfor %}
+    </div>
+{% endif %}
+{% endblock %}

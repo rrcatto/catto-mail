@@ -53,8 +53,8 @@ final class MigrationRollbackTest extends TestCase
     public function testEachMigrationRollsBackIndividually(): void
     {
         self::assertTrue(self::console('doctrine:migrations:migrate')->isSuccessful());
-        $expected = [48, 39, 31, 30, 30, 29, 25, 25, 24, 24, 19, 17, 9, 5, 0];
-        $versions = ['DoctrineMigrations\Version20261010000100', 'DoctrineMigrations\Version20261009000100', 'DoctrineMigrations\Version20261008000100', 'DoctrineMigrations\Version20261007000200', 'DoctrineMigrations\Version20261007000100', 'DoctrineMigrations\Version20261006000200', 'DoctrineMigrations\Version20261006000100', 'DoctrineMigrations\Version20261005000100', 'DoctrineMigrations\Version20261004000100', 'DoctrineMigrations\Version20261003000500', 'DoctrineMigrations\Version20261003000400',
+        $expected = [48, 48, 39, 31, 30, 30, 29, 25, 25, 24, 24, 19, 17, 9, 5, 0];
+        $versions = ['DoctrineMigrations\Version20261011000100', 'DoctrineMigrations\Version20261010000100', 'DoctrineMigrations\Version20261009000100', 'DoctrineMigrations\Version20261008000100', 'DoctrineMigrations\Version20261007000200', 'DoctrineMigrations\Version20261007000100', 'DoctrineMigrations\Version20261006000200', 'DoctrineMigrations\Version20261006000100', 'DoctrineMigrations\Version20261005000100', 'DoctrineMigrations\Version20261004000100', 'DoctrineMigrations\Version20261003000500', 'DoctrineMigrations\Version20261003000400',
             'DoctrineMigrations\Version20261003000300', 'DoctrineMigrations\Version20261003000200', 'DoctrineMigrations\Version20261003000100'];
         self::assertCount($expected[0], self::tables());
         foreach ($versions as $i => $version) {

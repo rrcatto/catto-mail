@@ -3,12 +3,12 @@
 <p>Webhooks tell a client system what happened, without it having to ask. The <strong>Catto-mail Webhook Worker</strong> (container <code>smarthost-webhook-worker</code>) sends them.</p>
 <ul>
 <li><strong>Events:</strong> <code>validation.completed</code>/<code>failed</code>, <code>send.completed</code>/<code>failed</code>, <code>message.hard_bounced</code>, <code>message.complained</code>, <code>repermission.responded</code>, and <code>webhook.test</code>.</li>
-<li><strong>Endpoints</strong> are managed by the client's admins (Client › Webhooks); each has its own signing secret and event list.</li>
+<li><strong>Endpoints</strong> are managed by the client's admins (client workspace: Settings › Webhooks); each has its own signing secret and event list.</li>
 <li><strong>Signed:</strong> every request carries <code>Smarthost-Signature</code> (HMAC-SHA256 with the endpoint secret over the timestamp and body). The receiver must verify it and reject old timestamps.</li>
 <li><strong>At least once:</strong> if the outcome of a request is unknown (timeout, restart) it is sent again; the receiver de-duplicates by <code>Smarthost-Event-Id</code>.</li>
 <li><strong>Retries:</strong> on timeouts, 408, 425, 429 and 5xx: after 1 minute, doubling up to 6 hours, 12 attempts (about a day); then <em>failed</em>. Other answers fail at once. Redirects are never followed.</li>
 <li><strong>Safety:</strong> only public addresses are contacted (no internal networks).</li>
 <li>If a webhook is missed, the client reconciles with the API.</li>
 </ul>
-<p>Watch them under Operator › Webhooks; test one in System setup › Webhook worker. Logs: <code>smarthostctl prod logs webhook</code>.</p>
+<p>Watch them under Mail flow › Webhooks; test one in System › System setup › Webhook worker. Logs: <code>smarthostctl prod logs webhook</code>.</p>
 {% endblock %}

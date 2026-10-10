@@ -3,27 +3,36 @@
 {% block title %}Sending domains{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
-<h1>Sending domains</h1>
-<p>A job may send only from a verified, enabled domain of this client. Verification publishes a DNS TXT record; DKIM signing needs an active DKIM key published by the operator.</p>
+<div class="pagehead">
+    <div>
+        <h1>Sending domains</h1>
+        <p class="sub">A job may send only from a verified, enabled domain of this client. Verification publishes a DNS TXT record; DKIM signing needs an active DKIM key published by the operator.</p>
+    </div>
+</div>
+{% if not client.mayCreateWork %}<p class="warn">This client is {{ client.status.value|label('client_status')|lower }}, so no new sending is accepted at the moment.</p>{% endif %}
 {% if domains is empty %}<p class="empty">No sending domains yet. An operator registers them.</p>{% else %}
-<table>
-    <thead><tr><th scope="col">Domain</th><th scope="col">Verification</th><th scope="col">Verification record</th><th scope="col">Last check</th><th scope="col">DKIM</th><th scope="col">Sending permitted</th><th scope="col">Action</th></tr></thead>
-    <tbody>
-    {% for d in domains %}
-        <tr>
-            <td>{{ d.domain }}</td>
-            <td>{{ ui.status(d.status, 'domain_status') }}{% if d.verified_at %}<br><small>since {{ d.verified_at|ts }}</small>{% endif %}</td>
-            <td>{% if d.status != 'verified' %}TXT at <code>{{ constant('App\\Domain\\SendingDomainService::TXT_PREFIX') }}{{ d.domain }}</code><br>value <code class="token">{{ constant('App\\Domain\\SendingDomainService::TXT_VALUE_PREFIX') }}{{ d.verification_token }}</code>{% else %}—{% endif %}</td>
-            <td>{{ d.last_checked_at|ts }}{% if d.last_check_error %}<br><small>{{ d.last_check_error }}</small>{% endif %}</td>
-            <td>{{ d.dkim_status|label('dkim_status') }}{% if d.dkim_selector %}<br><small>selector {{ d.dkim_selector }}</small>{% endif %}</td>
-            <td>{{ d.status == 'verified' and client.mayCreateWork ? 'Yes' : 'No' }}</td>
-            <td>{% if may_operate and d.status != 'disabled' %}
-                <form method="post" action="{{ path('dashboard_client_domain_verify', {clientId: cid, domainId: d.id}) }}">{{ ui.csrf() }}<button type="submit">Check DNS now</button></form>
-            {% else %}—{% endif %}</td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
+<section class="card card-flush" aria-labelledby="dom-h">
+    <div class="card-head"><h2 id="dom-h">Domains</h2><span class="muted small">{{ domains|length }} domain{{ domains|length == 1 ? '' : 's' }}</span></div>
+    <div class="scroll">
+    <table>
+        <thead><tr><th scope="col">Domain</th><th scope="col">Verification</th><th scope="col">Verification record</th><th scope="col">Last check</th><th scope="col">DKIM</th><th scope="col">Sending permitted</th><th scope="col">Action</th></tr></thead>
+        <tbody>
+        {% for d in domains %}
+            <tr>
+                <td><strong>{{ d.domain }}</strong></td>
+                <td>{{ ui.status(d.status, 'domain_status') }}{% if d.verified_at %}<br><small>since {{ d.verified_at|ts }}</small>{% endif %}</td>
+                <td>{% if d.status != 'verified' %}TXT at <code>{{ constant('App\\Domain\\SendingDomainService::TXT_PREFIX') }}{{ d.domain }}</code><br>value <code class="token">{{ constant('App\\Domain\\SendingDomainService::TXT_VALUE_PREFIX') }}{{ d.verification_token }}</code>{% else %}—{% endif %}</td>
+                <td>{{ d.last_checked_at|ts }}{% if d.last_check_error %}<br><small class="text-bad">{{ d.last_check_error }}</small>{% endif %}</td>
+                <td><span class="st st-dkim-{{ d.dkim_status }}">{{ d.dkim_status|label('dkim_status') }}</span>{% if d.dkim_selector %}<br><small>selector {{ d.dkim_selector }}</small>{% endif %}</td>
+                <td>{% if d.status == 'verified' and client.mayCreateWork %}<span class="st st-active">Yes</span>{% else %}<span class="st">No</span>{% endif %}</td>
+                <td>{% if may_operate and d.status != 'disabled' %}
+                    <form method="post" action="{{ path('dashboard_client_domain_verify', {clientId: cid, domainId: d.id}) }}">{{ ui.csrf() }}<button type="submit" class="secondary">Check DNS now</button></form>
+                {% else %}—{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</section>
 {% endif %}
-{% if not client.mayCreateWork %}<p class="muted">This client is {{ client.status.value|label('client_status')|lower }}, so no new sending is accepted at the moment.</p>{% endif %}
 {% endblock %}

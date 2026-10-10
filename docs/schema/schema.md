@@ -339,7 +339,8 @@ Other indexes:
   billing-period list, one open alert per client, metric and window (`client_alerts_open_uq`),
   the alert lists (`client_alerts_observed_idx`, `client_alerts_client_idx`) and the reputation
   evaluation's time window over bounce, complaint, deferral, outcome-unknown and suppression events
-  (`message_events_reputation_idx`, partial).
+  (`message_events_reputation_idx`, partial), and the dashboard's submissions per minute
+  (`message_events_submitted_idx`, partial on `submitted_to_postfix`).
 
 ## 5. Key table-level rules (enforced by CHECK)
 

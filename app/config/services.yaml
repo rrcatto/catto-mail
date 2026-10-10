@@ -81,6 +81,9 @@ services:
             $webhookEndpointLimit: '%app.client.webhook_endpoint_limit%'
             $sendingDomainLimit: '%app.client.sending_domain_limit%'
 
+    App\Util\InstallationTime:
+        arguments: ['%env(APP_TIMEZONE)%']
+
     App\Reputation\ReputationThresholds:
         factory: ['App\Reputation\ReputationThresholds', 'fromConfiguration']
         arguments:

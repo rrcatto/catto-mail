@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Dashboard;
 
 use App\Sending\AddressNormalizer;
+use App\Util\InstallationTime;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 
@@ -24,9 +25,6 @@ use Doctrine\DBAL\Connection;
  */
 final class ClientReadModel
 {
-    /** Window of the overview's engagement figures (they need message_events). */
-    public const ENGAGEMENT_WINDOW_DAYS = 30;
-
     public const VALIDATION_JOB_SORTS = [
         'submitted' => ['vj.submitted_at', 'timestamptz'],
         'total' => ['vj.total_addresses', 'integer'],
@@ -73,59 +71,55 @@ final class ClientReadModel
     public function __construct(
         private readonly Connection $connection,
         private readonly KeysetQuery $keyset,
+        private readonly InstallationTime $time,
     ) {
     }
 
-    /** @return array<string, mixed> */
-    public function overview(string $clientId): array
+    /**
+     * The client overview for a period: messages per bucket by current status against the
+     * previous period, validation results, engagement of the period's send jobs, sending
+     * domains, work in progress and the newest jobs. Every query carries the client id.
+     *
+     * @return array<string, mixed>
+     */
+    public function overview(string $clientId, OverviewPeriod $p): array
     {
         $c = $this->connection;
+        $since = $p->since->format(\DATE_ATOM);
+        $sums = TrendCharts::countersSql();
+        // Messages per bucket by current status, this period and the previous one (job counters, no message scan).
+        $series = TrendCharts::bucketise($c->fetchAllAssociative(
+            "SELECT to_char(date_trunc(CAST(? AS text), created_at AT TIME ZONE CAST(? AS text)), 'YYYY-MM-DD HH24:00') AS bucket, $sums
+               FROM send_jobs WHERE client_id = ? AND created_at >= ? GROUP BY 1",
+            [$p->unit, $p->zone->getName(), $clientId, $p->previousSince->format(\DATE_ATOM)]), $p);
         $validation = $c->fetchAssociative(<<<'SQL'
-            SELECT count(*) AS jobs,
-                   count(*) FILTER (WHERE status IN ('queued', 'processing')) AS active_jobs,
-                   COALESCE(sum(total_addresses), 0) AS addresses,
-                   COALESCE(sum(processed_count), 0) AS processed
-              FROM validation_jobs WHERE client_id = ?
-            SQL, [$clientId]);
-        $classifications = $c->fetchAllKeyValue(<<<'SQL'
-            SELECT k, sum(v::bigint) FROM validation_jobs vj, jsonb_each_text(vj.classification_counts_json) AS x(k, v)
-             WHERE vj.client_id = ? GROUP BY k ORDER BY k
-            SQL, [$clientId]);
-        $sending = $c->fetchAssociative(<<<'SQL'
-            SELECT count(*) AS jobs,
-                   count(*) FILTER (WHERE status IN ('collecting', 'queued', 'processing', 'dispatched')) AS active_jobs,
-                   COALESCE(sum(total_recipients), 0) AS recipients
-              FROM send_jobs WHERE client_id = ?
-            SQL, [$clientId]);
-        $statuses = $c->fetchAllKeyValue(<<<'SQL'
-            SELECT k, sum(v::bigint) FROM send_jobs sj, jsonb_each_text(sj.summary_counts_json) AS x(k, v)
-             WHERE sj.client_id = ? GROUP BY k
-            SQL, [$clientId]);
+            SELECT count(*) AS jobs, COALESCE(sum(total_addresses), 0) AS addresses, COALESCE(sum(processed_count), 0) AS checked,
+                   (SELECT count(*) FROM validation_jobs WHERE client_id = ? AND status IN ('queued', 'processing')) AS active_jobs,
+                   (SELECT count(*) FROM send_jobs WHERE client_id = ? AND status IN ('collecting', 'queued', 'processing', 'dispatched')) AS active_send_jobs,
+                   (SELECT jsonb_object_agg(k, n) FROM (SELECT k, sum(v::bigint) AS n FROM validation_jobs vj, jsonb_each_text(vj.classification_counts_json) AS x(k, v)
+                     WHERE vj.client_id = ? AND vj.submitted_at >= ? GROUP BY k) t) AS classes
+              FROM validation_jobs WHERE client_id = ? AND submitted_at >= ?
+            SQL, [$clientId, $clientId, $clientId, $since, $clientId, $since]) ?: [];
         $engagement = $c->fetchAssociative(<<<'SQL'
             SELECT count(*) FILTER (WHERE e.event_type = 'open_recorded') AS open_events,
                    count(DISTINCT e.message_id) FILTER (WHERE e.event_type = 'open_recorded') AS opened_messages,
                    count(*) FILTER (WHERE e.event_type = 'click_recorded') AS click_events,
                    count(DISTINCT e.message_id) FILTER (WHERE e.event_type = 'click_recorded') AS clicked_messages
               FROM send_jobs sj JOIN messages m ON m.send_job_id = sj.id JOIN message_events e ON e.message_id = m.id
-             WHERE sj.client_id = ? AND sj.created_at >= now() - make_interval(days => ?)
+             WHERE sj.client_id = ? AND sj.created_at >= ?
                AND e.event_type IN ('open_recorded', 'click_recorded')
-            SQL, [$clientId, self::ENGAGEMENT_WINDOW_DAYS]);
+            SQL, [$clientId, $since]);
         $domains = $c->fetchAllAssociative(
             'SELECT domain, status, dkim_status FROM sending_domains WHERE client_id = ? ORDER BY domain', [$clientId]);
-        $usage = $c->fetchAllKeyValue(<<<'SQL'
-            SELECT usage_type, sum(quantity) FROM usage_records
-             WHERE client_id = ? AND occurred_at >= date_trunc('month', now()) GROUP BY usage_type
-            SQL, [$clientId]);
 
         return [
-            'validation' => $validation,
-            'classifications' => array_map('intval', $classifications),
-            'sending' => $sending,
-            'statuses' => array_map('intval', $statuses),
+            'trends' => $series + ['validation' => ['jobs' => (int) ($validation['jobs'] ?? 0), 'checked' => (int) ($validation['checked'] ?? 0),
+                'classes' => array_map('intval', \is_string($validation['classes'] ?? null) ? (json_decode($validation['classes'], true) ?: []) : [])]],
+            'validation' => ['jobs' => (int) ($validation['jobs'] ?? 0), 'addresses' => (int) ($validation['addresses'] ?? 0),
+                'checked' => (int) ($validation['checked'] ?? 0), 'active_jobs' => (int) ($validation['active_jobs'] ?? 0)],
+            'active_send_jobs' => (int) ($validation['active_send_jobs'] ?? 0),
             'engagement' => $engagement,
-            'engagement_window_days' => self::ENGAGEMENT_WINDOW_DAYS,
             'domains' => $domains,
-            'usage_this_month' => array_map('intval', $usage),
             'recent_validation_jobs' => $this->validationJobs($clientId, [], Listing::first('submitted', 'desc', 5))['rows'],
             'recent_send_jobs' => $this->sendJobs($clientId, [], Listing::first('created', 'desc', 5))['rows'],
         ];
@@ -142,7 +136,7 @@ final class ClientReadModel
         $params = [$clientId];
         self::filterEquals($where, $params, 'vj.status', $filters['status'] ?? null);
         self::filterEquals($where, $params, 'vj.external_reference', $filters['external_reference'] ?? null);
-        self::filterRange($where, $params, 'vj.submitted_at', $filters);
+        $this->filterRange($where, $params, 'vj.submitted_at', $filters);
 
         return $this->keyset->page(<<<'SQL'
             vj.id::text AS id, vj.external_reference, vj.status, vj.submitted_at, vj.started_at, vj.completed_at,
@@ -218,7 +212,7 @@ final class ClientReadModel
         $params = [$clientId];
         self::filterEquals($where, $params, 'sj.status', $filters['status'] ?? null);
         self::filterEquals($where, $params, 'sj.external_reference', $filters['external_reference'] ?? null);
-        self::filterRange($where, $params, 'sj.created_at', $filters);
+        $this->filterRange($where, $params, 'sj.created_at', $filters);
 
         return $this->keyset->page(<<<'SQL'
             sj.id::text AS id, sj.external_reference, sj.message_class, sj.status, sj.created_at, sj.queued_at,
@@ -555,15 +549,16 @@ final class ClientReadModel
     /**
      * @param list<string>          $where
      * @param list<mixed>           $params
-     * @param array<string, string> $filters from/to as YYYY-MM-DD (UTC days, inclusive)
+     * @param array<string, string> $filters from/to as YYYY-MM-DD (days in the installation's time zone, inclusive)
      */
-    private static function filterRange(array &$where, array &$params, string $column, array $filters): void
+    private function filterRange(array &$where, array &$params, string $column, array $filters): void
     {
         foreach (['from' => '>=', 'to' => '<'] as $key => $op) {
             $day = $filters[$key] ?? '';
-            if (1 === preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) && false !== \DateTimeImmutable::createFromFormat('!Y-m-d', $day, new \DateTimeZone('UTC'))) {
-                $where[] = "$column $op CAST(? AS date)".('to' === $key ? " + 1" : '');
+            if (1 === preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) && false !== \DateTimeImmutable::createFromFormat('!Y-m-d', $day, $this->time->zone)) {
+                $where[] = "$column $op ((CAST(? AS date)".('to' === $key ? ' + 1' : '').")::timestamp AT TIME ZONE CAST(? AS text))";
                 $params[] = $day;
+                $params[] = $this->time->name();
             }
         }
     }

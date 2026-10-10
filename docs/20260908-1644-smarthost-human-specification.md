@@ -1465,7 +1465,7 @@ The installation-wide kill switch remains the Phase 8 delivery pause.
 - `usage_records` remains the only metering source: validation addresses per job, and one
   `message_submitted` unit per message accepted by Postfix (enforced unique).
 - Summaries cover the current day, the current month, the previous month and custom ranges
-  (UTC).
+  (calendar days of the installation's time zone, `APP_TIMEZONE`).
 - Reconciliation compares metered units with validation jobs and accepted messages and names
   every inconsistency.
 - Billing statements (draft → finalized → exported, or void) freeze an ended period's
@@ -1679,6 +1679,33 @@ Every dashboard change is a POST with a CSRF token. Dashboard responses carry a 
 Policy (same-origin scripts and styles only, with a per-request nonce for the import map; no CDN),
 refuse framing and are never cached; error pages are generic.
 
+## Dashboard layout (owner decision, version 0.2.2)
+
+One shell serves the operator console and the client workspaces and uses the full page width:
+
+- round area buttons on the left: Overview, Mail flow, Clients, System and Access in the operator
+  console; Overview, Sending, Validation, Settings and Usage in a client workspace; Help and the
+  workspace switch below them;
+- the current area's pages as pills at the top; on both overviews the pills choose the period
+  (24 hours, 7, 30 or 90 days);
+- at the top right: the search button, the delivery mode, *Stop sending* (a reason is required),
+  what needs attention and the account menu.
+
+Areas, pills and badges appear only where the user's permission keys allow. The operator Overview
+shows KPI cards against the previous period, send jobs by hard-bounce rate, the submission rate
+against the warm-up ceiling, mail flow per hour or day, workers and queues, what needs attention,
+per-client rates, validation results, component health, suppressions and recent activity, all from
+durable signals. The client Overview shows the same kind of figures for that client only. The
+global search finds clients, jobs, messages, suppressions, sending domains and users by an id, an
+address, a domain, an external reference or a name; in a client workspace it covers only that
+client.
+
+Charts use Chart.js, vendored in the application; the Outfit font is served by the application;
+the Content Security Policy allows no inline styles. The dashboard shows times in the
+installation's time zone (`APP_TIMEZONE`, default `Africa/Johannesburg`, SAST), and the overview
+buckets and the quota, usage and billing days and months follow it. Storage, the API, webhooks and
+exports keep UTC timestamps. Screenshots of every page are in `docs/screenshots/`.
+
 ## Dashboard sign-in and access control (specification 2.7)
 
 There are no passwords. At `/dashboard/login` a user enters an email address; if that address
@@ -1861,7 +1888,7 @@ secret.
 - The web application only records requests; it never runs host commands.
 
 **Setup wizard.**
-- Operator › System setup takes the administrator through 19 steps in dependency order: welcome,
+- System › System setup takes the administrator through 19 steps in dependency order: welcome,
   host, web identity, SMTP identity, DNS, TLS, DKIM, database, web application, validator,
   delivery daemon, Postfix, OpenDKIM, webhook worker, backups, seed test, bounce test, reboot test
   and production readiness.
@@ -1873,8 +1900,9 @@ secret.
 - Every check reports PASS, WARN, FAIL, SKIPPED or INFO, with a human explanation and a fix.
 - The history keeps requested runs, changes of result, and one scheduled result per check and
   day. Secrets are never stored.
-- System › Health shows every component, the delivery mode (HELD, LIVE, PAUSED, STOPPED), the
-  queues, the last backup and the certificates.
+- Mail flow › Delivery shows the delivery mode (HELD, LIVE, PAUSED, STOPPED) with its controls,
+  the delivery daemon, the submission rate, the Postfix queue, recent host requests and every
+  component; the last backup and the certificates are among the components and the diagnostics.
 
 **Emergency stop.**
 - "STOP SENDING EMAIL NOW" on every operator page needs `SYSTEM.DELIVERY.CONTROL` and a reason.
@@ -1891,7 +1919,7 @@ provider; port 80 is never opened. A daily timer renews and installs. A manual f
 - The restore rehearsal restores the newest backup into a temporary database, verifies it and
   drops it.
 
-**Help.** Operator › Help explains, from the implementation:
+**Help.** Help (the round question-mark button) explains, from the implementation:
 - the system, the components and the flows;
 - validation and its results, suppressions, sending, delivery states, tracking and its limits,
   bounces and complaints;

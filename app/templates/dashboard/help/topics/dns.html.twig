@@ -13,5 +13,6 @@
 <tr><td>TXT</td><td>_dmarc.news.example.org</td><td>v=DMARC1; p=none; rua=mailto:dmarc@news.example.org</td><td>DMARC policy of the sending domain. <a href="{{ path('dashboard_operator_help_topic', {topic: 'dmarc'}) }}">DMARC</a></td></tr>
 <tr><td>TXT</td><td>_smarthost-verification.news.example.org</td><td>(the token shown when the domain is added)</td><td>Proves the client controls the sending domain. <a href="{{ path('dashboard_operator_help_topic', {topic: 'sending-domains'}) }}">Sending domains</a></td></tr>
 </tbody></table>
+<p><strong>Your own mailbox is not on this server.</strong> catto-mail receives mail only for the bounce domain (bounces and complaints) and refuses every other address. The administrator's address (<code>APP_ADMIN_EMAIL</code>), where sign-in links are sent, must be a mailbox at a mail provider: keep your main domain's MX at that provider (or your registrar's e-mail forwarding), never at this server. The DNS checks warn if mail for the administrator's address would come here.</p>
 <p>The sign-in mail sender's domain (<code>APP_MAIL_FROM</code>) needs DKIM (and ideally DMARC) like any sending domain. DNS changes can take from minutes to hours to be visible; the checks query the public DNS.</p>
 {% endblock %}

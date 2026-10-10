@@ -2,17 +2,24 @@
 {% block title %}Reconciliation {{ client.companyName }}{% endblock %}
 {% block body %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_usage') }}">Usage and billing</a> › Reconciliation</p>
-<h1>Usage reconciliation: {{ client.companyName }}</h1>
-<p>Period {{ r.period.start }} to {{ r.period.end }} (exclusive): <strong>{{ r.status|label('reconciliation_status') }}</strong></p>
-<dl>
-    <dt>Validation jobs metered in the period</dt><dd>{{ r.checked.validation_jobs|number_format }}</dd>
-    <dt>Message usage records</dt><dd>{{ r.checked.message_usage_records|number_format }}</dd>
-    <dt>Messages accepted by Postfix in the period</dt><dd>{{ r.checked.messages_accepted|number_format }}</dd>
-    <dt>Findings</dt><dd>{{ r.findings_total }}</dd>
+<div class="pagehead">
+    <div>
+        <div class="titleline"><h1>Usage reconciliation: {{ client.companyName }}</h1><span class="st st-{{ r.status == 'consistent' ? 'completed' : 'failed' }}">{{ r.status|label('reconciliation_status') }}</span></div>
+        <p class="sub">Period {{ r.period.start|ts }} to {{ r.period.end|ts }} (exclusive): <strong>{{ r.status|label('reconciliation_status') }}</strong></p>
+    </div>
+</div>
+<dl class="facts">
+    <div><dt>Validation jobs metered in the period</dt><dd class="lg">{{ r.checked.validation_jobs|number_format }}</dd></div>
+    <div><dt>Message usage records</dt><dd class="lg">{{ r.checked.message_usage_records|number_format }}</dd></div>
+    <div><dt>Messages accepted by Postfix in the period</dt><dd class="lg">{{ r.checked.messages_accepted|number_format }}</dd></div>
+    <div><dt>Findings</dt><dd class="lg">{{ r.findings_total }}</dd></div>
 </dl>
 <p class="muted">Checked: every metered validation job's units equal its addresses that reached a final result, all for this client; every message unit names a message of this client that was submitted to Postfix; every message submitted to Postfix in the period has its unit.</p>
 {% if r.findings is not empty %}
-<table><thead><tr><th scope="col">Finding</th><th scope="col">Details</th></tr></thead>
-<tbody>{% for f in r.findings %}<tr><td>{{ f.type }}</td><td><code>{{ f|filter((v, k) => k != 'type')|json_encode }}</code></td></tr>{% endfor %}</tbody></table>
+<section class="card card-flush" aria-labelledby="find-h">
+    <div class="card-head"><h2 id="find-h">Findings</h2><span class="count count-bad">{{ r.findings|length }}</span></div>
+    <div class="scroll"><table><thead><tr><th scope="col">Finding</th><th scope="col">Details</th></tr></thead>
+    <tbody>{% for f in r.findings %}<tr><td>{{ f.type }}</td><td><code>{{ f|filter((v, k) => k != 'type')|json_encode }}</code></td></tr>{% endfor %}</tbody></table></div>
+</section>
 {% endif %}
 {% endblock %}

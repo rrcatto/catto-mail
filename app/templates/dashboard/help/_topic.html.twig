@@ -1,9 +1,22 @@
 {% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}{{ title }} · Help{% endblock %}
 {% block body %}
 <p class="crumbs"><a href="{{ path('dashboard_operator_help') }}">Help</a> › {{ group }}</p>
-<h1>{{ title }}</h1>
-<article class="help-body">{% block content %}{% endblock %}</article>
-<nav aria-label="Other help pages"><h2>Other pages in “{{ group }}”</h2><ul class="plain">{% for slug, t in groups[group] %}{% if slug != topic %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}">{{ t }}</a></li>{% endif %}{% endfor %}</ul>
-<p><a href="{{ path('dashboard_operator_help') }}">All help pages</a></p></nav>
+<div class="pagehead">
+    <div>
+        <h1>{{ title }}</h1>
+        <p class="sub">{{ group }}</p>
+    </div>
+</div>
+<div class="with-aside">
+    <article class="card"><div class="prose help-body">{% block content %}{% endblock %}</div></article>
+    <aside>
+        <nav class="card card-flush" aria-labelledby="help-more-h">
+            <div class="card-head"><h2 id="help-more-h">Other pages in “{{ group }}”</h2></div>
+            <ul class="result-list">{% for slug, t in groups[group] %}{% if slug != topic %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}"><span class="result-text"><span class="result-title">{{ t }}</span></span>{{ icon.i('chevron', 16) }}</a></li>{% endif %}{% endfor %}</ul>
+            <p class="card-foot"><a href="{{ path('dashboard_operator_help') }}">All help pages</a></p>
+        </nav>
+    </aside>
+</div>
 {% endblock %}

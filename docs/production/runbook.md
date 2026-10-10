@@ -302,7 +302,7 @@ Back off (lower the values) at the first spike. A client on probation can be set
 ## 11. Normal health checks
 
 - Daily:
-  - `prod ops-status`, or Operator › Overview: backlogs, messages by status, `outcome_unknown`,
+  - `prod ops-status`, or the operator Overview: backlogs, messages by status, `outcome_unknown`,
     delivery state, Postfix queue depth and snapshot age, rates per client, suppressions,
     unmatched DSNs, webhooks, workers;
   - `prod preflight --quiet`.
@@ -318,7 +318,7 @@ Back off (lower the values) at the first spike. A client on probation can be set
 
 ## 12. Webhook failures
 
-- Operator › Webhooks shows deliveries by state, with the last status, error and next retry, plus
+- Mail flow › Webhooks shows deliveries by state, with the last status, error and next retry, plus
   the worker heartbeats.
 - A failing endpoint retries for about a day (`APP_WEBHOOK_MAX_ATTEMPTS=12`) and is then `failed`.
   Endpoints are never disabled automatically.
@@ -327,7 +327,7 @@ Back off (lower the values) at the first spike. A client on probation can be set
 
 ## 13. DSN failures
 
-- Unmatched DSNs: Operator › Unmatched DSNs. Inspect them; request a match only when the evidence
+- Unmatched DSNs: Mail flow › Unmatched DSNs. Inspect them; request a match only when the evidence
   identifies the message; otherwise dismiss them with a reason.
 - DSNs not arriving:
   - `prod preflight --section dns --section postfix`: MX, port 25, bounce domain;
@@ -380,7 +380,7 @@ Every change needs the acting operator (with `PLATFORM.CLIENT.RESTRICT`, or
 keeps. Suspended: new work is refused (403), the delivery daemon loses the lease of the client's
 running send jobs at the next renewal and the validator stops claiming its jobs. Throttled: its
 API rate is capped (`APP_THROTTLED_CLIENT_API_RATE_PER_MINUTE`) and its message starts are paced
-at `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE`. The same controls are on Operator › Clients ›
+at `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE`. The same controls are on Clients › Clients ›
 *client* › Lifecycle. A suspension does not recall mail Postfix has already accepted.
 
 | Where the mail is | What stops it |
@@ -391,7 +391,7 @@ at `DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE`. The same controls are on Operato
 
 **Observe queued work:**
 - `prod queue` (`postqueue -p`) and `prod pause-status` (queue depth);
-- Operator › Overview (send backlog);
+- the operator Overview (send backlog);
 - `prod ops-status`.
 
 ## 16. Retention
@@ -477,7 +477,7 @@ prod console smarthost:usage:reconcile --client <client-id> --period previous_mo
 prod console smarthost:billing:statement prepare --client <client-id> --period previous_month --operator admin@example.com
 ```
 
-Alerts (Operator › Alerts) never act on a client: decide, act through the lifecycle above, and
+Alerts (Clients › Abuse & reputation) never act on a client: decide, act through the lifecycle above, and
 acknowledge the alert with a note. A failing preflight `runtime / reputation evaluation` check
 means the timer has not run for an hour: `prod machine systemctl list-timers`.
 
@@ -486,11 +486,11 @@ means the timer has not run for an hour: `prod machine systemctl list-timers`.
 - **First sign-in / recovery:** `prod admin-link` prints a single-use ADMIN link (15 minutes).
 - **Host agent:** `<instance>-host-agent.service` (`prod agent run`). It records the host-side
   checks every minute (the full preflight hourly) and carries out dashboard requests; see them
-  under Operator › System › Host requests. `prod agent once --requested` runs everything now;
+  under Mail flow › Delivery › Host requests. `prod agent once --requested` runs everything now;
   `prod agent facts` prints what it reports. Its log: `prod logs agent`.
-- **Diagnostics:** Operator › Diagnostics (and its history); System setup for the guided checks.
+- **Diagnostics:** System › Diagnostics (and its history); System › System setup for the guided checks.
 - **Logs:** `prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent [lines|-f]`.
-- **Address batches and re-permission:** Operator › Address batches; Help › Uploading lists and
+- **Address batches and re-permission:** Clients › Address batches; Help › Uploading lists and
   Re-permission.
 
 ## 22. Still to do outside the repository

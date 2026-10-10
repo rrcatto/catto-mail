@@ -1,4 +1,7 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
+<section class="card" aria-labelledby="pf-h">
+<h2 id="pf-h">Postfix</h2>
 <p>Postfix is the mail server. It accepts messages from the delivery daemon on the submission port (587, authenticated, internal only), passes each through OpenDKIM for the signature, and delivers it to the recipient's mail server on port 25.
 On the public port 25 it accepts only mail for the bounce domain: bounces and complaints. It must never relay mail for anyone else. {{ ui.help('postfix') }}</p>
 <p>Outbound port 25 is checked by connecting to a mail server and saying goodbye without sending anything (the activation preflight); many VPS providers block it until you ask.</p>
+</section>

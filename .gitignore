@@ -23,3 +23,9 @@ htmlcov/
 
 # Per-user Claude Code permissions (never committed).
 .claude/settings.local.json
+
+# Third-party design references used for mockups (not ours to publish).
+docs/designs/
+
+# The operator's own TLS certificate files (private key inside): never in the repository.
+SSL_certificate/

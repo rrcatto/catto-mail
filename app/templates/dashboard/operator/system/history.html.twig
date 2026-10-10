@@ -2,28 +2,38 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Test-result history{% endblock %}
 {% block body %}
-<h1>Test-result history</h1>
-<p class="muted">Kept: every run an administrator asked for, every change of result, and one scheduled result per check and day. Results never contain secrets.</p>
-<h2>Last run of each check</h2>
-<div class="scroll"><table class="dense">
-    <thead><tr><th scope="col">Test</th><th scope="col">Last run</th><th scope="col">Result</th><th scope="col">Duration</th><th scope="col">Details</th><th scope="col">Since</th></tr></thead>
-    <tbody>{% for r in last_runs %}<tr>
-        <td><a href="{{ path('dashboard_operator_diagnostics_history', {check: r.check_key}) }}">{{ r.component|capitalize }} / {{ r.title }}</a></td>
-        <td>{{ r.ran_at|ts }}</td><td>{{ ui.result(r.result) }}</td><td class="num">{{ r.duration_ms is null ? '—' : r.duration_ms ~ ' ms' }}</td>
-        <td>{{ r.summary }}</td><td><small>{{ r.changed_at|ts }}</small></td>
-    </tr>{% else %}<tr><td colspan="6" class="empty">No check has run yet.</td></tr>{% endfor %}</tbody>
-</table></div>
-<h2>Runs</h2>
-<form method="get" class="filters">
+<p class="crumbs"><a href="{{ path('dashboard_operator_diagnostics') }}">Diagnostics</a> › History</p>
+<div class="pagehead">
+    <div>
+        <h1>Test-result history</h1>
+        <p class="sub">Kept: every run an administrator asked for, every change of result, and one scheduled result per check and day. Results never contain secrets.</p>
+    </div>
+</div>
+<section class="card card-flush" aria-labelledby="last-h">
+    <div class="card-head"><h2 id="last-h">Last run of each check</h2><span class="count count-dark">{{ last_runs|length }}</span></div>
+    <div class="scroll"><table class="dense">
+        <thead><tr><th scope="col">Test</th><th scope="col">Last run</th><th scope="col">Result</th><th scope="col">Duration</th><th scope="col">Details</th><th scope="col">Since</th></tr></thead>
+        <tbody>{% for r in last_runs %}<tr>
+            <td><a href="{{ path('dashboard_operator_diagnostics_history', {check: r.check_key}) }}">{{ r.component|capitalize }} / {{ r.title }}</a></td>
+            <td>{{ r.ran_at|ts }}</td><td>{{ ui.result(r.result) }}</td><td class="num">{{ r.duration_ms is null ? '—' : r.duration_ms ~ ' ms' }}</td>
+            <td>{{ r.summary }}</td><td><small>{{ r.changed_at|ts }}</small></td>
+        </tr>{% else %}<tr><td colspan="6"><span class="muted">No check has run yet.</span></td></tr>{% endfor %}</tbody>
+    </table></div>
+</section>
+
+<form method="get" class="filters" aria-label="Filter the runs">
     <label>Check <input name="check" value="{{ filters.check }}" size="30"></label>
     <label>Component <select name="component"><option value="">Any</option>{% for c in components %}<option{% if filters.component == c %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
     <label>Result <select name="result"><option value="">Any</option>{% for r in ['pass', 'warn', 'fail', 'skipped', 'info'] %}<option{% if filters.result == r %} selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
     <button type="submit">Show</button>
 </form>
-<div class="scroll"><table class="dense">
-    <thead><tr><th scope="col">When</th><th scope="col">Test</th><th scope="col">Result</th><th scope="col">Why kept</th><th scope="col">Duration</th><th scope="col">Details</th></tr></thead>
-    <tbody>{% for r in runs %}<tr><td>{{ r.ran_at|ts }}</td><td>{{ r.title }}<br><small class="muted">{{ r.check_key }}</small></td><td>{{ ui.result(r.result) }}</td>
-        <td>{{ r.run_trigger }}</td><td class="num">{{ r.duration_ms is null ? '—' : r.duration_ms ~ ' ms' }}</td><td>{{ r.summary }}</td></tr>
-    {% else %}<tr><td colspan="6" class="empty">Nothing matches.</td></tr>{% endfor %}</tbody>
-</table></div>
+<section class="card card-flush" aria-labelledby="runs-h">
+    <div class="card-head"><h2 id="runs-h">Runs</h2><span class="count count-dark">{{ runs|length }}</span></div>
+    <div class="scroll"><table class="dense">
+        <thead><tr><th scope="col">When</th><th scope="col">Test</th><th scope="col">Result</th><th scope="col">Why kept</th><th scope="col">Duration</th><th scope="col">Details</th></tr></thead>
+        <tbody>{% for r in runs %}<tr><td>{{ r.ran_at|ts }}</td><td>{{ r.title }}<br><small class="muted">{{ r.check_key }}</small></td><td>{{ ui.result(r.result) }}</td>
+            <td>{{ r.run_trigger }}</td><td class="num">{{ r.duration_ms is null ? '—' : r.duration_ms ~ ' ms' }}</td><td>{{ r.summary }}</td></tr>
+        {% else %}<tr><td colspan="6"><span class="muted">Nothing matches.</span></td></tr>{% endfor %}</tbody>
+    </table></div>
+</section>
 {% endblock %}

@@ -2,7 +2,12 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Send jobs{% endblock %}
 {% block body %}
-<h1>Send jobs</h1>
+<div class="pagehead">
+    <div>
+        <h1>Send jobs</h1>
+        <p class="sub">The messages your application submitted, by job, newest first. “Remote accepted” means the receiving mail server accepted responsibility for a message; it does not prove inbox placement.</p>
+    </div>
+</div>
 <form method="get" class="filters" role="search" aria-label="Filter send jobs">
     {{ ui.select('status', 'Status', label_options('send_job_status'), filters.status) }}
     <label>External reference <input type="text" name="external_reference" value="{{ filters.external_reference }}"></label>
@@ -12,6 +17,9 @@
     <button type="submit">Apply</button>
     <a href="{{ path('dashboard_client_send_jobs', {clientId: client.id.toRfc4122}) }}">Reset</a>
 </form>
-{% include 'dashboard/client/_send_job_rows.html.twig' with {rows: page.rows} %}
+<section class="card card-flush" aria-labelledby="sj-h">
+    <div class="card-head"><h2 id="sj-h">Jobs</h2><ul class="legend"><li><svg width="10" height="10" aria-hidden="true"><rect class="seg-ok" width="10" height="10" rx="3"/></svg>Remote accepted</li><li><svg width="10" height="10" aria-hidden="true"><rect class="seg-hatch" width="10" height="10" rx="3"/></svg>In flight or deferred</li><li><svg width="10" height="10" aria-hidden="true"><rect class="seg-bad" width="10" height="10" rx="3"/></svg>Bounced, complained or failed</li><li><svg width="10" height="10" aria-hidden="true"><rect class="wf-mid" width="10" height="10" rx="3"/></svg>Suppressed (not sent)</li></ul><span class="muted small">Dates are days in {{ time_zone_label() }}</span></div>
+    {% include 'dashboard/client/_send_job_rows.html.twig' with {rows: page.rows} %}
+</section>
 {{ ui.pager(page, 'jobs') }}
 {% endblock %}

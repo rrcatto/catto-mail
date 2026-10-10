@@ -13,5 +13,5 @@ infra/bin/smarthostctl prod logs agent       # host agent (systemd journal)
 infra/bin/smarthostctl prod logs delivery 500   # more lines
 infra/bin/smarthostctl prod logs delivery -f    # follow</pre>
 <p>The application components log JSON lines (time, level, message, context). Logs never contain API keys, sign-in or tracking tokens, or message contents. The systemd units' own logs: <code>journalctl --user -u smarthost.service</code>.</p>
-<p>The dashboard does not show raw logs: the web application has no access to the host. The diagnostics and Health page summarise what matters.</p>
+<p>The dashboard does not show raw logs: the web application has no access to the host. The diagnostics (System › Diagnostics) and the Delivery page (Mail flow › Delivery) summarise what matters.</p>
 {% endblock %}

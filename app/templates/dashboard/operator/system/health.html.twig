@@ -1,35 +1,113 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
-{% block title %}System health{% endblock %}
+{% block title %}Delivery{% endblock %}
 {% block body %}
-<h1>Catto-mail system</h1>
-<p class="muted">Every line is the worst result of that component's latest checks — never just "the container exists".
-    The web application runs its own checks; the <strong>host agent</strong> (a small service on the server) runs the host, DNS, TLS, Postfix and backup checks
-    {% if agent_age is null %}<strong>but has never reported</strong>{% else %}and last reported {{ agent_age|duration }} ago{% endif %}.
-    {{ ui.help('components', 'What each component does') }}</p>
+{% set d = delivery %}
+<div class="pagehead">
+    <div>
+        <h1>Delivery</h1>
+        <p class="sub">How mail leaves this server: the delivery mode, the emergency stop, live activation, the rate ceiling, the Postfix queue and the host requests.</p>
+    </div>
+    <div class="actions">{{ ui.help('emergency-pause', 'Help: the delivery modes') }}<a class="btn btn-secondary" href="{{ path('dashboard_operator_system_requests') }}">Request log</a></div>
+</div>
 {% if not setup_complete and is_granted('SYSTEM.SETUP.MANAGE') %}<p class="warn">The setup is not complete. <a href="{{ path('dashboard_operator_setup') }}">Continue the System setup</a>.</p>{% endif %}
-<div class="cards">
-<section class="card" aria-labelledby="comp-h">
-    <h2 id="comp-h">Components</h2>
-    <table class="dense"><tbody>
-    {% for label, c in components %}
-        <tr><th scope="row">{{ label }}</th><td>{{ ui.result(c.result) }}</td>
-            <td><small class="muted">{% set bad = c.checks|filter(x => x.result in ['fail', 'warn']) %}{% if bad is not empty %}{{ (bad|first).summary }}{% elseif c.checks is empty %}no check yet{% else %}{{ c.checks|length }} checks{% endif %}</small></td></tr>
-    {% endfor %}
-    </tbody></table>
-    <p><a href="{{ path('dashboard_operator_diagnostics') }}">All diagnostics</a> · <a href="{{ path('dashboard_operator_diagnostics_history') }}">History</a></p>
+
+<div class="row-2 row-wide-left">
+    {% include 'dashboard/operator/system/_delivery_controls.html.twig' %}
+    <section class="card" aria-labelledby="daemon-h">
+        <div class="card-head"><h2 id="daemon-h">Delivery daemon</h2>
+            {% if daemon and daemon.alive %}<span class="st st-active">Running</span>{% else %}<span class="st st-failed">Not running</span>{% endif %}</div>
+        {% if daemon %}
+        <dl class="rows">
+            <dt>Version</dt><dd>{{ daemon.version }}</dd>
+            <dt>Running since</dt><dd>{{ daemon.started_at|ts }}</dd>
+            <dt>Last heartbeat</dt><dd>{{ daemon.last_seen_at|ts }}</dd>
+            <dt>Rate ceiling</dt><dd>{{ daemon.global_rate_per_minute > 0 ? daemon.global_rate_per_minute ~ ' messages per minute' : 'none' }}</dd>
+        </dl>
+        <h3>Since it started</h3>
+        <dl class="facts">
+            <div><dt>Submitted</dt><dd class="lg">{{ daemon.submitted|number_format }}</dd></div>
+            <div><dt>Temporary failures</dt><dd class="lg">{{ daemon.temporary_failures|number_format }}</dd></div>
+            <div><dt>DSNs processed</dt><dd class="lg">{{ daemon.dsns_processed|number_format }}</dd></div>
+        </dl>
+        {% else %}
+        <p class="empty">No delivery daemon has reported in the last day.</p>
+        {% endif %}
+        <p class="muted small">The rate ceiling comes from <code>DELIVERY_GLOBAL_RATE_PER_MINUTE</code>. Raising it is a step of the warm-up runbook, done on the server.</p>
+    </section>
+</div>
+
+<section aria-labelledby="modes-h">
+    <h2 id="modes-h">What HELD, LIVE, PAUSED and STOPPED mean</h2>
+    <div class="grid grid-4">
+        {% for m, text in {
+            HELD: 'The installation has not been switched to live delivery. Send jobs are accepted and wait; nothing goes to the Internet except dashboard sign-in mail. This is how every installation starts.',
+            LIVE: "Mail is delivered to recipients' mail servers, within the configured rate limits. Switching to LIVE is a deliberate, audited action that first runs the activation preflight.",
+            PAUSED: 'The emergency stop is in force: the delivery daemon starts no new message and Postfix holds its queue. Nothing is lost; resuming continues where it stopped.',
+            STOPPED: 'The delivery daemon is not running at all (crashed, or the system is stopped). Nothing is sent and bounces wait in the spool until it runs again.',
+        } %}
+        <article class="card{{ m == d.mode ? ' card-accent' : '' }}">
+            <h3 class="mode-title"><span class="dot mode-{{ m }}" aria-hidden="true"></span>{{ m }}{% if m == d.mode %} <span class="count count-dark">now</span>{% endif %}</h3>
+            <p class="small">{{ text }}</p>
+        </article>
+        {% endfor %}
+    </div>
 </section>
-{% include 'dashboard/operator/system/_delivery_controls.html.twig' %}
-<section class="card" aria-labelledby="work-h">
-    <h2 id="work-h">Work and housekeeping</h2>
-    <dl>
-        <dt>Validation jobs running</dt><dd>{{ work.validation_jobs }}</dd>
-        <dt>Send jobs queued or running</dt><dd>{{ work.send_jobs }}{% if work.collecting_jobs %} <small class="muted">({{ work.collecting_jobs }} still collecting recipients)</small>{% endif %}</dd>
-        <dt>Last backup</dt><dd>{% if backup and backup.value.last_success_at is defined %}{{ backup.value.last_success_at|ts }}{% if backup.value.offhost is defined and not backup.value.offhost %} <span class="res res-warn">WARN</span> not copied off the server{% endif %}{% else %}none recorded{% endif %}</dd>
-        <dt>Certificates</dt><dd>{% for t in tls %}{{ ui.result(t.result) }} {{ t.summary }}<br>{% else %}not checked yet{% endfor %}</dd>
-        <dt>Host requests waiting</dt><dd>{{ pending_requests }} <a href="{{ path('dashboard_operator_system_requests') }}">request log</a></dd>
-        {% if host %}<dt>Server</dt><dd>{{ host.value.os|default('?') }}, Podman {{ host.value.podman|default('?') }}, up since {{ host.value.boot_time|default('?') }}</dd>{% endif %}
-    </dl>
-</section>
+
+<div class="row-2 row-wide-left">
+    {% include 'dashboard/operator/_submission_rate.html.twig' with {period_route: 'dashboard_operator_system'} %}
+    <section class="card" aria-labelledby="queue-h">
+        <div class="card-head"><h2 id="queue-h">Postfix queue</h2>
+            <span class="live live-{{ d.queue and d.queue_snapshot_age is not null and d.queue_snapshot_age <= 300 ? 'on' : 'bad' }}">{{ d.queue_snapshot_age is null ? 'no snapshot' : 'snapshot ' ~ (d.queue_snapshot_age|duration) ~ ' old' }}</span></div>
+        {% if d.queue %}
+        {% set qt = d.queue.active + d.queue.deferred + d.queue.hold + d.queue.incoming %}
+        <p class="big">{{ qt|number_format }} <span>messages in the queue</span></p>
+        <dl class="facts facts-2">
+            <div><dt>Active</dt><dd class="lg">{{ d.queue.active|number_format }}</dd></div>
+            <div><dt>Deferred</dt><dd class="lg">{{ d.queue.deferred|number_format }}</dd></div>
+            <div><dt>Hold</dt><dd class="lg">{{ d.queue.hold|number_format }}</dd></div>
+            <div><dt>Incoming</dt><dd class="lg">{{ d.queue.incoming|number_format }}</dd></div>
+        </dl>
+        {% else %}
+        <p class="empty">No snapshot yet: the delivery daemon reports the queue depth from Postfix queue snapshots.</p>
+        {% endif %}
+        <p class="muted small">Read by the delivery daemon from postqueue snapshots. Hold stays at 0 unless the emergency stop is in force.</p>
+    </section>
+</div>
+
+<div class="row-2">
+    <section class="card card-flush" aria-labelledby="req-h">
+        <div class="card-head"><div><h2 id="req-h">Host requests</h2>
+            <p class="muted small">The web application never runs commands on the server: actions are recorded here and carried out by the host agent{% if agent_age is null %}, <strong>which has never reported</strong>{% else %}, last report {{ agent_age|duration }} ago{% endif %}. {{ pending_requests }} waiting.</p></div>
+            <a class="more" href="{{ path('dashboard_operator_system_requests') }}">Request log</a></div>
+        <div class="scroll"><table>
+            <thead><tr><th scope="col">Requested</th><th scope="col">Action</th><th scope="col">Status</th><th scope="col">By</th><th scope="col">Note and outcome</th></tr></thead>
+            <tbody>{% for r in requests %}<tr>
+                <td>{{ r.requested_at|ts }}</td><td>{{ r.action }}</td>
+                <td>{{ ui.result(r.status == 'succeeded' ? 'pass' : (r.status == 'failed' ? 'fail' : (r.status == 'cancelled' ? 'skipped' : 'waiting'))) }} {{ r.status }}</td>
+                <td>{{ r.requested_by ?? 'system' }}</td><td>{% if r.note %}{{ r.note }}<br>{% endif %}<small class="muted">{{ r.result_summary }}</small></td>
+            </tr>{% else %}<tr><td colspan="5"><span class="muted">No request yet.</span></td></tr>{% endfor %}</tbody>
+        </table></div>
+    </section>
+    <section class="card" aria-labelledby="comp-h">
+        <div class="card-head"><h2 id="comp-h">Components</h2><a class="more" href="{{ path('dashboard_operator_diagnostics') }}">All diagnostics</a></div>
+        <p class="muted small">Every line is the worst result of that component's latest checks — never just "the container exists". The web application runs its own checks; the <strong>host agent</strong> (a small service on the server) runs the host, DNS, TLS, Postfix and backup checks
+            {% if agent_age is null %}<strong>but has never reported</strong>{% else %}and last reported {{ agent_age|duration }} ago{% endif %}. {{ ui.help('components', 'What each component does') }}</p>
+        <table class="dense"><tbody>
+        {% for label, c in components %}
+            <tr><th scope="row">{{ label }}</th><td>{{ ui.result(c.result) }}</td>
+                <td><small class="muted">{% set bad = c.checks|filter(x => x.result in ['fail', 'warn']) %}{% if bad is not empty %}{{ (bad|first).summary }}{% elseif c.checks is empty %}no check yet{% else %}{{ c.checks|length }} checks{% endif %}</small></td></tr>
+        {% endfor %}
+        </tbody></table>
+        <h3>Work and housekeeping</h3>
+        <dl class="rows">
+            <dt>Validation jobs running</dt><dd>{{ work.validation_jobs }}</dd>
+            <dt>Send jobs queued or running</dt><dd>{{ work.send_jobs }}{% if work.collecting_jobs %} <small class="muted">({{ work.collecting_jobs }} still collecting recipients)</small>{% endif %}</dd>
+            <dt>Last backup</dt><dd>{% if backup and backup.value.last_success_at is defined %}{{ backup.value.last_success_at|ts }}{% if backup.value.offhost is defined and not backup.value.offhost %} <span class="res res-warn">WARN</span> not copied off the server{% endif %}{% else %}none recorded{% endif %}</dd>
+            <dt>Certificates</dt><dd>{% for t in tls %}{{ ui.result(t.result) }} {{ t.summary }}<br>{% else %}not checked yet{% endfor %}</dd>
+            {% if host %}<dt>Server</dt><dd>{{ host.value.os|default('?') }}, Podman {{ host.value.podman|default('?') }}, up since {{ host.value.boot_time|default('?') }}</dd>{% endif %}
+        </dl>
+        <p class="small"><a href="{{ path('dashboard_operator_diagnostics') }}">All diagnostics</a> · <a href="{{ path('dashboard_operator_diagnostics_history') }}">History</a></p>
+    </section>
 </div>
 {% endblock %}

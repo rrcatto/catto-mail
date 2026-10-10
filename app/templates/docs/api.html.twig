@@ -1,0 +1,27 @@
+{# The public API documentation index (/docs/api): no session, no script; the stylesheet and font come from the application. #}
+{% import 'dashboard/_icons.html.twig' as icon %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Catto Mail API</title>
+    <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
+</head>
+<body class="bare">
+<header class="topbar topbar-bare"><span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span></header>
+<main class="content content-bare">
+    <section class="narrow" aria-labelledby="api-h">
+        <h1 id="api-h">Catto Mail API</h1>
+        <ul class="result-list">
+            <li><a href="/docs/api/integration-guide.md"><span class="result-text"><span class="result-title">Client integration guide</span><span class="result-meta">(Markdown): authentication, idempotency, errors,
+                pagination, validation and send jobs, webhooks, limits and quotas, polling and reconciliation.</span></span>{{ icon.i('chevron', 16) }}</a></li>
+            <li><a href="/docs/api/openapi.v1.yaml"><span class="result-text"><span class="result-title">OpenAPI 3.1 contract</span><span class="result-meta">(normative): every endpoint, schema and status value.</span></span>{{ icon.i('chevron', 16) }}</a></li>
+        </ul>
+        <p class="caveat">Delivery semantics: <em>remote_accepted</em> means the receiving mail server accepted responsibility for a message, not
+        inbox placement; a recorded open is not a proven read; validation is not consent; an ordinary unsubscribe is not a global
+        suppression.</p>
+    </section>
+</main>
+</body>
+</html>

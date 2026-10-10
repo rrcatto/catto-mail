@@ -11,8 +11,9 @@ use App\Entity\Client;
 use App\Entity\SendingDomain;
 use App\Entity\User;
 use App\Entity\WebhookEndpoint;
-use App\Sending\AddressNormalizer;
 use App\Security\DashboardUserProvider;
+use App\Sending\AddressNormalizer;
+use App\Util\InstallationTime;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -30,13 +31,15 @@ abstract class AdminCommand extends Command
     protected EntityManagerInterface $em;
     protected DashboardUserProvider $userProvider;
     protected AccessControl $accessControl;
+    protected InstallationTime $installationTime;
 
     #[Required]
-    public function setAdminDependencies(EntityManagerInterface $em, DashboardUserProvider $userProvider, AccessControl $accessControl): void
+    public function setAdminDependencies(EntityManagerInterface $em, DashboardUserProvider $userProvider, AccessControl $accessControl, InstallationTime $installationTime): void
     {
         $this->em = $em;
         $this->userProvider = $userProvider;
         $this->accessControl = $accessControl;
+        $this->installationTime = $installationTime;
     }
 
     final protected function execute(InputInterface $input, OutputInterface $output): int
@@ -92,21 +95,21 @@ abstract class AdminCommand extends Command
     protected function addPeriodOptions(): void
     {
         $this->addOption('period', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'current_day, current_month or previous_month')
-            ->addOption('month', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'A calendar month, YYYY-MM (UTC)')
-            ->addOption('from', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period start date YYYY-MM-DD (UTC, inclusive)')
-            ->addOption('to', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period end date YYYY-MM-DD (UTC, exclusive)');
+            ->addOption('month', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'A calendar month, YYYY-MM (in APP_TIMEZONE)')
+            ->addOption('from', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period start date YYYY-MM-DD (in APP_TIMEZONE, inclusive)')
+            ->addOption('to', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period end date YYYY-MM-DD (in APP_TIMEZONE, exclusive)');
     }
 
     protected function usagePeriod(InputInterface $input, string $default = 'current_month'): \App\Usage\UsagePeriod
     {
         if (null !== $input->getOption('from') || null !== $input->getOption('to')) {
-            return \App\Usage\UsagePeriod::custom((string) $input->getOption('from'), (string) $input->getOption('to'));
+            return \App\Usage\UsagePeriod::custom((string) $input->getOption('from'), (string) $input->getOption('to'), $this->installationTime->zone);
         }
         if (null !== $input->getOption('month')) {
-            return \App\Usage\UsagePeriod::month((string) $input->getOption('month'));
+            return \App\Usage\UsagePeriod::month((string) $input->getOption('month'), $this->installationTime->zone);
         }
 
-        return \App\Usage\UsagePeriod::named((string) ($input->getOption('period') ?? $default));
+        return \App\Usage\UsagePeriod::named((string) ($input->getOption('period') ?? $default), $this->installationTime->zone);
     }
 
     protected function webhookEndpoint(string $id): WebhookEndpoint

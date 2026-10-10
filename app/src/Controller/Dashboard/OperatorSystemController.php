@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Controller\Dashboard;
 
 use App\Dashboard\ClientAccess;
+use App\Dashboard\OperatorOverview;
+use App\Dashboard\OperatorReadModel;
+use App\Dashboard\OverviewPeriod;
 use App\Domain\DomainRuleViolation;
 use App\Entity\Client;
 use App\Entity\WebhookEndpoint;
@@ -17,6 +20,7 @@ use App\System\SetupWizard;
 use App\System\SystemChecks;
 use App\System\SystemRequests;
 use App\System\SystemState;
+use App\Util\InstallationTime;
 use App\Webhook\WebhookTestService;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
@@ -30,7 +34,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Operator › System (specification 2.11): the health dashboard, diagnostics and their
+ * Mail flow › Delivery and System (specification 2.11): the delivery page, diagnostics and their
  * history, the delivery controls ("stop sending email now"), the host-agent request log,
  * and the administrator setup wizard with its guided seed and bounce tests.
  *
@@ -57,8 +61,11 @@ final class OperatorSystemController extends AbstractController
 
     #[Route('/system', name: 'dashboard_operator_system', methods: ['GET'])]
     #[IsGranted('PLATFORM.SYSTEM.VIEW')]
-    public function health(): Response
+    public function health(Request $request, OperatorOverview $overview, OperatorReadModel $read, InstallationTime $time): Response
     {
+        $period = OverviewPeriod::fromKey($request->query->getString('period', OverviewPeriod::DEFAULT), $time->zone);
+        $heartbeats = $read->deliveryStatus();
+        $daemon = array_values(array_filter($heartbeats, static fn (array $h): bool => (bool) $h['alive']))[0] ?? ($heartbeats[0] ?? null);
         $all = $this->checks->latest();
         $components = [];
         foreach (self::HEALTH_ROWS as $label => [$comps, $prefixes]) {
@@ -78,6 +85,8 @@ final class OperatorSystemController extends AbstractController
                 SQL),
             'host' => $host, 'backup' => $backup, 'tls' => $tls, 'agent_age' => $this->state->agentAge(),
             'pending_requests' => $this->requests->pendingCount(), 'setup_complete' => $this->wizard->isComplete(),
+            'daemon' => $daemon, 'requests' => $this->requests->recent(8), 'rate' => $overview->submissionChart($period),
+            'period' => $period, 'periods' => array_map(static fn (array $p): string => $p[0], OverviewPeriod::PERIODS),
         ]);
     }
 
@@ -393,7 +402,7 @@ final class OperatorSystemController extends AbstractController
                 throw new DomainRuleViolation('Choose an endpoint.');
             }
             $webhooks->request($endpoint->getClient(), $endpoint, \App\Audit\AuditActor::user($this->access->user()));
-            $this->addFlash('success', 'A webhook.test event was queued for that endpoint. Its delivery appears under Operator › Webhooks within seconds.');
+            $this->addFlash('success', 'A webhook.test event was queued for that endpoint. Its delivery appears under Mail flow › Webhooks within seconds.');
         } catch (DomainRuleViolation|\App\Api\ApiProblem $e) {
             $this->addFlash('error', $e->getMessage());
         }

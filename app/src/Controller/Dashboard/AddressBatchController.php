@@ -29,7 +29,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Operator › Address batches (specification 2.11): upload up to 10,000 addresses, preview,
+ * Clients › Address batches (specification 2.11): upload up to 10,000 addresses, preview,
  * import, validate (through the Email Validator), review the results by separate state
  * dimension, download reports, and send in rollout stages (seed, controlled, rollout,
  * full) after the compliance approval. ADMIN only (SYSTEM.ADDRESS_BATCH.MANAGE).
