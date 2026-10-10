@@ -15,6 +15,12 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# `sudo -iu cattomail` starts no login session: use the service user's own systemd and Podman
+# runtime directory (lingering keeps them running) all the same.
+if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$UID" ]]; then
+  export XDG_RUNTIME_DIR="/run/user/$UID"
+  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+fi
 export SMARTHOST_DOTENV="${SMARTHOST_DOTENV:-$REPO/infra/.env}"
 export SMARTHOST_GENERATED="${SMARTHOST_GENERATED:-$REPO/infra/.generated}"
 DOTENV="$SMARTHOST_DOTENV"
@@ -38,12 +44,23 @@ SERVICES=(postgres opendkim postfix symfony-app webhook-worker nginx validator d
 
 die() { echo "smarthostctl prod: $*" >&2; exit 1; }
 say() { echo "smarthostctl prod: $*"; }
-envval() { [[ -f "$DOTENV" ]] || die "$DOTENV missing (smarthostctl prod init-env)"; grep -m1 -E "^$1=" "$DOTENV" | cut -d= -f2-; }
+# A setting's value: the .env's, else the built-in one (docs/contracts/environment.md).
+envval() { [[ -f "$DOTENV" ]] || die "$DOTENV missing (smarthostctl prod init-env)"; "${RENDER[@]}" get "$1" --env "$DOTENV"; }
 I() { envval SMARTHOST_INSTANCE; }
 require_production() {
   [[ "$(envval SMARTHOST_ENV)" == production ]] || die "$DOTENV is not a production configuration (SMARTHOST_ENV=$(envval SMARTHOST_ENV)); use the development commands of smarthostctl"
 }
-render() { "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" >/dev/null; }
+# The settings changed in the dashboard (System › Settings) from the running database, kept in
+# $GEN/overrides.json; when PostgreSQL is not running the last copy is used.
+fetch_overrides() {
+  local out
+  mkdir -p "$GEN"
+  if out="$(podman exec "$(I)-postgres" psql -X -At -U "$(envval POSTGRES_USER)" -d "$(envval SMARTHOST_DB_NAME)" \
+      -c "SELECT coalesce(json_object_agg(name, value), '{}') FROM setting_overrides" 2>/dev/null)" && [[ "$out" == \{* ]]; then
+    printf '%s\n' "$out" > "$GEN/overrides.json"
+  fi
+}
+render() { fetch_overrides; "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" --overrides "$GEN/overrides.json" >/dev/null; }
 topo() { [[ -x "$TOPO" ]] || render; "$TOPO" "$@"; }
 default_instance() { [[ "$(I)" == smarthost && "$GEN" == "$REPO/infra/.generated" ]]; }
 # The engine is local when Podman runs on this host. The production units (host agent, backup,
@@ -81,15 +98,18 @@ host_gate() {
 console() { podman exec -i -u www-data "$(I)-symfony-app" php bin/console "$@"; }
 psql_admin() { podman exec -i "$(I)-postgres" psql -X -v ON_ERROR_STOP=1 -U "$(envval POSTGRES_USER)" -d "$(envval SMARTHOST_DB_NAME)" "$@"; }
 
-# Set KEY=VALUE in the .env in place (keeps its mode and every other line).
+# Set KEY=VALUE in the .env in place (keeps its mode and every other line); a built-in setting
+# that the file does not name yet is added at the end.
 set_env() {
   local key="$1" value="$2"
-  grep -qE "^$key=" "$DOTENV" || die "$key is not in $DOTENV"
+  "${RENDER[@]}" get "$key" --env "$DOTENV" >/dev/null || die "$key is not a catto-mail setting"
   python3 - "$DOTENV" "$key" "$value" <<'PY'
 import re, sys
 path, key, value = sys.argv[1:]
 text = open(path, encoding="utf-8").read()
-text = re.sub(rf"^{re.escape(key)}=.*$", lambda m: f"{key}={value}", text, count=1, flags=re.M)
+text, n = re.subn(rf"^{re.escape(key)}=.*$", lambda m: f"{key}={value}", text, count=1, flags=re.M)
+if n == 0:
+    text = text.rstrip("\n") + f"\n{key}={value}\n"
 open(path, "w", encoding="utf-8").write(text)
 PY
 }
@@ -389,7 +409,7 @@ cmd_logs() {
 
 # --------------------------------------------------------------- backup/restore
 backup_root() { local d; d="$(envval BACKUP_DIR)"; echo "${d:-$GEN/backups}"; }
-STAMP_RE='^[0-9]{8}T[0-9]{6}Z(\.tar\.enc)?$'
+STAMP_RE='^[0-9]{8}T[0-9]{6}(Z|[+-][0-9]{4})(\.tar\.enc)?$'
 
 # Removes only what the backup tooling itself created: a scheduled backup (a timestamp name
 # directly inside the backup root) or a private restore directory (restore.XXXXXX directly
@@ -431,7 +451,9 @@ cmd_backup_status() {
   python3 -c 'import json,sys; [print(f"{k}: {v}") for k, v in sorted(json.load(open(sys.argv[1])).items())]' "$f"
 }
 
-now_iso() { date -u +%Y-%m-%dT%H:%M:%S+00:00; }
+# Dates in the installation's time zone (SMARTHOST_TIMEZONE), whatever the host's own zone is.
+zdate() { local z; z="$(envval SMARTHOST_TIMEZONE)"; if [[ -n "$z" ]]; then TZ="$z" date "$@"; else date "$@"; fi; }
+now_iso() { zdate +%Y-%m-%dT%H:%M:%S%:z; }
 
 # A scheduled backup (specification 2.11): back up into BACKUP_DIR, encrypt when a passphrase
 # file is configured, keep the newest BACKUP_KEEP, copy off the host, record the outcome.
@@ -439,7 +461,7 @@ cmd_backup_scheduled() {
   require_production
   local root stamp dir out keep target pf key encrypted=false offhost=false offhost_err="" old
   root="$(backup_root)"; mkdir -p "$root"; chmod 700 "$root"
-  stamp="$(date -u +%Y%m%dT%H%M%SZ)"; dir="$root/$stamp"
+  stamp="$(zdate +%Y%m%dT%H%M%S%z)"; dir="$root/$stamp"
   backup_status_set "last_attempt_at=$(now_iso)" "schedule=$(envval BACKUP_SCHEDULE)" "keep=$(envval BACKUP_KEEP)"
   if ! (cmd_backup "$dir"); then
     backup_status_set "last_result=failed: the backup command failed (see the backup timer's journal)"
@@ -533,7 +555,7 @@ cmd_backup() {
   require_production
   local i dir with_queue=false; i="$(I)"
   if [[ "${1:-}" == --scheduled ]]; then shift; cmd_backup_scheduled "$@"; return; fi
-  dir="$GEN/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+  dir="$GEN/backups/$(zdate +%Y%m%dT%H%M%S%z)"
   while (($#)); do
     case "$1" in --with-queue) with_queue=true; shift ;; *) dir="$1"; shift ;; esac
   done
@@ -557,7 +579,7 @@ cmd_backup() {
   chmod 600 "$dir"/*
   {
     echo "catto-mail production backup"
-    echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "created: $(now_iso)"
     echo "instance: $i"
     echo "image tag: $(envval SMARTHOST_IMAGE_TAG)"
     echo "live delivery: $(envval SMARTHOST_LIVE_DELIVERY_ENABLED)"
@@ -594,6 +616,37 @@ cmd_restore() {
   say "restored from $dir"
 }
 
+# ------------------------------------------------------------------- settings
+# Apply the settings changed in the dashboard: render with them, then replace only the
+# containers whose configuration changed (every container when the topology script changed,
+# e.g. a new time zone) and reinstall the units when a timer changed (backup schedule).
+cmd_settings_apply() {
+  require_production
+  "${RENDER[@]}" check --env "$DOTENV"
+  local before="$GEN/.settings-before" consumer service changed=()
+  rm -rf "$before"; mkdir -p "$before"
+  [[ -d "$GEN/env" ]] && cp -p "$GEN"/env/*.env "$before/" 2>/dev/null || true
+  [[ -f "$GEN/podman/smarthost-production.sh" ]] && cp -p "$GEN/podman/smarthost-production.sh" "$before/topology.sh"
+  [[ -d "$GEN/systemd" ]] && cp -rp "$GEN/systemd" "$before/systemd"
+  render   # warnings about ignored dashboard values go to stderr
+  if ! diff -rq "$before/systemd" "$GEN/systemd" >/dev/null 2>&1 && default_instance && local_engine; then
+    "$HELPER" install >/dev/null && say "systemd units reinstalled (a timer changed)"
+  fi
+  if ! cmp -s "$before/topology.sh" "$GEN/podman/smarthost-production.sh"; then
+    say "the topology changed (time zone): recreating every service"
+    cmd_stop; topo remove; topo create; cmd_start
+    rm -rf "$before"; say "settings applied: every service was recreated"; return
+  fi
+  for consumer in app webhook-worker validator delivery postfix opendkim proxy postgres; do
+    cmp -s "$before/$consumer.env" "$GEN/env/$consumer.env" && continue
+    case "$consumer" in app) service=symfony-app ;; proxy) service=nginx ;; *) service="$consumer" ;; esac
+    changed+=("$service")
+  done
+  rm -rf "$before"
+  if ((${#changed[@]})); then topo replace "${changed[@]}"; say "settings applied: restarted ${changed[*]}"
+  else say "settings applied: no service needed a restart"; fi
+}
+
 # --------------------------------------------------------------- upgrade/rollback
 cmd_upgrade() {
   require_production
@@ -601,6 +654,9 @@ cmd_upgrade() {
   [[ -n "$tag" ]] || die "usage: upgrade <new-image-tag> [--no-backup] (check out the new release first)"
   [[ "${2:-}" == --no-backup ]] && backup=false
   [[ "$tag" != "$old" ]] || die "already on $tag"
+  # The new release's .env layout (renamed settings, built-in values); the old file is kept as
+  # infra/.env.v<old>-<timestamp>, which a rollback to <old> restores.
+  "${RENDER[@]}" migrate-env --env "$DOTENV" --version "$old"
   "${PREFLIGHT[@]}" --section runtime --pre-upgrade --quiet || die "the runtime preflight failed; fix it before upgrading"
   [[ "$backup" == true ]] && cmd_backup
   set_env SMARTHOST_IMAGE_TAG "$tag"
@@ -615,6 +671,13 @@ cmd_rollback() {
   local tag="${1:-}" dir="${2:-}" i; i="$(I)"
   [[ -n "$tag" && -n "$dir" ]] || die "usage: rollback <previous-image-tag> <backup-dir taken before the upgrade> (released migrations are not reversed in place)"
   for s in opendkim postfix app nginx validator delivery; do podman image exists "localhost/smarthost-$s:$tag" || die "image localhost/smarthost-$s:$tag is gone; check out that release and run 'prod build' with SMARTHOST_IMAGE_TAG=$tag"; done
+  # The configuration the upgrade kept for that release (infra/.env.v<tag>-<timestamp>), if any.
+  local kept; kept="$(ls -1t "$DOTENV.v${tag#v}-"* 2>/dev/null | head -n1 || true)"
+  if [[ -n "$kept" ]]; then
+    cp -p "$DOTENV" "$DOTENV.v$(envval SMARTHOST_IMAGE_TAG)-$(zdate +%Y%m%dT%H%M%S)"
+    cp -p "$kept" "$DOTENV"
+    say "restored the configuration kept for $tag ($kept)"
+  fi
   set_env SMARTHOST_IMAGE_TAG "$tag"
   render
   cmd_stop
@@ -629,6 +692,10 @@ usage() {
 usage: smarthostctl prod <command>     (catto-mail production; runbook: docs/production/runbook.md)
  configuration
   init-env              create infra/.env from infra/production.env.example with secrets generated here
+  env-migrate           rewrite an older infra/.env in the current grouped layout, keeping every value;
+                        the old file stays as infra/.env.v<version>-<timestamp> (upgrade runs this)
+  settings-apply        apply the settings changed in the dashboard (System › Settings): render with them
+                        and restart the services whose settings changed (the host agent runs this)
   check                 validate infra/.env against the contract and the production safety rules
   render                check, then render env files, the production topology and the systemd units
  install and lifecycle
@@ -683,8 +750,10 @@ USAGE
 cmd="${1:-}"; shift || true
 case "$cmd" in
   init-env) "${RENDER[@]}" init-env --production ;;
+  env-migrate) "${RENDER[@]}" migrate-env --env "$DOTENV" ;;
   check) "${RENDER[@]}" check --env "$DOTENV" ;;
-  render) require_production; "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" ;;
+  render) require_production; fetch_overrides; "${RENDER[@]}" render --env "$DOTENV" --out "$GEN" --overrides "$GEN/overrides.json" ;;
+  settings-apply) cmd_settings_apply ;;
   build) require_production; cmd_build ;;
   tls) require_production; cmd_tls "$@" ;;
   install) cmd_install ;;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Logging;
 
+use App\Util\Clock;
 use Monolog\Formatter\FormatterInterface;
 use Monolog\LogRecord;
 
@@ -25,7 +26,7 @@ final class ContractFormatter implements FormatterInterface
     public function format(LogRecord $record): string
     {
         $fields = [
-            'ts' => $record->datetime->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z'),
+            'ts' => $record->datetime->setTimezone(Clock::zone())->format('Y-m-d\TH:i:s.vP'), // the installation's zone
             'level' => strtolower($record->level->getName()),
             // The webhook worker runs the same image and kernel as the web app.
             'service' => \in_array('smarthost:webhook:work', $_SERVER['argv'] ?? [], true) ? 'webhook-worker' : 'symfony-app',

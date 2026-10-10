@@ -1,6 +1,7 @@
 """Phase 8: production configuration rules and the rendered production topology."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -94,7 +95,7 @@ class ProductionRulesTest(unittest.TestCase):
             values = render.parse_dotenv(target)
             self.assertEqual(0o600, target.stat().st_mode & 0o777)
             for row in render.contract():
-                if row["secret"] and row["name"] != "MAILER_DSN":
+                if row["secret"]:
                     self.assertGreaterEqual(len(values[row["name"]]), 32, row["name"])
             self.assertRegex(values["APP_ENCRYPTION_KEYS"], r"^prod1:[A-Za-z0-9+/]{43}=$")
             before = target.read_text()
@@ -129,7 +130,7 @@ class ProductionRenderingTest(unittest.TestCase):
     def test_the_script_is_valid_bash_with_rendered_values(self) -> None:
         self.assertEqual(0, subprocess.run(["bash", "-n", str(self.out / "podman/smarthost-production.sh")]).returncode)
         self.assertIn("I=smarthost\n", self.script)
-        self.assertIn("TAG=0.2.2\n", self.script)
+        self.assertIn("TAG=0.2.3\n", self.script)
         self.assertIn("EGRESS_ENABLED=true\n", self.script)
         self.assertNotRegex(self.script, r"\$\{[A-Z][A-Z0-9_]*\}", "every contract placeholder is rendered")
 
@@ -242,3 +243,96 @@ class ProductionRenderingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnvLayoutTest(unittest.TestCase):
+    """The .env holds only the operator's settings, grouped; older files migrate keeping every value;
+    the dashboard's overrides are merged with the same rules as the application."""
+
+    def test_templates_hold_the_grouped_layout_without_phase_comments(self) -> None:
+        for path, environment in ((ROOT / "infra/.env.example", "development"), (ROOT / "infra/production.env.example", "production")):
+            text = path.read_text()
+            self.assertEqual(render.layout_names(environment), list(render.parse_dotenv(path)))
+            self.assertNotIn("consumers:", text)
+            self.assertNotRegex(text, r"(?i)\| phase \d")
+            self.assertIn("# === Installation ===", text)
+            self.assertIn("SMARTHOST_TIMEZONE=Africa/Johannesburg", text)
+        dev = render.parse_dotenv(ROOT / "infra/.env.example")
+        for internal in ("SMARTHOST_DB_HOST", "POSTGRES_USER", "OPENDKIM_KEY_DIR", "APP_ENV", "TRUSTED_PROXIES", "ACME_EMAIL", "BACKUP_DIR"):
+            self.assertNotIn(internal, dev, f"{internal} is built in")
+        self.assertEqual("postgres", render.resolve(dev)["SMARTHOST_DB_HOST"])
+        self.assertEqual("", render.resolve({"SMARTHOST_ENV": "production"})["TRUSTED_PROXIES"])
+
+    def test_migrate_env_keeps_values_and_the_old_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp) / ".env"
+            # An old-style file: every variable, phase comments, the pre-0.2.3 time-zone name.
+            old = {**render.defaults("development"), "APP_TIMEZONE": "Europe/London", "MAILER_DSN": "",
+                   "APP_SECRET": "s" * 32, "DELIVERY_GLOBAL_CONCURRENCY": "7", "MAILPIT_SMTP_PORT": "1026"}
+            old.pop("SMARTHOST_TIMEZONE")
+            env.write_text("# consumers: app | phase 2\n" + "".join(f"{k}={v}\n" for k, v in old.items()))
+            env.chmod(0o600)
+            out = subprocess.run([sys.executable, str(ROOT / "infra/lib/smarthost_render.py"), "migrate-env", "--env", str(env), "--version", "0.2.2"],
+                                 capture_output=True, text=True)
+            self.assertEqual(0, out.returncode, out.stderr)
+            kept = list(Path(tmp).glob(".env.v0.2.2-*"))
+            self.assertEqual(1, len(kept), out.stdout)
+            self.assertRegex(kept[0].name, r"^\.env\.v0\.2\.2-\d{8}T\d{6}$")
+            self.assertIn("APP_TIMEZONE=Europe/London", kept[0].read_text(), "the old file is kept unchanged")
+            new = render.parse_dotenv(env)
+            self.assertEqual(0o600, env.stat().st_mode & 0o777)
+            self.assertEqual("Europe/London", new["SMARTHOST_TIMEZONE"], "renamed, value kept")
+            self.assertNotIn("APP_TIMEZONE", new)
+            self.assertNotIn("MAILER_DSN", new)
+            self.assertEqual("7", new["DELIVERY_GLOBAL_CONCURRENCY"])
+            self.assertEqual("s" * 32, new["APP_SECRET"])
+            self.assertEqual("1026", new["MAILPIT_SMTP_PORT"], "a built-in setting with another value stays, under its own heading")
+            self.assertNotIn("SMARTHOST_DB_HOST", new, "a built-in setting with its default value is dropped")
+            self.assertIn(render.CHANGED_BUILT_INS, env.read_text())
+            again = subprocess.run([sys.executable, str(ROOT / "infra/lib/smarthost_render.py"), "migrate-env", "--env", str(env)],
+                                   capture_output=True, text=True)
+            self.assertIn("already in the current layout", again.stdout)
+            self.assertEqual(1, len(list(Path(tmp).glob(".env.v*"))), "nothing to migrate: no second copy")
+
+    def test_the_old_time_zone_name_is_named_by_check(self) -> None:
+        values = {**render.defaults("development"), "APP_TIMEZONE": "Africa/Johannesburg"}
+        values.pop("SMARTHOST_TIMEZONE")
+        errors = render.validate({k: v for k, v in values.items() if k in render.layout_names("development") or k == "APP_TIMEZONE"})
+        self.assertTrue(any("APP_TIMEZONE is now SMARTHOST_TIMEZONE" in e and "env-migrate" in e for e in errors), errors)
+        self.assertTrue(any("SMARTHOST_TIMEZONE must be an IANA" in e for e in
+                            render.validate({**{n: render.defaults("development")[n] for n in render.layout_names("development")}, "SMARTHOST_TIMEZONE": "+02:00"})))
+
+    def test_dashboard_overrides_are_merged_with_the_catalogue_rules(self) -> None:
+        raw = {n: render.defaults("development")[n] for n in render.layout_names("development")}
+        merged, applied, ignored, errors = render.merge_overrides(raw, {
+            "SMARTHOST_TIMEZONE": "Europe/London", "DELIVERY_GLOBAL_CONCURRENCY": "25",
+            "APP_LOGIN_LINK_TTL_SECONDS": "5", "APP_SECRET": "x", "BACKUP_KEEP": "3"})
+        self.assertEqual({"SMARTHOST_TIMEZONE": "Europe/London", "DELIVERY_GLOBAL_CONCURRENCY": "25"}, applied)
+        self.assertEqual({"APP_LOGIN_LINK_TTL_SECONDS", "APP_SECRET", "BACKUP_KEEP"}, set(ignored))
+        self.assertEqual("Europe/London", merged["SMARTHOST_TIMEZONE"])
+        self.assertEqual([], errors)
+        # Values that together break a production rule: none is applied, the reason is kept.
+        prod = production_values()
+        merged, applied, ignored, errors = render.merge_overrides(prod, {"APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS": "100"})
+        self.assertEqual({}, applied)
+        self.assertTrue(errors and merged == prod)
+
+    def test_render_applies_overrides_and_reports_them(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env, out, ov = Path(tmp) / ".env", Path(tmp) / "g", Path(tmp) / "overrides.json"
+            raw = {n: render.defaults("development")[n] for n in render.layout_names("development")}
+            raw.update({n: "secret-" + n.lower() + "-0123456789" for n in raw if any(r["name"] == n and r["secret"] for r in render.contract())})
+            env.write_text("".join(f"{k}={v}\n" for k, v in raw.items()))
+            ov.write_text(json.dumps({"SMARTHOST_TIMEZONE": "Europe/London", "APP_SECRET": "x"}))
+            render.render(env, out, ov)
+            state = json.loads((out / "settings.json").read_text())
+            self.assertEqual({"SMARTHOST_TIMEZONE": "Europe/London"}, state["applied"])
+            self.assertIn("APP_SECRET", state["ignored"])
+            self.assertEqual("Africa/Johannesburg", state["config"]["SMARTHOST_TIMEZONE"], "the .env value, shown beside the override")
+            self.assertTrue(state["rendered_at"].endswith("+01:00") or state["rendered_at"].endswith("+00:00"), state["rendered_at"])
+            self.assertIn("SMARTHOST_TIMEZONE=Europe/London", (out / "env/app.env").read_text())
+            pod = (out / "podman/smarthost-pod.sh").read_text()
+            self.assertIn("TIMEZONE=Europe/London", pod)
+            self.assertIn('--env "TZ=$TIMEZONE"', pod)
+            self.assertIn('-c "timezone=$TIMEZONE"', pod)
+            self.assertIn("/etc/smarthost/settings.json:ro", pod)

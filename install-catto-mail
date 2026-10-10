@@ -24,7 +24,7 @@ REPO_URL="https://github.com/rrcatto/catto-mail.git"
 SERVICE_USER="cattomail"
 VERSION=""
 WEB_HOST="" MTA_HOST="" BOUNCE_DOMAIN="" ADMIN_EMAIL="" MAIL_FROM="" PUBLIC_IP="" SSH_PORT=""
-ACME_EMAIL="" ACME_PROVIDER="" ACME_CREDENTIALS=""
+ACME_EMAIL="" ACME_PROVIDER="" ACME_CREDENTIALS="" TIMEZONE="Africa/Johannesburg"
 INTERACTIVE=true APPLY_FIREWALL=false STOP_AFTER=0 EGRESS=true
 LOG="/var/log/catto-mail-install.log"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +44,9 @@ usage: sudo ./install-catto-mail [options]
   --mail-from ADDRESS     sender of the sign-in mail, at a domain you will give a DKIM key
   --public-ip ADDRESS     the server's public IPv4 (default: detected)
   --ssh-port PORT         the SSH port the firewall keeps open (default: detected)
+  --timezone ZONE         the installation's time zone, an IANA name (default: Africa/Johannesburg,
+                          SAST); every time catto-mail shows or writes uses it, and the server's
+                          own time zone is set to it
   --acme-email ADDRESS    Let's Encrypt account address (optional; certificates later otherwise)
   --acme-provider NAME    lego DNS provider (e.g. cloudflare) or "manual"
   --acme-credentials FILE file with the DNS provider's API credentials (NAME=value lines)
@@ -68,6 +71,7 @@ while (($#)); do
     --mail-from) MAIL_FROM="${2:-}"; shift 2 ;;
     --public-ip) PUBLIC_IP="${2:-}"; shift 2 ;;
     --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
+    --timezone) TIMEZONE="${2:-}"; shift 2 ;;
     --acme-email) ACME_EMAIL="${2:-}"; shift 2 ;;
     --acme-provider) ACME_PROVIDER="${2:-}"; shift 2 ;;
     --acme-credentials) ACME_CREDENTIALS="${2:-}"; shift 2 ;;
@@ -155,7 +159,7 @@ public_ipv4() {
 # ---------------------------------------------------------------------------- steps
 echo "catto-mail installer — log: $LOG"
 : >>"$LOG" 2>/dev/null || { echo "Run the installer as root (sudo)." >&2; exit 1; }
-echo "==== $(date -u +%FT%TZ) install-catto-mail $*" >>"$LOG"
+echo "==== $(date +%FT%T%:z) install-catto-mail $*" >>"$LOG"
 
 step "Checking that this is root on Ubuntu 26.04"
 [[ $EUID -eq 0 ]] || fail "the installer is not running as root" "run it with sudo, or as root" yes
@@ -254,6 +258,8 @@ else
   [[ "$BOUNCE_DOMAIN" != "$WEB_HOST" ]] || fail "the bounce domain must differ from the web host name" "use e.g. bounce.example.com" yes
   valid_email "$ADMIN_EMAIL" || fail "'$ADMIN_EMAIL' is not an e-mail address" "pass --admin-email" yes
   valid_email "$MAIL_FROM" || fail "'$MAIL_FROM' is not an e-mail address" "pass --mail-from" yes
+  [[ -e "/usr/share/zoneinfo/$TIMEZONE" && "$TIMEZONE" =~ ^[A-Za-z][A-Za-z0-9_+/-]*$ ]] \
+    || fail "'$TIMEZONE' is not a time zone name" "pass --timezone with an IANA name, e.g. Africa/Johannesburg (list: timedatectl list-timezones)" yes
   [[ -z "$ACME_EMAIL" ]] || valid_email "$ACME_EMAIL" || fail "'$ACME_EMAIL' is not an e-mail address" "pass --acme-email" yes
   [[ "$ACME_PROVIDER" =~ ^[a-z0-9._-]{0,40}$ ]] || fail "'$ACME_PROVIDER' is not a lego DNS provider name" "see: lego dnshelp" yes
   [[ -z "$ACME_CREDENTIALS" || "$ACME_CREDENTIALS" =~ ^/[A-Za-z0-9._/-]+$ ]] \
@@ -269,7 +275,7 @@ values = {
     'APP_MAIL_FROM': '$MAIL_FROM', 'SMARTHOST_IMAGE_TAG': '$tag', 'SMARTHOST_SSH_PORT': '$SSH_PORT',
     'VALIDATOR_SMTP_HELO_HOSTNAME': '$MTA_HOST', 'VALIDATOR_SMTP_MAIL_FROM': 'validator@$BOUNCE_DOMAIN',
     'ACME_EMAIL': '$ACME_EMAIL', 'ACME_DNS_PROVIDER': '$ACME_PROVIDER', 'ACME_CREDENTIALS_FILE': '$ACME_CREDENTIALS',
-    'SMARTHOST_EGRESS_ENABLED': '$EGRESS',
+    'SMARTHOST_EGRESS_ENABLED': '$EGRESS', 'SMARTHOST_TIMEZONE': '$TIMEZONE',
 }
 text = open(path).read()
 for key, value in values.items():
@@ -291,7 +297,13 @@ prod check >>"$LOG" 2>&1 || fail "the configuration does not satisfy the product
 # Sign-in links are e-mailed to the administrator, and catto-mail receives only bounce-domain mail:
 # warn when mail for that address would come to this server or has nowhere to go.
 mailbox="$(prod preflight --admin-mailbox 2>>"$LOG" || true)"
-if [[ -n "$mailbox" ]]; then warn "$mailbox"; else pass; fi
+# The server keeps the installation's time zone too, so the journal and timers use it.
+zone="$(python3 "$(APP_DIR)/infra/lib/smarthost_render.py" get SMARTHOST_TIMEZONE --env "$ENV_FILE" 2>>"$LOG")"
+if [[ -n "$zone" ]] && [[ "$(timedatectl show -p Timezone --value 2>/dev/null)" != "$zone" ]] \
+    && ! run timedatectl set-timezone "$zone"; then
+  mailbox="${mailbox:+$mailbox; }the server's time zone is not $zone: run timedatectl set-timezone $zone"
+fi
+if [[ -n "$mailbox" ]]; then warn "$mailbox"; else pass "time zone $zone"; fi
 
 step "Building the container images (several minutes)"
 tag="$(grep -E '^SMARTHOST_IMAGE_TAG=' "$ENV_FILE" | cut -d= -f2)"
@@ -346,7 +358,7 @@ prod firewall >"$FW" 2>>"$LOG" || fail "the firewall rules could not be generate
 if [[ "$APPLY_FIREWALL" == true ]]; then
   grep -q "tcp dport { $SSH_PORT, 25, 443 }" "$FW" || fail "the generated rules do not keep SSH port $SSH_PORT open" "pass --ssh-port" yes
   run nft -f "$FW" || fail "nft could not apply the rules" "see the log" yes
-  grep -q catto_mail /etc/nftables.conf 2>/dev/null || { echo "include \"$FW\"" >> /etc/nftables.conf; }
+  grep -qF "$FW" /etc/nftables.conf 2>/dev/null || { echo "include \"$FW\"" >> /etc/nftables.conf; }
   run systemctl enable nftables
   pass "applied; SSH port $SSH_PORT, 25 and 443 open"
 else

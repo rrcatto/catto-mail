@@ -14,7 +14,7 @@ import os
 import signal
 import sys
 
-from . import logs
+from . import logs, models
 from .config import Config, ConfigError
 
 
@@ -45,7 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if heartbeat_age() < limit else 1
     if args.command == "check-db":
         return asyncio.run(_check_db(cfg))
-    logs.setup(cfg.log_level, cfg.log_format)
+    models.set_zone(cfg.timezone)
+    logs.setup(cfg.log_level, cfg.log_format, cfg.timezone)
     return asyncio.run(_run(cfg, args.exit_when_idle, args.stats_file))
 
 

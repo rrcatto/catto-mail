@@ -15,6 +15,7 @@ import os
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 class ConfigError(Exception):
@@ -29,6 +30,7 @@ class Config:
     smarthost_env: str
     log_level: str
     log_format: str
+    timezone: ZoneInfo  # the installation's zone (SMARTHOST_TIMEZONE): logs, timestamps, database session
     db_host: str
     db_port: int
     db_name: str
@@ -60,7 +62,7 @@ class Config:
 
         return make_conninfo(host=self.db_host, port=self.db_port, dbname=self.db_name, sslmode=self.db_sslmode,
                              user=self.db_user, password=self.db_password, connect_timeout=10,
-                             application_name="smarthost-validator")
+                             application_name="smarthost-validator", options=f"-c timezone={self.timezone.key}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Config:
@@ -85,6 +87,7 @@ class Config:
             smarthost_env=smarthost_env,
             log_level=r.choice("SMARTHOST_LOG_LEVEL", ("debug", "info", "warning", "error")),
             log_format=r.choice("SMARTHOST_LOG_FORMAT", ("json", "text"), default="json"),
+            timezone=_zone(r.required("SMARTHOST_TIMEZONE")),
             db_host=r.required("SMARTHOST_DB_HOST"),
             db_port=r.integer("SMARTHOST_DB_PORT", 1, 65535),
             db_name=r.required("SMARTHOST_DB_NAME"),
@@ -172,3 +175,12 @@ class _Reader:
         if raw not in allowed:
             raise ConfigError(f"{name} must be one of {', '.join(allowed)}.")
         return raw
+
+
+def _zone(name: str) -> ZoneInfo:
+    try:
+        if name in ("Local", "localtime") or name.startswith(("/", ".")):
+            raise ValueError(name)
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ConfigError(f"SMARTHOST_TIMEZONE must be an IANA time zone name such as Africa/Johannesburg, not {name!r}.") from exc

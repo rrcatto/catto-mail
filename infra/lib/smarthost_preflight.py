@@ -385,6 +385,7 @@ def cert_info(der: bytes | None) -> CertInfo:
 
     def date(key: str) -> dt.datetime:
         raw = field_(key)
+        # openssl prints certificate dates in GMT; they are shown in the installation zone.
         return dt.datetime.strptime(re.sub(r"\s+", " ", raw.strip()), "%b %d %H:%M:%S %Y %Z").replace(tzinfo=dt.UTC)
 
     subject, issuer = field_("subject"), field_("issuer")
@@ -567,8 +568,14 @@ class Preflight:
     # Before an upgrade the checkout is already the new release, whose grant matrix the upgrade
     # applies itself; the grants are compared by the runtime preflight after the upgrade.
     pre_upgrade: bool = False
+    raw: dict[str, str] | None = None   # the .env as written (default: values); checked against the layout
     results: list[Check] = field(default_factory=list)
-    now: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
+    now: dt.datetime | None = None   # default: now in the installation's zone (SMARTHOST_TIMEZONE)
+
+    def __post_init__(self) -> None:
+        self.zone = render.zone_of(self.values)
+        if self.now is None:
+            self.now = dt.datetime.now(self.zone)
 
     def add(self, section: str, name: str, level: str, detail: str = "", activation: bool = False) -> None:
         if self.activation and activation and level == "WARN":
@@ -581,7 +588,7 @@ class Preflight:
 
     # ---------------------------------------------------------------- config
     def check_config(self) -> None:
-        errors = render.validate(self.v)
+        errors = render.validate(self.raw if self.raw is not None else self.v)
         if errors:
             for e in errors:
                 self.add("config", "production rule", "FAIL", e, True)
@@ -649,6 +656,13 @@ class Preflight:
             self.add("host", "lingering (start at boot)", "PASS" if "Linger=yes" in out else "WARN", out.strip() or "unknown", True)
             rc, out = h.run("systemctl", "--user", "is-active", "podman.socket")
             self.add("host", "podman.socket", "PASS" if out.strip() == "active" else "WARN", out.strip())
+            # The journal and the systemd timers (backups, renewal) use the host's own zone.
+            want = self.zone.key
+            rc, out = h.run("timedatectl", "show", "-p", "Timezone", "--value")
+            have = out.strip()
+            self.add("host", "time zone", "PASS" if have == want else "WARN",
+                     f"{have} (SMARTHOST_TIMEZONE)" if have == want
+                     else f"the server uses {have or 'an unknown zone'}, the installation {want}: as root, timedatectl set-timezone {want}")
 
     def check_low_ports(self, remote: bool) -> None:
         """The rootless service user's systemd binds the ingress ports (25, 443) on the host."""
@@ -835,7 +849,7 @@ class Preflight:
         base = f"127.{random.randint(64, 254)}.{random.randint(1, 254)}"
         sources = (f"{base}.2", f"{base}.3")
         nonce = f"{random.getrandbits(48):012x}"
-        since = (self.now - dt.timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = (self.now - dt.timedelta(seconds=5)).isoformat(timespec="seconds")
 
         def target(bind: str) -> tuple[str, int]:
             host, _, port = bind.rpartition(":")
@@ -922,6 +936,7 @@ class Preflight:
             except (OSError, ValueError, smtplib.SMTPException, subprocess.CalledProcessError) as exc:
                 self.add("tls", f"{label} certificate", "FAIL", f"cannot read the served certificate: {exc}", True)
                 continue
+            info.not_before, info.not_after = info.not_before.astimezone(self.zone), info.not_after.astimezone(self.zone)
             days = (info.not_after - self.now).days
             if info.not_before > self.now or info.not_after < self.now:
                 self.add("tls", f"{label} certificate validity", "FAIL", f"valid {info.not_before:%Y-%m-%d} to {info.not_after:%Y-%m-%d}", True)
@@ -1299,7 +1314,8 @@ def main(argv: list[str]) -> int:
                    help="print a warning if the administrator's address cannot receive the sign-in mail (the installer)")
     a = p.parse_args(argv)
     env = Path(os.environ.get("SMARTHOST_DOTENV") or ROOT / "infra/.env")
-    values = render.parse_dotenv(env)
+    raw = render.parse_dotenv(env)
+    values = render.resolve(raw)   # the .env's values completed with the built-in ones
     host = Host(values)
     if a.checklist:
         records = []
@@ -1323,7 +1339,7 @@ def main(argv: list[str]) -> int:
         if level != "PASS":
             print(f"{values.get('APP_ADMIN_EMAIL', '')}: {detail}")
         return 0
-    pf = Preflight(values, host, Resolver(a.resolver), activation=a.activation, egress_probe=a.smtp_egress_probe,
+    pf = Preflight(values, host, Resolver(a.resolver), raw=raw, activation=a.activation, egress_probe=a.smtp_egress_probe,
                    pre_upgrade=a.pre_upgrade)
     return report(pf.run(tuple(a.section) if a.section else None), a.json, a.quiet)
 

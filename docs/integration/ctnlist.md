@@ -45,13 +45,13 @@ are never reported to catto-mail as global opt-outs.
 
 ```json
 {
-  "id": "0199…", "type": "repermission.responded", "created_at": "2026-10-07T11:19:00Z",
+  "id": "0199…", "type": "repermission.responded", "created_at": "2026-10-07T11:19:00.000000+02:00",
   "data": {
     "batch": {"id": "0199…", "name": "2019 newsletter list", "list_id": "news.example.org"},
     "entry_id": "0199…",
     "address": "Reader@example.org",
     "response": "confirmed",
-    "responded_at": "2026-10-07T11:18:58Z"
+    "responded_at": "2026-10-07T11:18:58.000000+02:00"
   }
 }
 ```

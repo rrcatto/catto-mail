@@ -134,7 +134,9 @@ flowchart TD
 
 | Command | Effect |
 |---|---|
-| `smarthostctl init-env` | Creates `infra/.env` (mode 0600, gitignored) from `infra/.env.example` and fills the secrets with random development values. Never overwrites. |
+| `smarthostctl init-env` | Creates `infra/.env` (mode 0600, gitignored) from `infra/.env.example` and fills the secrets with random development values. Never overwrites. The file holds only the settings you set, grouped under headings; every other variable is built in (`docs/contracts/environment.md`, *The .env file*). |
+| `smarthostctl env-migrate` | Rewrites an older `infra/.env` in the current grouped layout, keeping every value; the old file stays as `infra/.env.v<version>-<timestamp>` (gitignored). |
+| `smarthostctl settings-apply` | Applies the settings changed in the dashboard (System › Settings): renders with them and recreates the pod (volumes kept). Every render reads them from the running database. |
 | `smarthostctl render` | Writes one env file per consumer (least privilege, following the contract's *Consumers* column) and renders the pod script (`infra/podman/`) and the systemd units (`infra/systemd/`) into `infra/.generated/`. Rejects any variable that is not in the contract. |
 | `smarthostctl build` | Builds the seven Smarthost images (`localhost/smarthost-*:dev`). The PostgreSQL and Mailpit images are not built; pull them once (§1). |
 | `smarthostctl secrets` | Creates disposable self-signed TLS certificates for Postfix and nginx as Podman secrets. |
@@ -617,6 +619,19 @@ be resolved", the application "could not translate host name postgres"), so diff
 on each run. Screenshots of every page were taken with headless Chromium at 1,440 and 390 pixels
 (`docs/screenshots/`) without script errors, CSP violations or horizontal overflow. The rehearsal
 and the installer test were not run.
+
+Latest runs (v0.2.3, installation time zone, grouped `.env`, System › Settings, on the local
+Podman 4.9.3 engine): `test phase2` 303 tests and 4,986 assertions; `test phase3` 298 pytest tests
+and the 10,000-address run; `test phase4` the Go units and 34 integration tests; `test phase8`
+25/25 (74 unit tests); `check-contracts` 2,823; `verify` 175/176 (T06, §1; the run before lost T14
+and T16 as well, to a logged "Temporary failure in name resolution" for `opendkim` and a slow DSN
+delivery); `test phase8-rehearsal` 68/68 (its first run found that pruning and the restore
+rehearsal did not recognise backup names with the zone's offset, fixed before the release). End
+to end against the pod during the work: `phase6-e2e` 75/75; `phase4-e2e`, `phase5-e2e` and
+`phase7-e2e` failed only checks with a logged name-resolution timeout (§1), and `phase4-e2e`
+scenario A passed 4/4 on its re-run. Every
+screenshot was retaken at 0.2.3. The installer test was not run (the engine host has only 65,536
+subordinate IDs).
 
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender

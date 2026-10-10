@@ -323,7 +323,7 @@ INSERT INTO message_events (id, message_id, event_type, event_source, source_eve
 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, 0), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), $11::jsonb, $12)
 ON CONFLICT (event_source, source_event_key) WHERE source_event_key IS NOT NULL DO NOTHING
 RETURNING id::text`, ids.UUIDv7(), ev.MessageID, ev.Type, ev.Source, ev.Key, ev.FailureScope, ev.SMTPCode,
-		ev.Enhanced, ev.RemoteHost, truncate(ev.Diagnostic, 2000), string(rawMeta), ev.OccurredAt.UTC()).Scan(&id)
+		ev.Enhanced, ev.RemoteHost, truncate(ev.Diagnostic, 2000), string(rawMeta), ev.OccurredAt).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil // already recorded (replay)
 	}
@@ -341,7 +341,7 @@ RETURNING id::text`, ids.UUIDv7(), ev.MessageID, ev.Type, ev.Source, ev.Key, ev.
 	if _, err := t.Exec(ctx, `
 UPDATE messages SET current_status = $2,
        resolved_at = CASE WHEN $3 THEN COALESCE(resolved_at, $4) ELSE resolved_at END
- WHERE id = $1`, m.ID, next, status.Terminal[next], ev.OccurredAt.UTC()); err != nil {
+ WHERE id = $1`, m.ID, next, status.Terminal[next], ev.OccurredAt); err != nil {
 		return id, true, err
 	}
 	t.count(m.JobID, m.Status, next)
@@ -470,7 +470,7 @@ func (s *Store) CreateMessages(ctx context.Context, job *Job, me string, msgs []
 	if err := t.fence(ctx, job.ID, me); err != nil {
 		return 0, err
 	}
-	now := time.Now().UTC()
+	now := time.Now()
 	var mids, rids, refs, addrs, toks, rps, tts, sts []string
 	for _, m := range msgs {
 		mids, rids, refs = append(mids, m.ID), append(rids, m.Recipient.ID), append(refs, m.Recipient.ExternalRef)
@@ -676,7 +676,7 @@ UPDATE send_job_recipients SET subject = NULL, html_body = NULL, text_body = NUL
 	}
 	if _, err := t.Exec(ctx, `
 INSERT INTO usage_records (id, client_id, usage_type, quantity, reference_type, reference_id, occurred_at)
-VALUES ($1, $2, 'message_submitted', 1, 'message', $3, $4)`, ids.UUIDv7(), job.ClientID, a.MessageID, a.OccurredAt.UTC()); err != nil {
+VALUES ($1, $2, 'message_submitted', 1, 'message', $3, $4)`, ids.UUIDv7(), job.ClientID, a.MessageID, a.OccurredAt); err != nil {
 		return false, err
 	}
 	return true, t.commit(ctx)
@@ -705,7 +705,7 @@ func (s *Store) RecordSubmissionFailed(ctx context.Context, job *Job, me, messag
 	// Without a queue id the postfix_submission key rule (<message_id>:<qid>)
 	// cannot apply, so the refusal is keyed as a delivery_daemon lifecycle event.
 	inserted, err := t.appendEvent(ctx, m, Event{MessageID: messageID, Type: "submission_failed", Source: "delivery_daemon", Key: "submission_failed:" + messageID,
-		SMTPCode: code, Enhanced: enhanced, Diagnostic: diagnostic, OccurredAt: time.Now().UTC(), Metadata: map[string]any{"stage": stage}})
+		SMTPCode: code, Enhanced: enhanced, Diagnostic: diagnostic, OccurredAt: time.Now(), Metadata: map[string]any{"stage": stage}})
 	if err != nil {
 		return false, err
 	}

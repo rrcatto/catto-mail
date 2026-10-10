@@ -45,7 +45,7 @@ final class GrantMatrixTest extends TestCase
     public function testTableAndColumnPrivilegesEqualTheContract(): void
     {
         $matrix = self::matrix();
-        self::assertCount(48, $matrix, 'schema.md §6 should list all 48 tables');
+        self::assertCount(49, $matrix, 'schema.md §6 should list all 49 tables');
         $c = Db::owner();
         $problems = [];
         foreach ($matrix as $table => $roles) {

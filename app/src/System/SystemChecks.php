@@ -17,7 +17,7 @@ use Symfony\Component\Uid\Uuid;
  * The latest result of every system check and its meaningful history (system_checks,
  * system_check_runs; specification 2.11). A result enters the history when it was
  * explicitly requested, when it differs from the previous result, or as the first
- * scheduled result of the check on a UTC day, so the history stays small and readable.
+ * scheduled result of the check on a day of the installation's zone, so the history stays small and readable.
  */
 final class SystemChecks
 {
@@ -63,7 +63,8 @@ final class SystemChecks
                     [6 => null === $ms ? ParameterType::NULL : ParameterType::INTEGER]);
                 $trigger = $requested ? 'requested' : ($changed ? 'changed' : null);
                 if (null === $trigger && (int) $this->connection->fetchOne(
-                    "SELECT count(*) FROM system_check_runs WHERE check_key = ? AND ran_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'", [$key]) === 0) {
+                    "SELECT count(*) FROM system_check_runs WHERE check_key = ? AND ran_at >= date_trunc('day', now() AT TIME ZONE CAST(? AS text)) AT TIME ZONE CAST(? AS text)",
+                    [$key, Clock::zone()->getName(), Clock::zone()->getName()]) === 0) {
                     $trigger = 'scheduled';
                 }
                 if (null !== $trigger) {

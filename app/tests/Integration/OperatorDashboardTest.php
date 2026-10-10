@@ -24,11 +24,11 @@ final class OperatorDashboardTest extends DashboardTestCase
     private function unmatchedDsn(?string $candidate = null): string
     {
         $id = SchemaFixtures::id();
-        Db::owner()->insert('unmatched_dsns', ['id' => $id, 'received_at' => gmdate('Y-m-d H:i:s'), 'spool_ingest_key' => 'k-'.$id,
+        Db::owner()->insert('unmatched_dsns', ['id' => $id, 'received_at' => date('Y-m-d H:i:s'), 'spool_ingest_key' => 'k-'.$id,
             'content_sha256' => str_repeat('c', 64), 'classification' => 'hard_bounce', 'final_recipient' => 'lost@example.test',
             'enhanced_status_code' => '5.1.1', 'reporting_mta' => 'mx.example.test', 'raw_message' => "From: MAILER-DAEMON\r\n\r\n<script>alert(1)</script>",
             'detail_json' => json_encode(['diagnostic' => 'smtp; 550 5.1.1 unknown user', 'action' => 'failed',
-                'candidates' => null === $candidate ? [] : [['message_id' => $candidate, 'sender_matches_returned_from' => true, 'created_at' => gmdate('c')]]])]);
+                'candidates' => null === $candidate ? [] : [['message_id' => $candidate, 'sender_matches_returned_from' => true, 'created_at' => date('c')]]])]);
 
         return $id;
     }
@@ -73,7 +73,7 @@ final class OperatorDashboardTest extends DashboardTestCase
         // one, the panel says so instead of inventing a figure.
         self::assertStringContainsString('Postfix queue', $overview);
         self::assertStringContainsString('no snapshot yet', $overview);
-        // Times are shown in the dashboard's time zone (APP_TIMEZONE; the test pod uses Africa/Johannesburg).
+        // Times are shown in the dashboard's time zone (SMARTHOST_TIMEZONE; the test pod uses Africa/Johannesburg).
         self::assertStringContainsString('Times are shown in SAST (Africa/Johannesburg)', $overview);
         self::assertMatchesRegularExpression('/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d SAST/', self::text($this->page('/dashboard/operator/audit')));
         // The figures of the period come from the job counters; the charts get them as JSON.
@@ -220,7 +220,7 @@ final class OperatorDashboardTest extends DashboardTestCase
         $target = SchemaFixtures::id();
         foreach (range(1, 3) as $i) {
             Db::owner()->insert('audit_log', ['id' => SchemaFixtures::id(), 'actor_type' => 'system', 'actor_id' => 'test', 'action' => 'phase6.test_action',
-                'target_type' => 'phase6_target', 'target_id' => $target, 'occurred_at' => gmdate('Y-m-d H:i:s', time() - $i),
+                'target_type' => 'phase6_target', 'target_id' => $target, 'occurred_at' => date('Y-m-d H:i:s', time() - $i),
                 'detail_json' => json_encode(['note' => "entry $i", 'password' => 'hunter2-SECRET', 'api_key_hash' => 'deadbeefSECRET', 'nested' => ['signing_secret' => 'SECRETVALUE']])]);
         }
         $this->signIn($this->newUser(true));

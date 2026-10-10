@@ -115,9 +115,20 @@ Migration `Version20261007000100`.
   only on pages with a chart). The Content-Security-Policy allows no inline styles: data-driven
   widths are SVG attributes.
 - `App\Dashboard\Search`: the global search, tenant-scoped in a client workspace.
-- `App\Util\InstallationTime`: the installation time zone (`APP_TIMEZONE`) for dashboard times,
-  overview buckets, date filters, API key expiry, quota days and months, usage and billing.
+- `App\Util\InstallationTime`: the installation time zone (`SMARTHOST_TIMEZONE`, SAST by
+  default). The kernel makes it PHP's default zone on boot and `SessionTimeZoneMiddleware` sets it
+  on every database session, so `Clock::now()`, the API and webhook timestamps (RFC 3339 with the
+  zone's offset), logs, dashboard times, overview buckets, quota days and months, usage and billing
+  are all in it.
 - Migration `Version20261011000100` (the submission-rate index).
+
+**Settings in the dashboard (owner decision, 2026-10-10):** System › Settings
+(`OperatorSettingsController`) lists the operational settings of `docs/contracts/settings.json`
+(copied into the image; `App\System\SettingCatalog`) with their `infra/.env` value, the dashboard
+value (`SettingOverrides`, table `setting_overrides`, audited with a reason) and the value in force
+(`AppliedSettings`, the rendered `/etc/smarthost/settings.json`). Changing and applying need
+`SYSTEM.SETTINGS.MANAGE`; applying is the host request `settings.apply`. Console:
+`smarthost:settings list|set|reset`. Migration `Version20261012000100`.
 
 **Later phases:** retention commands; a public registration workflow (owner decision).
 

@@ -50,9 +50,10 @@ final class QuotaTest extends ApiTestCase
         self::assertStringEndsWith('/problems/quota-exceeded', $problem['type']);
         self::assertSame(['metric' => 'validation_addresses', 'period' => 'day', 'limit' => 5, 'used' => 2, 'requested' => 4],
             array_intersect_key($problem['quota'], array_flip(['metric', 'period', 'limit', 'used', 'requested'])));
-        // The day is the installation's (APP_TIMEZONE): it resets at its next midnight, given in UTC.
-        $midnight = (new \DateTimeImmutable('tomorrow', $this->container()->get(\App\Util\InstallationTime::class)->zone))->setTimezone(new \DateTimeZone('UTC'));
+        // The day is the installation's (SMARTHOST_TIMEZONE): it resets at its next midnight.
+        $midnight = new \DateTimeImmutable('tomorrow', $this->container()->get(\App\Util\InstallationTime::class)->zone);
         self::assertStringStartsWith($midnight->format('Y-m-d\\TH:i:s'), $problem['quota']['resets_at']);
+        self::assertStringEndsWith('+02:00', $problem['quota']['resets_at'], 'API timestamps carry the installation zone\'s offset');
         self::assertSame(1, (int) Db::owner()->fetchOne('SELECT count(*) FROM validation_jobs WHERE client_id = ?', [$client->getId()->toRfc4122()]), 'nothing created');
         self::assertSame(202, $this->validation($key, 3)->getStatusCode());
         $r = $this->validation($key, 1);

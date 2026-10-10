@@ -96,8 +96,11 @@ def check(key: str, component: str, title: str, result: str, summary: str) -> di
 
 class Agent:
     def __init__(self, values: dict[str, str], host: Host, generated: Path, resolver: Resolver | None = None,
-                 now=lambda: dt.datetime.now(dt.UTC)):
-        self.v, self.host, self.gen, self.now = values, host, generated, now
+                 now=None):
+        self.v, self.host, self.gen = values, host, generated
+        # Every time the agent reports is in the installation's zone (SMARTHOST_TIMEZONE).
+        self.zone = render.zone_of(values)
+        self.now = now or (lambda: dt.datetime.now(self.zone))
         self.i = values["SMARTHOST_INSTANCE"]
         self.resolver = resolver or Resolver()
         self.next_host = self.next_preflight = self.next_app = 0.0
@@ -203,13 +206,15 @@ class Agent:
         try:
             for ln in Path("/proc/stat").read_text().splitlines():
                 if ln.startswith("btime "):
-                    boot = dt.datetime.fromtimestamp(int(ln.split()[1]), dt.UTC).isoformat(timespec="seconds")
+                    boot = dt.datetime.fromtimestamp(int(ln.split()[1]), self.zone).isoformat(timespec="seconds")
         except (OSError, ValueError):
             pass
         _, tag = self.host.run("git", "-C", str(ROOT), "describe", "--tags", "--always")
         _, commit = self.host.run("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")
         try:
-            firewall = "catto_mail" in Path("/etc/nftables.conf").read_text(errors="replace")
+            # The rules themselves, or the include line of the installation guide and installer.
+            conf = Path("/etc/nftables.conf").read_text(errors="replace")
+            firewall = "catto_mail" in conf or "catto-mail-firewall.nft" in conf
         except OSError:
             firewall = None
         acme = self.read_json(self.gen / "acme/status.json")
@@ -293,7 +298,7 @@ class Agent:
                        f"Podman {f['podman']} as {f['user']} (uid {f['uid']}), rootless: {f['rootless']}."))
         c.append(check("host.firewall", "security", "Host firewall (nftables)",
                        "pass" if f["firewall_configured"] else "warn",
-                       "the catto_mail ruleset is in /etc/nftables.conf" if f["firewall_configured"]
+                       "the catto_mail ruleset is in /etc/nftables.conf (directly or included)" if f["firewall_configured"]
                        else "no catto_mail ruleset in /etc/nftables.conf: review and apply `smarthostctl prod firewall` (installation guide)"))
         c.append(check("boot.linger", "boot", "Lingering (services start without a login, at boot)",
                        "pass" if f["linger"] else "fail", "on" if f["linger"] else f"off: as root run loginctl enable-linger {f['user']}"))
@@ -456,6 +461,9 @@ class Agent:
                 return False, "the request has no operator to audit", {}
             rc, out = self.prod("live-enable" if action.endswith("enable") else "live-disable", "--operator", by, "--note", note)
             return rc == 0, out.strip()[-1500:], {}
+        if action == "settings.apply":
+            rc, out = self.prod("settings-apply")
+            return rc == 0, out.strip()[-1500:] or "settings applied", {}
         if action == "backup.run":
             rc, out = self.prod("backup", "--scheduled")
             return rc == 0, out.strip()[-800:], {}
@@ -551,7 +559,7 @@ def main(argv: list[str]) -> int:
     sub.add_parser("facts")
     a = p.parse_args(argv)
     env = Path(os.environ.get("SMARTHOST_DOTENV") or ROOT / "infra/.env")
-    values = render.parse_dotenv(env)
+    values = render.load(env)   # the .env's values completed with the built-in ones
     generated = Path(os.environ.get("SMARTHOST_GENERATED") or ROOT / "infra/.generated")
     agent = Agent(values, Host(values), generated)
     if a.cmd == "facts":

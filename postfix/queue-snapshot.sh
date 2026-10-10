@@ -7,7 +7,7 @@
 set -eu
 dir="${SMARTHOST_POSTFIX_OBSERVABILITY_DIR:?}/queue"
 keep="${POSTFIX_QUEUE_SNAPSHOT_RETENTION_COUNT:?}"
-ts=$(date -u +%Y%m%dT%H%M%SZ)
+ts=$(date +%Y%m%dT%H%M%S%z)  # the installation's zone (TZ=SMARTHOST_TIMEZONE), e.g. 20261010T105500+0200
 umask 027
 tmp="$dir/.tmp-$ts.$$"
 if postqueue -j > "$tmp"; then

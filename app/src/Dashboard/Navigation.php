@@ -40,6 +40,7 @@ final class Navigation
         'system' => ['System', 'system', [
             ['setup', 'System setup', 'dashboard_operator_setup', 'SYSTEM.SETUP.MANAGE'],
             ['diagnostics', 'Diagnostics', 'dashboard_operator_diagnostics', 'PLATFORM.SYSTEM.VIEW'],
+            ['settings', 'Settings', 'dashboard_operator_settings', 'PLATFORM.SYSTEM.VIEW'],
             ['audit', 'Audit log', 'dashboard_operator_audit', 'PLATFORM.AUDIT.VIEW'],
         ]],
         'access' => ['Access', 'access', [

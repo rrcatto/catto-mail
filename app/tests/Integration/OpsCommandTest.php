@@ -29,9 +29,9 @@ final class OpsCommandTest extends DashboardTestCase
         $id = 'ops-test-'.bin2hex(random_bytes(4));
         Db::owner()->executeStatement('UPDATE delivery_heartbeats SET stopped_at = now() WHERE stopped_at IS NULL');
         Db::owner()->insert('delivery_heartbeats', [
-            'worker_id' => $id, 'version' => '0.1.7', 'started_at' => gmdate('Y-m-d H:i:s'), 'last_seen_at' => gmdate('Y-m-d H:i:s'),
+            'worker_id' => $id, 'version' => '0.1.7', 'started_at' => date('Y-m-d H:i:s'), 'last_seen_at' => date('Y-m-d H:i:s'),
             'live_delivery' => $held ? 'false' : 'true', 'send_work_held' => $held ? 'true' : 'false', 'outbound_paused' => $paused ? 'true' : 'false',
-            'global_rate_per_minute' => 5, 'queue_snapshot_at' => null === $deferred ? null : gmdate('Y-m-d H:i:s'),
+            'global_rate_per_minute' => 5, 'queue_snapshot_at' => null === $deferred ? null : date('Y-m-d H:i:s'),
             'queue_active' => null === $deferred ? null : 1, 'queue_deferred' => $deferred, 'queue_hold' => null === $deferred ? null : 0,
             'queue_incoming' => null === $deferred ? null : 0,
         ]);

@@ -113,7 +113,7 @@ func (t *tx) applyPolicy(ctx context.Context) error {
 			if n < t.cfg.SoftBounceThreshold {
 				continue
 			}
-			until := time.Now().UTC().Add(t.cfg.SoftBounceWindow)
+			until := time.Now().Add(t.cfg.SoftBounceWindow)
 			expires = &until
 		}
 		var active bool
@@ -198,7 +198,7 @@ func (s *Store) RecordSuppressed(ctx context.Context, job *Job, me, messageID st
 	}
 	m := &msgState{ID: messageID, JobID: job.ID, ClientID: job.ClientID, Status: cur}
 	inserted, err := t.appendEvent(ctx, m, Event{MessageID: messageID, Type: "message_suppressed", Source: "delivery_daemon",
-		Key: "message_suppressed:" + messageID, OccurredAt: time.Now().UTC(),
+		Key: "message_suppressed:" + messageID, OccurredAt: time.Now(),
 		Metadata: map[string]any{"suppression_id": sup.ID, "reason": sup.Reason, "checked": "before_submission"}})
 	if err != nil {
 		return false, err

@@ -69,7 +69,7 @@ final class SystemTest extends DashboardTestCase
             'SELECT run_trigger FROM system_check_runs WHERE check_key = ? ORDER BY ran_at', [$key]));
         self::assertSame('fail', $checks->get($key)['result']);
         Db::owner()->executeStatement("UPDATE system_check_runs SET ran_at = ran_at - interval '1 day' WHERE check_key = ?", [$key]);
-        $checks->record($one('fail'), SystemCheckSource::Agent, false);   // unchanged, but the first of a new UTC day
+        $checks->record($one('fail'), SystemCheckSource::Agent, false);   // unchanged, but the first of a new day
         self::assertSame('scheduled', Db::owner()->fetchOne('SELECT run_trigger FROM system_check_runs WHERE check_key = ? ORDER BY ran_at DESC LIMIT 1', [$key]));
         self::assertSame(0, $checks->record([['key' => 'BAD KEY', 'component' => 'host', 'result' => 'pass']], SystemCheckSource::Agent, false));
     }

@@ -5,7 +5,7 @@ import pytest
 
 from smarthost_validator.dns_check import DnsChecker
 from smarthost_validator.limits import AcceptAllPolicy, Limits, ProviderBackoff
-from smarthost_validator.models import ClaimedAddress, FinalResult, RetryResult, utcnow
+from smarthost_validator.models import ClaimedAddress, FinalResult, RetryResult, now
 from smarthost_validator.pipeline import Evaluator
 from smarthost_validator.smtp_probe import SmtpProber
 from tests.fakes.fake_resolver import FakeResolver
@@ -79,7 +79,7 @@ async def test_probing_disabled(smtp_server):
     ("block-554@example.test", "smtp.rcpt.5.7.1"),
 ])
 async def test_temporary_conditions_retry_with_backoff(smtp_server, original, reason):
-    before = utcnow()
+    before = now()
     out = await evaluator(smtp_server).evaluate(addr(original, attempt=1))
     assert isinstance(out, RetryResult) and out.last_error == reason
     assert out.next_attempt_at >= before + timedelta(seconds=60)  # base delay; never immediate

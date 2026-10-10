@@ -285,7 +285,7 @@ SELECT s.key, s.value::int, COALESCE((SELECT count(*) FROM messages m WHERE m.se
 	}
 }
 
-// writeLog appends Postfix log records (syslog format, UTC) to the active log.
+// writeLog appends Postfix log records (syslog format, local time) to the active log.
 func (e *env) writeLog(lines ...string) {
 	f, err := os.OpenFile(filepath.Join(e.obs, "log", "postfix.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
@@ -297,14 +297,15 @@ func (e *env) writeLog(lines ...string) {
 	}
 }
 
-func logTime(t time.Time) string { return t.UTC().Format("Jan 02 15:04:05") }
+// Postfix writes local time in the installation's zone (TZ in its container; the test pod sets the same).
+func logTime(t time.Time) string { return t.Local().Format("Jan 02 15:04:05") }
 
 func (e *env) snapshot(at time.Time, qids ...string) {
 	var b strings.Builder
 	for _, q := range qids {
 		fmt.Fprintf(&b, `{"queue_name":"deferred","queue_id":%q,"recipients":[{"address":"x@y"}]}`+"\n", q)
 	}
-	name := filepath.Join(e.obs, "queue", "snapshot-"+at.UTC().Format("20060102T150405Z")+".jsonl")
+	name := filepath.Join(e.obs, "queue", "snapshot-"+at.Format("20060102T150405-0700")+".jsonl")
 	if err := os.WriteFile(name, []byte(b.String()), 0o640); err != nil {
 		e.t.Fatal(err)
 	}

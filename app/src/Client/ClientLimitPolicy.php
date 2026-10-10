@@ -25,7 +25,7 @@ use Doctrine\DBAL\Connection;
  *   webhook endpoints           APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT
  *   sending domains             APP_CLIENT_SENDING_DOMAIN_LIMIT
  *
- * Volume quotas (validation jobs/addresses, send jobs/recipients per calendar day or month in APP_TIMEZONE)
+ * Volume quotas (validation jobs/addresses, send jobs/recipients per calendar day or month in SMARTHOST_TIMEZONE)
  * have no installation ceiling: commercial plans are an operator decision, so they
  * apply only where an operator set them for the client (App\Client\QuotaEnforcer).
  */

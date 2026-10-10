@@ -17,7 +17,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GEN="$REPO/infra/.generated"
 TOOLS=localhost/smarthost-testtools:dev
-ev() { grep -E "^$1=" "$REPO/infra/.env" | head -n1 | cut -d= -f2-; }
+ev() { python3 "$REPO/infra/lib/smarthost_render.py" get "$1" --env "$REPO/infra/.env"; }  # .env value, else built-in
 
 podman pod exists smarthost && [[ "$(podman pod inspect smarthost --format '{{.State}}')" == Running ]] \
   || { echo "phase6-e2e: the smarthost pod is not running (smarthostctl start)" >&2; exit 2; }
@@ -38,7 +38,7 @@ console smarthost:user:create "$USER_A" >/dev/null
 console smarthost:user:create "$USER_B" >/dev/null
 console smarthost:membership:set "$USER_A" "$CLIENT_A" member >/dev/null
 console smarthost:membership:set "$USER_B" "$CLIENT_B" admin >/dev/null
-since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+since="$(date +%Y-%m-%dT%H:%M:%S%:z)"
 
 out="$(podman run --rm --network smarthost-internal --label project=smarthost \
   -e SMARTHOST_DB_NAME="$(ev SMARTHOST_DB_NAME)" -e SMARTHOST_DB_OWNER_USER="$(ev SMARTHOST_DB_OWNER_USER)" \

@@ -47,6 +47,10 @@ OBS_DIR=${SMARTHOST_POSTFIX_OBSERVABILITY_DIR}
 SPOOL_DIR=${SMARTHOST_DSN_SPOOL_DIR}
 DELIVERY_UID=${SMARTHOST_DELIVERY_UID}
 SPOOL_GID=${SMARTHOST_SPOOL_GID}
+# The installation's time zone: every container gets TZ, PostgreSQL also its
+# timezone and log_timezone settings (environment contract, SMARTHOST_TIMEZONE).
+TIMEZONE=${SMARTHOST_TIMEZONE}
+PG_ZONE_ARGS=(postgres -c "timezone=$TIMEZONE" -c "log_timezone=$TIMEZONE")
 
 say() { echo "smarthost-pod: $*"; }
 die() { echo "smarthost-pod: ERROR: $*" >&2; exit 1; }
@@ -58,7 +62,7 @@ env_file() { echo "--env-file=$GENERATED/env/$1.env"; }
 service() {
   local name="$1"; shift
   podman create --name "smarthost-$name" --pod "$POD" --label project=smarthost \
-    --pull never --restart on-failure "$@" >/dev/null
+    --pull never --restart on-failure --env "TZ=$TIMEZONE" "$@" >/dev/null
   say "created container smarthost-$name"
 }
 
@@ -86,7 +90,7 @@ cmd_create() {
     -v smarthost-postgres-data:/var/lib/postgresql/data \
     --health-cmd "pg_isready -h 127.0.0.1 -U $POSTGRES_USER -d $POSTGRES_DB -q" \
     --health-interval 10s --health-start-period 30s --health-retries 6 \
-    "$PG_IMAGE"
+    "$PG_IMAGE" "${PG_ZONE_ARGS[@]}"
   service mailpit \
     -e "MP_SMTP_BIND_ADDR=0.0.0.0:$MAILPIT_SMTP_PORT" -e MP_UI_BIND_ADDR=0.0.0.0:8025 \
     --health-cmd "/mailpit readyz" --health-interval 15s --health-start-period 5s --health-retries 4 \
@@ -108,7 +112,8 @@ cmd_create() {
     -v "smarthost-postfix-observability:$OBS_DIR" -v "smarthost-dsn-spool:$SPOOL_DIR" \
     --health-cmd smarthost-postfix-healthcheck --health-interval 15s --health-start-period 15s --health-retries 4 \
     localhost/smarthost-postfix:dev
-  service symfony-app "$(env_file app)" \
+  # The rendered settings in force (System › Settings shows them), read-only.
+  service symfony-app "$(env_file app)" -v "$GENERATED/settings.json:/etc/smarthost/settings.json:ro" \
     --health-cmd smarthost-fpm-healthcheck --health-interval 15s --health-start-period 10s --health-retries 4 \
     localhost/smarthost-app:dev
   # The real Symfony webhook worker (Phase 7). The php-fpm base image sets STOPSIGNAL
@@ -147,7 +152,7 @@ run_task() {
     *) die "unknown task $task" ;;
   esac
   podman rm --force --ignore "smarthost-$task" >/dev/null
-  if podman run --rm --name "smarthost-$task" --pod "$POD" --label project=smarthost --pull never "${args[@]}" \
+  if podman run --rm --name "smarthost-$task" --pod "$POD" --label project=smarthost --pull never --env "TZ=$TIMEZONE" "${args[@]}" \
       | sed "s/^/  $task: /"; then
     say "task $task ok"
   else

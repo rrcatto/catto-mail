@@ -26,7 +26,7 @@ GEN="$REPO/infra/.generated"
 TOOLS=localhost/smarthost-testtools:dev
 SCEN="${*:-A B C D E}"
 PASS=0; FAIL=0
-ev() { grep -E "^$1=" "$REPO/infra/.env" | head -n1 | cut -d= -f2-; }
+ev() { python3 "$REPO/infra/lib/smarthost_render.py" get "$1" --env "$REPO/infra/.env"; }  # .env value, else built-in
 pass() { PASS=$((PASS+1)); echo "  PASS  $*"; }
 fail() { FAIL=$((FAIL+1)); echo "  FAIL  $*"; }
 jget() { python3 -c "import json,sys; d=json.loads(sys.stdin.read().strip().splitlines()[-1]); print(eval(sys.argv[1], {}, {'d': d}))" "$1"; }

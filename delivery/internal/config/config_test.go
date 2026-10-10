@@ -5,12 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func valid() map[string]string {
 	return map[string]string{
 		"SMARTHOST_ENV": "development", "SMARTHOST_PUBLIC_BASE_URL": "https://smarthost.localhost/",
-		"SMARTHOST_LIVE_DELIVERY_ENABLED": "false", "SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS": "false",
+		"SMARTHOST_LIVE_DELIVERY_ENABLED": "false", "SMARTHOST_TIMEZONE": "Africa/Johannesburg", "SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS": "false",
 		"SMARTHOST_BOUNCE_DOMAIN": "Bounce.Example", "SMARTHOST_VERP_LOCAL_PART": "bounce", "SMARTHOST_VERP_DELIMITER": "+",
 		"SMARTHOST_SUBMISSION_USERNAME": "u", "SMARTHOST_SUBMISSION_PASSWORD": "p",
 		"DELIVERY_POSTFIX_SUBMISSION_HOST": "postfix", "DELIVERY_POSTFIX_SUBMISSION_PORT": "587",
@@ -60,11 +61,19 @@ func TestValidConfig(t *testing.T) {
 	if !strings.Contains(c.DSN(), `password='x\'y'`) {
 		t.Fatalf("dsn quoting: %s", c.DSN())
 	}
+	if c.TimeZone.String() != "Africa/Johannesburg" || !strings.Contains(c.DSN(), `timezone='Africa/Johannesburg'`) {
+		t.Fatalf("time zone: %v %s", c.TimeZone, c.DSN())
+	}
+	if _, off := time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC).In(c.TimeZone).Zone(); off != 2*3600 {
+		t.Fatalf("SAST is UTC+2, got offset %d", off)
+	}
 }
 
 func TestFailsClosed(t *testing.T) {
 	for name, mut := range map[string]func(map[string]string){
-		"missing variable": func(m map[string]string) { delete(m, "DELIVERY_LEASE_SECONDS") },
+		"missing variable":  func(m map[string]string) { delete(m, "DELIVERY_LEASE_SECONDS") },
+		"missing time zone": func(m map[string]string) { delete(m, "SMARTHOST_TIMEZONE") },
+		"unknown time zone": func(m map[string]string) { m["SMARTHOST_TIMEZONE"] = "Mars/Olympus" },
 		"unverified in prod": func(m map[string]string) {
 			m["SMARTHOST_ENV"] = "production"
 			m["SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS"] = "true"

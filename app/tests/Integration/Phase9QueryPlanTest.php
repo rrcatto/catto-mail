@@ -114,7 +114,7 @@ final class Phase9QueryPlanTest extends DashboardTestCase
         $domain = $this->verifiedDomain($measured)->getId()->toRfc4122();
         // Six jobs of 10,000 messages (the per-job ceiling).
         for ($j = 0; $j < 6; ++$j) {
-            $job = DashboardFixtures::sendJob($o, $m, $domain, 10000, ['created_at' => gmdate('Y-m-d H:i:s', time() - 7200 - $j)]);
+            $job = DashboardFixtures::sendJob($o, $m, $domain, 10000, ['created_at' => date('Y-m-d H:i:s', time() - 7200 - $j)]);
             $this->measuredJobs[] = $job['job'];
             DashboardFixtures::transportEvents($o, $job['job']);
         }
@@ -177,7 +177,7 @@ final class Phase9QueryPlanTest extends DashboardTestCase
             $other = $others[$j];
             $d = $o->fetchOne("INSERT INTO sending_domains (id, client_id, domain, status, verification_token, verified_at) VALUES (gen_random_uuid(), ?, ?, 'verified', ?, now()) RETURNING id",
                 [$other, 'bulk'.$j.'-'.bin2hex(random_bytes(3)).'.example', bin2hex(random_bytes(16))]);
-            $bulk = DashboardFixtures::sendJob($o, $other, (string) $d, 10000, ['created_at' => gmdate('Y-m-d H:i:s', time() - 86400 * (1 + $j % 5))]);
+            $bulk = DashboardFixtures::sendJob($o, $other, (string) $d, 10000, ['created_at' => date('Y-m-d H:i:s', time() - 86400 * (1 + $j % 5))]);
             $this->measuredJobs[] = $bulk['job'];
             DashboardFixtures::transportEvents($o, $bulk['job']);
         }

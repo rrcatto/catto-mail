@@ -6,7 +6,9 @@ installation. The normative contract is the OpenAPI document
 contract wins. An installation serves both documents at `/docs/api`.
 
 Base URL: `https://<your Smarthost host>/v1`. All requests and responses are JSON over
-HTTPS; errors are `application/problem+json` (RFC 9457).
+HTTPS; errors are `application/problem+json` (RFC 9457). Timestamps are RFC 3339 in the
+installation's time zone with its offset (South African Standard Time by default, for example
+`2026-10-10T10:48:56.123456+02:00`); parse them as RFC 3339, never as a fixed `Z` suffix.
 
 ## 1. What the four key results mean
 
@@ -95,9 +97,9 @@ A quota refusal happens before any work is created and names the quota:
 
 ```json
 {"type": "https://<host>/problems/quota-exceeded", "title": "Quota exceeded", "status": 429,
- "detail": "This request would exceed the client's daily send recipients quota of 5000 (4950 used, 100 requested); it resets at 2026-10-08T00:00:00.000000Z.",
+ "detail": "This request would exceed the client's daily send recipients quota of 5000 (4950 used, 100 requested); it resets at 2026-10-08T00:00:00.000000+02:00.",
  "quota": {"metric": "send_recipients", "period": "day", "limit": 5000, "used": 4950,
-           "requested": 100, "resets_at": "2026-10-08T00:00:00.000000Z"}}
+           "requested": 100, "resets_at": "2026-10-08T00:00:00.000000+02:00"}}
 ```
 
 Quotas count work as it is admitted (jobs created, addresses submitted, recipients
@@ -186,7 +188,7 @@ managing endpoints.
 Each delivery is an HTTPS `POST` of one event:
 
 ```json
-{"id": "<event id>", "type": "send.completed", "created_at": "2026-10-07T10:00:00.000000Z", "data": { ... }}
+{"id": "<event id>", "type": "send.completed", "created_at": "2026-10-07T10:00:00.000000+02:00", "data": { ... }}
 ```
 
 **Verify the signature before parsing:**

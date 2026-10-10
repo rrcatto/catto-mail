@@ -55,9 +55,11 @@ Placeholders below: `mail.example.com` (public hostname), `mta.example.com` (mai
    - Once started, the ingress socket holds both ports even while nginx restarts. `prod stop`
      releases them until the next `prod start`.
    - Ports below 25 stay privileged, so set no lower value.
-3. As `cattomail` (log in as that user, e.g. `machinectl shell cattomail@` or SSH, so that
-   `systemctl --user` works):
+3. As `cattomail` (from root: `sudo -iu cattomail`; the user has no password and nobody logs in as
+   it). `smarthostctl` finds the user's own systemd by itself; for the plain `systemctl --user`
+   below, point the shell at it first:
    ```sh
+   export XDG_RUNTIME_DIR=/run/user/$(id -u)
    systemctl --user enable --now podman.socket
    git clone https://github.com/<owner>/catto-mail.git && cd catto-mail && git checkout v<release>
    infra/bin/smarthostctl prod init-env && $EDITOR infra/.env    # section 2
@@ -412,7 +414,7 @@ restores the newest backup into a temporary database, verifies it and drops it. 
 accepts the encrypted file directly. Manual backups:
 
 ```sh
-prod backup                                   # infra/.generated/backups/<UTC timestamp>/ (0700)
+prod backup                                   # infra/.generated/backups/<local timestamp+offset>/ (0700)
 prod backup /srv/backups/catto-$(date +%F) --with-queue   # include the Postfix queue and DSN spool (pause first)
 ```
 
@@ -435,18 +437,35 @@ systemd user timer or cron.
 
 ```sh
 git fetch && git checkout v<new>
-prod upgrade <new-tag>          # runtime preflight, backup, build <new-tag>, recreate (migrations + grants at start), runtime preflight
+prod env-migrate                # infra/.env in the new layout; the old file stays as infra/.env.v<old>-<timestamp>
+prod upgrade <new-tag>          # env-migrate, runtime preflight, backup, build <new-tag>, recreate (migrations + grants at start), runtime preflight
 prod preflight                  # full check
 ```
 
 - Released migrations are immutable; schema changes come as new migrations.
 - Read the CHANGELOG for new variables. `prod check` names any missing ones; add them to
   `infra/.env` first.
+- Settings changed in the dashboard (System › Settings, `setting_overrides`) stay in force: every
+  render reads them from the database (the last copy, `infra/.generated/overrides.json`, when
+  PostgreSQL is down).
 
 **Rollback:**
-- `prod rollback <previous-tag> <backup-dir-from-the-upgrade>` restores the previous images and the
-  database taken before the upgrade.
+- `prod rollback <previous-tag> <backup-dir-from-the-upgrade>` restores the previous images, the
+  `infra/.env` the upgrade kept for that version and the database taken before the upgrade.
 - Mail state recorded after the backup is lost, so roll back promptly, and pause first.
+
+## 18a. Settings and the time zone
+
+- `infra/.env` holds the operator's settings in groups; every other contract variable is built in
+  (`docs/contracts/environment.md`, *The .env file*). `prod env-migrate` rewrites an older file.
+- System › Settings changes the operational settings without changing the file; `prod
+  settings-apply` (the host agent's `settings.apply`) renders with them and replaces only the
+  containers whose environment changed, every container when the time zone changed, and
+  reinstalls the units when a timer changed. Without the dashboard:
+  `prod console smarthost:settings list` and `... reset NAME --operator EMAIL --reason TEXT`.
+- `SMARTHOST_TIMEZONE` (default `Africa/Johannesburg`) is the zone of every time catto-mail shows,
+  writes or computes. Keep the server's zone the same (`timedatectl set-timezone`, as root): the
+  journal and the timers use it, and the host check warns when they differ.
 
 ## 19. Recovery
 

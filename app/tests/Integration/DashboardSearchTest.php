@@ -65,7 +65,7 @@ final class DashboardSearchTest extends DashboardTestCase
         $set = DashboardFixtures::sendJob($o, $client->getId()->toRfc4122(), $this->verifiedDomain($client)->getId()->toRfc4122(), 3);
         foreach ($set['messages'] as $i => $message) {
             $o->insert('message_events', ['id' => SchemaFixtures::id(), 'message_id' => $message, 'event_type' => 'submitted_to_postfix',
-                'event_source' => 'postfix_submission', 'source_event_key' => 'rate-'.$message, 'occurred_at' => gmdate('Y-m-d H:i:00')]);
+                'event_source' => 'postfix_submission', 'source_event_key' => 'rate-'.$message, 'occurred_at' => date('Y-m-d H:i:00')]);
         }
         $this->signIn($this->newUser(true));
 

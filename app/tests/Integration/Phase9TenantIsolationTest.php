@@ -30,7 +30,7 @@ final class Phase9TenantIsolationTest extends DashboardTestCase
         [$a, $aKey] = $this->newApiClient();
         [$b, $bKey] = $this->newApiClient();
         $o = Db::owner();
-        $last = (new \DateTimeImmutable('first day of last month 12:00', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+        $last = (new \DateTimeImmutable('first day of last month 12:00'))->format('Y-m-d H:i:s');
         $bId = $b->getId()->toRfc4122();
         $bDomain = $this->verifiedDomain($b);
         $bValidation = Phase9Fixtures::meteredValidationJob($o, $bId, 20, $last);

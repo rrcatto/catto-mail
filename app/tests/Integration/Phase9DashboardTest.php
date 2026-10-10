@@ -48,7 +48,7 @@ final class Phase9DashboardTest extends DashboardTestCase
         self::assertSame(5000, (int) Db::owner()->fetchOne('SELECT send_recipients_per_day FROM client_limits WHERE client_id = ?', [$id]));
         $this->submit($page, "/dashboard/operator/clients/$id/notes", ['note' => 'Contract signed 2026-10-01; abuse contact verified by phone.']);
         self::assertStringContainsString('abuse contact verified by phone', self::text($this->page($page)));
-        $r = $this->submit($page, "/dashboard/operator/clients/$id/api-keys", ['name' => 'production server', 'expires_on' => gmdate('Y-m-d', strtotime('+90 days'))]);
+        $r = $this->submit($page, "/dashboard/operator/clients/$id/api-keys", ['name' => 'production server', 'expires_on' => date('Y-m-d', strtotime('+90 days'))]);
         self::assertSame(200, $r->getStatusCode());
         self::assertSame(1, preg_match('/shk_[A-Za-z0-9_-]{43}/', (string) $r->getContent(), $m));
         self::assertStringContainsString('no-store', (string) $r->headers->get('Cache-Control'));
@@ -112,7 +112,7 @@ final class Phase9DashboardTest extends DashboardTestCase
     {
         $client = $this->newClient(ClientStatus::Active, 'Metered Co');
         $id = $client->getId()->toRfc4122();
-        $recent = gmdate('Y-m-d H:i:s', time() - 600);
+        $recent = date('Y-m-d H:i:s', time() - 600);
         $send = Phase9Fixtures::meteredSendJob(Db::owner(), $id, $this->verifiedDomain($client)->getId()->toRfc4122(), 120, $recent);
         Phase9Fixtures::events(Db::owner(), \array_slice($send['messages'], 0, 12), 'hard_bounce', $recent, 'recipient');
         $operator = $this->newUser(true);
@@ -126,7 +126,7 @@ final class Phase9DashboardTest extends DashboardTestCase
         self::assertSame('throttled the client', Db::owner()->fetchOne('SELECT acknowledgement_note FROM client_alerts WHERE id = ?', [$alert]));
 
         $usage = self::text($this->page('/dashboard/operator/usage?period=current_month'));
-        // Usage periods are calendar days of the installation's time zone (APP_TIMEZONE).
+        // Usage periods are calendar days of the installation's time zone (SMARTHOST_TIMEZONE).
         $local = new \DateTimeImmutable('now', $this->container()->get(\App\Util\InstallationTime::class)->zone);
         $month = ['from' => $local->format('Y-m-01'), 'to' => $local->modify('first day of next month')->format('Y-m-d')];
         self::assertStringContainsString('Metered Co', $usage);

@@ -1,0 +1,567 @@
+{
+  "description": "Settings an administrator may change in the dashboard (System > Settings). A change is stored in the database (setting_overrides) and takes precedence over infra/.env without changing the file; it takes effect when it is applied (the configuration is rendered again and the affected services restart). Every name is a variable of docs/contracts/environment.md and of the .env layout; secrets, the database, networks and ports, certificates and keys, host and domain names, addresses, the live-delivery switch and other safety switches are never listed here.",
+  "settings": [
+    {
+      "name": "SMARTHOST_TIMEZONE",
+      "label": "Time zone (IANA name, e.g. Africa/Johannesburg)",
+      "kind": "timezone",
+      "group": "Installation"
+    },
+    {
+      "name": "SMARTHOST_LOG_LEVEL",
+      "label": "Log level",
+      "kind": "choice",
+      "choices": [
+        "debug",
+        "info",
+        "warning",
+        "error"
+      ],
+      "group": "Installation"
+    },
+    {
+      "name": "POSTFIX_MESSAGE_SIZE_LIMIT",
+      "label": "Largest message Postfix accepts (bytes)",
+      "kind": "integer",
+      "min": 1048576,
+      "max": 104857600,
+      "group": "Mail server and domains"
+    },
+    {
+      "name": "APP_LOGIN_LINK_TTL_SECONDS",
+      "label": "Sign-in link lifetime (seconds)",
+      "kind": "integer",
+      "min": 60,
+      "max": 86400,
+      "group": "Dashboard sign-in"
+    },
+    {
+      "name": "DELIVERY_GLOBAL_CONCURRENCY",
+      "label": "Simultaneous submissions to Postfix",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_PER_DOMAIN_CONCURRENCY",
+      "label": "Simultaneous submissions per recipient domain",
+      "kind": "integer",
+      "min": 1,
+      "max": 100,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_PER_DOMAIN_RATE_PER_MINUTE",
+      "label": "Messages per minute per recipient domain",
+      "kind": "integer",
+      "min": 1,
+      "max": 100000,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_GLOBAL_RATE_PER_MINUTE",
+      "label": "Installation-wide messages per minute (0 = no ceiling)",
+      "kind": "integer",
+      "min": 0,
+      "max": 100000,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_THROTTLED_CLIENT_RATE_PER_MINUTE",
+      "label": "Messages per minute of a throttled client",
+      "kind": "integer",
+      "min": 1,
+      "max": 100000,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_DEFERRAL_BACKOFF_SECONDS",
+      "label": "Back-off from a deferring domain (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 86400,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_POLL_INTERVAL_SECONDS",
+      "label": "Poll interval for new send work (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 3600,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_LEASE_SECONDS",
+      "label": "Lease on claimed send work (seconds)",
+      "kind": "integer",
+      "min": 10,
+      "max": 86400,
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_DSN_NOTIFY",
+      "label": "Delivery status notifications requested",
+      "kind": "choice",
+      "choices": [
+        "FAILURE,DELAY",
+        "FAILURE",
+        "SUCCESS,FAILURE,DELAY",
+        "NEVER"
+      ],
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_DSN_RET",
+      "label": "Content returned in a bounce",
+      "kind": "choice",
+      "choices": [
+        "HDRS",
+        "FULL"
+      ],
+      "group": "Delivery pacing"
+    },
+    {
+      "name": "DELIVERY_SOFT_BOUNCE_SUPPRESSION_THRESHOLD",
+      "label": "Soft bounces in a row that suppress an address",
+      "kind": "integer",
+      "min": 1,
+      "max": 100,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS",
+      "label": "Window for those soft bounces (days)",
+      "kind": "integer",
+      "min": 1,
+      "max": 365,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "DELIVERY_FILE_POLL_INTERVAL_SECONDS",
+      "label": "Poll interval for the Postfix log and bounce spool (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 3600,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "DELIVERY_RECONCILE_INTERVAL_SECONDS",
+      "label": "Reconciliation interval (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 86400,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "DELIVERY_RECONCILE_GRACE_SECONDS",
+      "label": "Grace before a missing message counts as lost (seconds)",
+      "kind": "integer",
+      "min": 0,
+      "max": 604800,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "DELIVERY_RECONCILE_MIN_SNAPSHOTS",
+      "label": "Queue snapshots a message must be missing from",
+      "kind": "integer",
+      "min": 2,
+      "max": 100,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS",
+      "label": "Postfix queue snapshot interval (seconds)",
+      "kind": "integer",
+      "min": 10,
+      "max": 3600,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "POSTFIX_QUEUE_SNAPSHOT_RETENTION_COUNT",
+      "label": "Queue snapshots kept",
+      "kind": "integer",
+      "min": 2,
+      "max": 10000,
+      "group": "Bounces and reconciliation"
+    },
+    {
+      "name": "VALIDATOR_CHUNK_SIZE",
+      "label": "Addresses claimed at a time",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_LEASE_SECONDS",
+      "label": "Lease on claimed addresses (seconds)",
+      "kind": "integer",
+      "min": 5,
+      "max": 86400,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_POLL_INTERVAL_SECONDS",
+      "label": "Poll interval for new validation work (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 3600,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_GLOBAL_CONCURRENCY",
+      "label": "Simultaneous checks",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_PER_DOMAIN_CONCURRENCY",
+      "label": "Simultaneous checks per domain",
+      "kind": "integer",
+      "min": 1,
+      "max": 100,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_PER_MX_CONCURRENCY",
+      "label": "Simultaneous checks per mail server",
+      "kind": "integer",
+      "min": 1,
+      "max": 100,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_MAX_ATTEMPTS",
+      "label": "Attempts per address",
+      "kind": "integer",
+      "min": 1,
+      "max": 100,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_RETRY_BASE_SECONDS",
+      "label": "First retry delay (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 86400,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_RETRY_MAX_SECONDS",
+      "label": "Longest retry delay (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 604800,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_DNS_TIMEOUT_SECONDS",
+      "label": "DNS timeout (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 120,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_SMTP_CONNECT_TIMEOUT_SECONDS",
+      "label": "SMTP connect timeout (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 600,
+      "group": "Email validation"
+    },
+    {
+      "name": "VALIDATOR_SMTP_COMMAND_TIMEOUT_SECONDS",
+      "label": "SMTP command timeout (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 600,
+      "group": "Email validation"
+    },
+    {
+      "name": "APP_API_RATE_LIMIT_PER_MINUTE",
+      "label": "API requests per minute per API key",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000000,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_THROTTLED_CLIENT_API_RATE_PER_MINUTE",
+      "label": "API requests per minute of a throttled client",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000000,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_API_MAX_REQUEST_BYTES",
+      "label": "Largest API request (bytes)",
+      "kind": "integer",
+      "min": 1024,
+      "max": 10485760,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_SEND_JOB_MAX_RECIPIENTS",
+      "label": "Recipients per send job",
+      "kind": "integer",
+      "min": 1,
+      "max": 10000,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH",
+      "label": "Recipients per recipient batch",
+      "kind": "integer",
+      "min": 1,
+      "max": 500,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_CLIENT_API_KEY_LIMIT",
+      "label": "API keys per client",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT",
+      "label": "Webhook endpoints per client",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_CLIENT_SENDING_DOMAIN_LIMIT",
+      "label": "Sending domains per client",
+      "kind": "integer",
+      "min": 1,
+      "max": 10000,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_DOMAIN_VERIFICATION_RECHECK_HOURS",
+      "label": "Sending-domain recheck interval (hours)",
+      "kind": "integer",
+      "min": 1,
+      "max": 8760,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_ACCEPTABLE_USE_POLICY_VERSION",
+      "label": "Acceptable-use policy version clients must accept (empty = none)",
+      "kind": "text",
+      "pattern": "^([A-Za-z0-9][A-Za-z0-9._-]{0,63})?$",
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_REPERMISSION_RESPONSE_DAYS",
+      "label": "Days a re-permission link stays valid",
+      "kind": "integer",
+      "min": 1,
+      "max": 365,
+      "group": "API and client limits"
+    },
+    {
+      "name": "APP_WEBHOOK_MAX_ATTEMPTS",
+      "label": "Delivery attempts per event",
+      "kind": "integer",
+      "min": 1,
+      "max": 100,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_TIMEOUT_SECONDS",
+      "label": "Request timeout (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 120,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS",
+      "label": "Connect timeout (seconds, at most the request timeout)",
+      "kind": "integer",
+      "min": 1,
+      "max": 120,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_POLL_INTERVAL_SECONDS",
+      "label": "Poll interval (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 3600,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_LEASE_SECONDS",
+      "label": "Lease on a claimed delivery (seconds)",
+      "kind": "integer",
+      "min": 5,
+      "max": 86400,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_RETRY_BASE_SECONDS",
+      "label": "First retry delay (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 86400,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_RETRY_MAX_SECONDS",
+      "label": "Longest retry delay (seconds)",
+      "kind": "integer",
+      "min": 1,
+      "max": 604800,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_WEBHOOK_SECRET_OVERLAP_HOURS",
+      "label": "Hours the previous signing secret stays valid",
+      "kind": "integer",
+      "min": 0,
+      "max": 720,
+      "group": "Webhooks"
+    },
+    {
+      "name": "APP_REPUTATION_MIN_MESSAGES",
+      "label": "Messages a client needs before rates are judged",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000000,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_HARD_BOUNCE_WARNING_PERCENT",
+      "label": "Hard-bounce warning (%)",
+      "kind": "decimal",
+      "min": 0,
+      "max": 100,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_HARD_BOUNCE_CRITICAL_PERCENT",
+      "label": "Hard-bounce critical (%)",
+      "kind": "decimal",
+      "min": 0,
+      "max": 100,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_COMPLAINT_WARNING_PERCENT",
+      "label": "Complaint warning (%)",
+      "kind": "decimal",
+      "min": 0,
+      "max": 100,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_COMPLAINT_CRITICAL_PERCENT",
+      "label": "Complaint critical (%)",
+      "kind": "decimal",
+      "min": 0,
+      "max": 100,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_DEFERRAL_WARNING_PERCENT",
+      "label": "Deferral warning (%)",
+      "kind": "decimal",
+      "min": 0,
+      "max": 100,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_DEFERRAL_CRITICAL_PERCENT",
+      "label": "Deferral critical (%)",
+      "kind": "decimal",
+      "min": 0,
+      "max": 100,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_VOLUME_INCREASE_WARNING_FACTOR",
+      "label": "Volume increase warning (times the usual)",
+      "kind": "decimal",
+      "min": 1,
+      "max": 1000,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_REPUTATION_VOLUME_INCREASE_CRITICAL_FACTOR",
+      "label": "Volume increase critical (times the usual)",
+      "kind": "decimal",
+      "min": 1,
+      "max": 1000,
+      "group": "Reputation alerts"
+    },
+    {
+      "name": "APP_RETENTION_STAGED_CONTENT_DAYS",
+      "label": "Days unsent message content is kept",
+      "kind": "integer",
+      "min": 1,
+      "max": 3650,
+      "group": "Data retention"
+    },
+    {
+      "name": "APP_RETENTION_TRACKING_DAYS",
+      "label": "Days tracking links stay valid (empty = always)",
+      "kind": "integer",
+      "min": 1,
+      "max": 3650,
+      "empty": true,
+      "group": "Data retention"
+    },
+    {
+      "name": "DELIVERY_DSN_RETENTION_DAYS",
+      "label": "Days processed bounce files are kept",
+      "kind": "integer",
+      "min": 1,
+      "max": 3650,
+      "group": "Data retention"
+    },
+    {
+      "name": "POSTFIX_LOG_RETENTION_DAYS",
+      "label": "Days rotated Postfix logs are kept",
+      "kind": "integer",
+      "min": 1,
+      "max": 3650,
+      "group": "Data retention"
+    },
+    {
+      "name": "ACME_RENEW_DAYS",
+      "label": "Renew this many days before expiry",
+      "kind": "integer",
+      "min": 1,
+      "max": 60,
+      "production_only": true,
+      "group": "Certificates (Let's Encrypt)"
+    },
+    {
+      "name": "BACKUP_KEEP",
+      "label": "Backups kept",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "production_only": true,
+      "group": "Backups"
+    },
+    {
+      "name": "BACKUP_SCHEDULE",
+      "label": "Backup time (systemd calendar, e.g. *-*-* 03:15:00)",
+      "kind": "text",
+      "pattern": "^[A-Za-z0-9*:.,/ -]{1,60}$",
+      "production_only": true,
+      "group": "Backups"
+    }
+  ]
+}

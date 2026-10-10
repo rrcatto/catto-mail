@@ -17,6 +17,7 @@ use App\Entity\Client;
 use App\Entity\SendingDomain;
 use App\Security\ClientVoter;
 use App\Suppression\GlobalSuppressionService;
+use App\Util\Clock;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -282,7 +283,7 @@ final class ClientDashboardController extends AbstractController
             return $value ? 'true' : 'false';
         }
         if ('checked_at' === $column) {
-            return (new \DateTimeImmutable((string) $value))->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
+            return (new \DateTimeImmutable((string) $value))->setTimezone(Clock::zone())->format('Y-m-d\TH:i:s.vP');
         }
         $s = (string) $value;
 

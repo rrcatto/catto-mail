@@ -26,7 +26,7 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class UsageBillingTest extends ApiTestCase
 {
-    /** The installation's time zone (APP_TIMEZONE): usage periods are its calendar days and months. */
+    /** The installation's time zone (SMARTHOST_TIMEZONE): usage periods are its calendar days and months. */
     private function zone(): \DateTimeZone
     {
         return $this->container()->get(\App\Util\InstallationTime::class)->zone;
@@ -47,7 +47,7 @@ final class UsageBillingTest extends ApiTestCase
         $validation = Phase9Fixtures::meteredValidationJob($o, $id, 30, $this->previousMonth());
         $send = Phase9Fixtures::meteredSendJob($o, $id, $domain->getId()->toRfc4122(), 12, $this->previousMonth('+5 days'));
         // Current-month usage that must not appear in the previous month.
-        Phase9Fixtures::meteredValidationJob($o, $id, 7, gmdate('Y-m-d H:i:s'));
+        Phase9Fixtures::meteredValidationJob($o, $id, 7, date('Y-m-d H:i:s'));
 
         return [$client, $id, $send, $validation];
     }

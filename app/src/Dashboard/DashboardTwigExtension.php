@@ -25,7 +25,7 @@ final class DashboardTwigExtension
     ) {
     }
 
-    /** The dashboard's time zone name (APP_TIMEZONE), for the date filter and the charts. */
+    /** The installation's time zone name (SMARTHOST_TIMEZONE), for the date filter and the charts. */
     #[AsTwigFunction('time_zone')]
     public function timeZone(): string
     {

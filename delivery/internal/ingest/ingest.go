@@ -89,7 +89,7 @@ func (g *Ingester) Pass(ctx context.Context) error {
 		}
 		var recs []postfixlog.Located
 		lines := 0
-		ts := now().UTC()
+		ts := now()
 		for lines < BatchLines {
 			l, more, err := rd.Next()
 			if err != nil {

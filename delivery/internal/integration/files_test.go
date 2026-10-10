@@ -28,7 +28,7 @@ func rotateGzip(t *testing.T, path string, at time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gz := path + "." + at.UTC().Format("20060102-150405") + ".gz"
+	gz := path + "." + at.Format("20060102-150405") + ".gz"
 	f, _ := os.Create(gz)
 	z := gzip.NewWriter(f)
 	_, _ = z.Write(data)

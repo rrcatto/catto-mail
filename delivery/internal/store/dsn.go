@@ -178,7 +178,7 @@ func (t *tx) candidates(ctx context.Context, e dsn.Evidence, received time.Time)
 	}
 	out := make([]DSNCandidate, 0, len(ms))
 	for _, m := range ms {
-		out = append(out, DSNCandidate{MessageID: m.ID, CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
+		out = append(out, DSNCandidate{MessageID: m.ID, CreatedAt: m.CreatedAt.Local().Format(time.RFC3339),
 			SenderMatches: e.ReturnedFrom != "" && strings.EqualFold(m.SenderEmail, e.ReturnedFrom)})
 	}
 	return out, nil
@@ -296,7 +296,7 @@ func occurredAt(r *dsn.Report, out dsn.Outcome, received, created time.Time) tim
 	if t.Before(created) || t.After(received.Add(5*time.Minute)) {
 		t = received
 	}
-	return t.UTC()
+	return t.Local()
 }
 
 // insertUnmatched keeps an uncorrelated report for the operator (D-05).
@@ -362,7 +362,7 @@ INSERT INTO unmatched_dsns (id, received_at, spool_ingest_key, content_sha256, c
                             original_recipient, final_recipient, postfix_queue_id, reporting_mta, enhanced_status_code,
                             raw_message, detail_json)
 VALUES ($1, $2, $3, $4, $5, 'open', NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), $12, $13::jsonb)
-ON CONFLICT (spool_ingest_key) DO NOTHING`, ids.UUIDv7(), in.ReceivedAt.UTC(), in.Key, in.SHA256, out.Classification(),
+ON CONFLICT (spool_ingest_key) DO NOTHING`, ids.UUIDv7(), in.ReceivedAt, in.Key, in.SHA256, out.Classification(),
 		in.Evidence.VERPToken, cleanText(original, 320), cleanText(final, 320), in.Evidence.QueueID, cleanText(reporting, 255),
 		enhanced, raw, string(rawDetail))
 	return err
@@ -479,7 +479,7 @@ SELECT id::text, matched_message_id::text, raw_message, received_at FROM unmatch
 // reopen returns a match request to open, keeping the reason in detail_json.
 func (t *tx) reopen(ctx context.Context, res *ResolutionResult, reason string) error {
 	res.Reason = reason
-	failure, _ := json.Marshal(map[string]any{"at": time.Now().UTC().Format(time.RFC3339), "message_id": res.MessageID, "reason": reason})
+	failure, _ := json.Marshal(map[string]any{"at": time.Now().Format(time.RFC3339), "message_id": res.MessageID, "reason": reason})
 	if _, err := t.Exec(ctx, `
 UPDATE unmatched_dsns
    SET status = 'open',

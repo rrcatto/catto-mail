@@ -37,7 +37,7 @@ func Scan(dir string, since time.Time, fn func(Located)) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
+	now := time.Now()
 	for _, g := range gens {
 		if g.ModTime.Before(since) {
 			continue

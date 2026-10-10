@@ -25,7 +25,6 @@ def production_values(**overrides: str) -> dict[str, str]:
             values[r["name"]] = "s3cret-" + r["name"].lower() + "-0123456789"
     values.update({
         "APP_ENCRYPTION_KEYS": "prod1:" + base64.b64encode(os.urandom(32)).decode(),
-        "MAILER_DSN": "",
         "SMARTHOST_PUBLIC_BASE_URL": "https://mail.cattomail-ops.net",
         "PROXY_SERVER_NAME": "mail.cattomail-ops.net",
         "POSTFIX_MYHOSTNAME": "mta1.cattomail-ops.net",

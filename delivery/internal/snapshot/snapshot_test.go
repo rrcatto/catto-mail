@@ -9,7 +9,7 @@ import (
 
 func write(t *testing.T, dir string, ts time.Time, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+ts.UTC().Format("20060102T150405Z")+".jsonl"), []byte(body), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "snapshot-"+ts.Format("20060102T150405-0700")+".jsonl"), []byte(body), 0o640); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -41,6 +41,23 @@ func TestListLoadFreshness(t *testing.T) {
 	}
 	if run := ConsecutiveFresh(s, time.Minute, now.Add(time.Hour)); run != nil {
 		t.Fatal("stale snapshots must give no run")
+	}
+}
+
+// Names carry the installation's local time and offset; names written before
+// 0.2.3 (UTC, "Z") are still read.
+func TestNamesWithOffsetAndLegacyUTC(t *testing.T) {
+	dir := t.TempDir()
+	sast, err := time.LoadLocation("Africa/Johannesburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 10, 10, 55, 0, 0, sast)
+	write(t, dir, at, "")
+	_ = os.WriteFile(filepath.Join(dir, "snapshot-"+at.Add(-time.Minute).UTC().Format("20060102T150405Z")+".jsonl"), nil, 0o640)
+	s, err := List(dir)
+	if err != nil || len(s) != 2 || filepath.Base(s[1].Path) != "snapshot-20261010T105500+0200.jsonl" || !s[1].Time.Equal(at) || !s[0].Time.Equal(at.Add(-time.Minute)) {
+		t.Fatalf("%v %v", s, err)
 	}
 }
 

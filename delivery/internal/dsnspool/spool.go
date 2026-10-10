@@ -299,12 +299,12 @@ func receivedAt(key string, mtime time.Time) time.Time {
 	if head, _, ok := strings.Cut(key, "."); ok {
 		if sec, err := strconv.ParseInt(head, 10, 64); err == nil {
 			t := time.Unix(sec, 0)
-			if t.After(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)) && t.Before(time.Now().Add(24*time.Hour)) {
-				return t.UTC()
+			if t.After(time.Date(2020, 1, 1, 0, 0, 0, 0, time.Local)) && t.Before(time.Now().Add(24*time.Hour)) {
+				return t
 			}
 		}
 	}
-	return mtime.UTC()
+	return mtime
 }
 
 // Sweep deletes processed files older than the retention period. The database

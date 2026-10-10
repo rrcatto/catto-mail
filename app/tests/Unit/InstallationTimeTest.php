@@ -8,7 +8,7 @@ use App\Util\InstallationTime;
 use App\Dashboard\OverviewPeriod;
 use PHPUnit\Framework\TestCase;
 
-/** The dashboard's time zone (APP_TIMEZONE) and the overview periods built on it. */
+/** The installation's time zone (SMARTHOST_TIMEZONE), the clock and the overview periods built on it. */
 final class InstallationTimeTest extends TestCase
 {
     public function testTimesAreShownInTheConfiguredZone(): void
@@ -23,8 +23,33 @@ final class InstallationTimeTest extends TestCase
     public function testAnUnknownZoneIsAStartupError(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('APP_TIMEZONE');
+        $this->expectExceptionMessage('SMARTHOST_TIMEZONE');
         new InstallationTime('Mars/Olympus_Mons');
+    }
+
+    public function testAnOffsetOrAbbreviationIsNotAZone(): void
+    {
+        foreach (['+02:00', 'SAST', 'UTC+2', ''] as $bad) {
+            try {
+                new InstallationTime($bad);
+                self::fail("'$bad' was accepted");
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testTheClockAndTheApiFormatUseTheInstallationZone(): void
+    {
+        $previous = date_default_timezone_get();
+        try {
+            date_default_timezone_set('Africa/Johannesburg');
+            self::assertSame('+02:00', \App\Util\Clock::now()->format('P'));
+            self::assertSame('2026-10-10T10:48:56.123456+02:00',
+                \App\Util\Clock::rfc3339(new \DateTimeImmutable('2026-10-10T08:48:56.123456Z')), 'API timestamps carry the SAST offset');
+        } finally {
+            date_default_timezone_set($previous);
+        }
     }
 
     public function testPeriodsAreWholeBucketsOfTheLocalDayOrHour(): void

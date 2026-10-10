@@ -9,7 +9,7 @@ use App\Util\Clock;
 
 /**
  * A bounded period for usage summaries, reconciliation, billing and export (Phase 9):
- * [start, end) of whole calendar days in the installation's time zone (APP_TIMEZONE,
+ * [start, end) of whole calendar days in the installation's time zone (SMARTHOST_TIMEZONE,
  * InstallationTime). Named periods are the current day, the current month and the
  * previous month; a custom period is at most 366 days long.
  */

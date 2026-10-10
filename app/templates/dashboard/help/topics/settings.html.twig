@@ -1,0 +1,28 @@
+{% extends 'dashboard/help/_topic.html.twig' %}
+{% block content %}
+<p>catto-mail reads its configuration from <code>infra/.env</code> on the server (<code>/home/cattomail/catto-mail/infra/.env</code> after the installer).
+The file holds only the settings an operator sets, grouped under headings; everything else (container names, ports inside the topology, paths, database role names) is built in.
+Every setting is described in <code>docs/contracts/environment.md</code>.</p>
+
+<h2>Changing a setting in the dashboard</h2>
+<p><strong>System › Settings</strong> lists the operational settings: pacing, validation, webhooks, API and client limits, reputation thresholds, retention, the time zone, the log level and, in production, backups and certificate renewal.
+For each one it shows the value in <code>infra/.env</code>, the value set in the dashboard and the value in force.</p>
+<ul>
+<li>A value set in the dashboard is stored in the database and <strong>takes precedence over <code>infra/.env</code> without changing the file</strong>. Empty the field to use the file's value again.</li>
+<li>Every change needs a reason and is recorded in the audit log with the old and the new value. Changing settings needs the permission <code>SYSTEM.SETTINGS.MANAGE</code> (administrators).</li>
+<li>A change takes effect when it is <strong>applied</strong>. In production, <em>Apply changes</em> asks the host agent to render the configuration again with the dashboard values and to restart the services that use the changed settings (<code>smarthostctl prod settings-apply</code>). In development, run <code>infra/bin/smarthostctl settings-apply</code>.</li>
+<li>The renderer checks every dashboard value with the same rules as the page. A value that breaks a rule is ignored and shown as <em>ignored</em>; if the values together break a rule of the configuration, none is applied and the page says why. A bad value never stops the services.</li>
+<li>Every later render (recreate, upgrade) uses the dashboard values too, so they survive restarts and upgrades.</li>
+</ul>
+<p>Secrets, the database, networks and ports, certificates and keys, host names, domains and addresses, the live-delivery switch and the SMTP probe switch are set only in <code>infra/.env</code>: the services need them before they can read the database, or they have their own audited controls.</p>
+<p>If the dashboard is unreachable, list or clear the dashboard values on the server: <code>infra/bin/smarthostctl prod console smarthost:settings list</code> and <code>... smarthost:settings reset NAME --operator you@example.com --reason "..."</code>, then <code>smarthostctl prod settings-apply</code>.</p>
+
+<h2>The time zone</h2>
+<p><code>SMARTHOST_TIMEZONE</code> (default <code>Africa/Johannesburg</code>, SAST, UTC+2) is the installation's time zone. Every time catto-mail shows, writes or computes is in it: the dashboard, API responses and webhook payloads (with the zone's offset, for example <code>2026-10-10T10:48:56.123456+02:00</code>), exports, the logs of every service, the database sessions, the Postfix log, snapshot and backup names, and the calendar days and months of quotas, usage and billing.
+The installer sets the server's own time zone to it as well, so the journal and the timers use it; the host check in Diagnostics warns when they differ (fix: <code>sudo timedatectl set-timezone Africa/Johannesburg</code> as root).
+Changing the time zone restarts every service when it is applied.</p>
+<p>Fields whose format a standard fixes keep it: HTTP date headers are always GMT, and <code>Smarthost-Signature</code> carries Unix time.</p>
+
+<h2>Older configuration files</h2>
+<p>Before 0.2.3 <code>infra/.env</code> listed every variable with a comment naming its phase. <code>smarthostctl prod upgrade</code> rewrites it in the grouped layout and keeps the old file beside it as <code>infra/.env.v&lt;version&gt;-&lt;date and time&gt;</code>; a rollback to that version restores it. To do it by hand: <code>infra/bin/smarthostctl prod env-migrate</code>.</p>
+{% endblock %}

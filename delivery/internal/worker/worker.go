@@ -766,7 +766,7 @@ func (w *Worker) ingestQueueIDs(ctx context.Context, job *store.Job, qids map[st
 		byGen[l.GenerationID] = append(byGen[l.GenerationID], l)
 	}
 	for _, g := range order {
-		if _, err := w.Store.ApplyLogBatch(ctx, byGen[g], g, 0, false, w.Cfg.BounceDomain, w.Now().UTC()); err != nil {
+		if _, err := w.Store.ApplyLogBatch(ctx, byGen[g], g, 0, false, w.Cfg.BounceDomain, w.Now()); err != nil {
 			log.Warning("applying re-scanned log records failed", "error", err)
 		}
 	}

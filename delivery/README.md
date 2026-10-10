@@ -39,7 +39,7 @@ Operator match request (NOTIFY smarthost_unmatched_dsn_work) -> re-interpret -> 
 | Package | Responsibility |
 |---|---|
 | `internal/config` | The environment contract (consumer `delivery`), `_FILE` secrets, fail-closed checks. |
-| `internal/logx` | Contract JSON logs (`ts`, `level`, `service`, `msg`, `client_id`, `job_id`, `message_id`, `worker_id`). No bodies, secrets, tokens or credentials; recipient addresses only at debug level. |
+| `internal/logx` | Contract JSON logs (`ts` in the installation zone with its offset, `level`, `service`, `msg`, `client_id`, `job_id`, `message_id`, `worker_id`). No bodies, secrets, tokens or credentials; recipient addresses only at debug level. |
 | `internal/address` | D-32 normalisation (UTS #46 non-transitional on `golang.org/x/net/idna`, plus the explicit "xn-- label must decode to non-ASCII" check); passes the shared 87 vectors. |
 | `internal/ids` | UUIDv7 message ids, 128-bit lower-case base32 VERP tokens, 192-bit base64url tracking tokens, `Message-ID: <id@SMARTHOST_BOUNCE_DOMAIN>`, VERP parsing. |
 | `internal/mimemsg` | MIME from the client's rendered content under the header contract; RFC 2047 encoded words; header-injection rejection; RFC 8058 headers for subscription mail only. |

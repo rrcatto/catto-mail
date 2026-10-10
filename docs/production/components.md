@@ -83,3 +83,14 @@ never deleted by the tooling; `prod recreate` and upgrades keep them.
 `smarthost-proxy-tls-cert`, `smarthost-proxy-tls-key`, `smarthost-postfix-tls-cert`,
 `smarthost-postfix-tls-key` (installed by `smarthostctl prod tls set`). All other secrets are
 in `infra/.env` (mode 0600) and reach each container only through its own env file.
+
+## Configuration
+
+`infra/.env` holds only the operator's settings, grouped under headings; every other variable of
+`docs/contracts/environment.md` is built in. `smarthost_render.py` renders it into one env file per
+container, the topology script and the systemd units in `infra/.generated/`. Values changed in
+**System › Settings** are stored in PostgreSQL (`setting_overrides`), never in the file: *Apply
+changes* asks the host agent to render again with them (`smarthostctl prod settings-apply`) and to
+replace only the containers whose settings changed. The rendered `settings.json` (mounted read-only
+into the web application) tells the page which values are in force. Every container runs in the
+installation's time zone (`TZ`, PostgreSQL `timezone`), `SMARTHOST_TIMEZONE`.

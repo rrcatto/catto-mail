@@ -95,9 +95,9 @@ abstract class AdminCommand extends Command
     protected function addPeriodOptions(): void
     {
         $this->addOption('period', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'current_day, current_month or previous_month')
-            ->addOption('month', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'A calendar month, YYYY-MM (in APP_TIMEZONE)')
-            ->addOption('from', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period start date YYYY-MM-DD (in APP_TIMEZONE, inclusive)')
-            ->addOption('to', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period end date YYYY-MM-DD (in APP_TIMEZONE, exclusive)');
+            ->addOption('month', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'A calendar month, YYYY-MM (in SMARTHOST_TIMEZONE)')
+            ->addOption('from', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period start date YYYY-MM-DD (in SMARTHOST_TIMEZONE, inclusive)')
+            ->addOption('to', null, \Symfony\Component\Console\Input\InputOption::VALUE_REQUIRED, 'Custom period end date YYYY-MM-DD (in SMARTHOST_TIMEZONE, exclusive)');
     }
 
     protected function usagePeriod(InputInterface $input, string $default = 'current_month'): \App\Usage\UsagePeriod

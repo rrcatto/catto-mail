@@ -86,7 +86,7 @@ func (r *Reconciler) Pass(ctx context.Context) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	t := now().UTC()
+	t := now()
 	if !snapshot.Fresh(snaps, r.SnapshotInterval, t) {
 		res.Stale = true
 		age := "none"
@@ -190,7 +190,7 @@ func (r *Reconciler) Pass(ctx context.Context) (Result, error) {
 		}
 		ok, err := r.Store.MarkOutcomeUnknown(ctx, c, map[string]any{
 			"postfix_queue_id": c.QueueID, "absent_from_snapshots": r.MinSnapshots,
-			"grace_seconds": int(r.Grace.Seconds()), "last_event_at": c.LastEvent.UTC().Format(time.RFC3339)})
+			"grace_seconds": int(r.Grace.Seconds()), "last_event_at": c.LastEvent.Local().Format(time.RFC3339)})
 		if err != nil {
 			return res, err
 		}

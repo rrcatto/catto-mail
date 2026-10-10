@@ -48,7 +48,7 @@ final class ReputationTest extends DashboardTestCase
         $id = $client->getId()->toRfc4122();
         $domain = $this->verifiedDomain($client)->getId()->toRfc4122();
         $o = Db::owner();
-        $recent = gmdate('Y-m-d H:i:s', time() - 3600);
+        $recent = date('Y-m-d H:i:s', time() - 3600);
         $send = Phase9Fixtures::meteredSendJob($o, $id, $domain, 100, $recent);
         Phase9Fixtures::events($o, \array_slice($send['messages'], 0, 6), 'hard_bounce', $recent, 'recipient');
         Phase9Fixtures::events($o, \array_slice($send['messages'], 6, 1), 'complaint', $recent);
@@ -100,7 +100,7 @@ final class ReputationTest extends DashboardTestCase
         $id = $client->getId()->toRfc4122();
         $domain = $this->verifiedDomain($client)->getId()->toRfc4122();
         $o = Db::owner();
-        $recent = gmdate('Y-m-d H:i:s', time() - 600);
+        $recent = date('Y-m-d H:i:s', time() - 600);
         $small = Phase9Fixtures::meteredSendJob($o, $id, $domain, 5, $recent);
         Phase9Fixtures::events($o, $small['messages'], 'hard_bounce', $recent, 'recipient');
         $this->evaluator()->evaluate();

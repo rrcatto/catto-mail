@@ -51,8 +51,9 @@ var (
 
 // Parse parses one record (without its newline). now resolves the year of
 // syslog-style timestamps, which have none: the latest year that does not put
-// the record more than a day into the future. Postfix writes UTC in the
-// container. ok is false for lines without a queue id.
+// the record more than a day into the future. Postfix writes the installation's
+// local time (TZ=SMARTHOST_TIMEZONE in its container), so a syslog-style
+// timestamp is read in now's location. ok is false for lines without a queue id.
 func Parse(line string, now time.Time) (Record, bool) {
 	var r Record
 	var rest string
@@ -61,7 +62,7 @@ func Parse(line string, now time.Time) (Record, bool) {
 		h, _ := strconv.Atoi(m[3])
 		mi, _ := strconv.Atoi(m[4])
 		s, _ := strconv.Atoi(m[5])
-		t := time.Date(now.Year(), months[m[1]], day, h, mi, s, 0, time.UTC)
+		t := time.Date(now.Year(), months[m[1]], day, h, mi, s, 0, now.Location())
 		if t.After(now.Add(24 * time.Hour)) {
 			t = t.AddDate(-1, 0, 0)
 		}
@@ -71,7 +72,7 @@ func Parse(line string, now time.Time) (Record, bool) {
 		if err != nil {
 			return r, false
 		}
-		r.Time, r.Process, r.QueueID, rest = t.UTC(), m[2], m[3], m[4]
+		r.Time, r.Process, r.QueueID, rest = t.In(now.Location()), m[2], m[3], m[4]
 	} else {
 		return r, false
 	}

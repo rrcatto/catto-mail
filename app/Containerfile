@@ -36,6 +36,7 @@ COPY app/ /srv/app/
 COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
 COPY docs/api/integration-guide.md /srv/app/config/contracts/integration-guide.md
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
+COPY docs/contracts/settings.json /srv/app/config/contracts/settings.json
 # Test-only copies of the schema contracts (structural-equivalence and grant tests).
 COPY docs/schema/reference-schema.sql docs/schema/schema.md docs/contracts/address-normalization-vectors.json /srv/app/tests/contracts/
 RUN composer dump-autoload --optimize && mkdir -p var && chown -R www-data:www-data var
@@ -52,6 +53,7 @@ COPY --from=vendor /srv/app /srv/app
 COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
 COPY docs/api/integration-guide.md /srv/app/config/contracts/integration-guide.md
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
+COPY docs/contracts/settings.json /srv/app/config/contracts/settings.json
 # Phase 1 infrastructure probes still used by the verification suite.
 COPY app/phase1-probe/ /srv/probe/
 RUN rm -rf /srv/app/tests /srv/app/phpunit.dist.xml && chmod -R a+rX /srv/probe \

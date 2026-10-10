@@ -417,6 +417,16 @@ dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .counts, .plain { margin: .3rem 0; padding-left: 1.1rem; }
 .crumbs { margin: 0 0 4px; font-size: 14px; color: var(--muted); }
 .tag { display: inline-block; margin: 0 4px 4px 0; padding: 2px 10px; border-radius: 999px; background: var(--line-2); color: var(--ink-2); font-size: 12px; }
+.tag-warn { background: var(--warn-bg); color: var(--warn); }
+.tag-bad { background: var(--bad-bg); color: var(--bad); }
+/* System › Settings: one editable table per group, the same columns in every group. */
+.table-settings { table-layout: fixed; width: 100%; min-width: 760px; }
+.table-settings th:nth-child(1) { width: 36%; }
+.table-settings th:nth-child(2), .table-settings th:nth-child(4) { width: 17%; }
+.table-settings th:nth-child(3) { width: 30%; }
+.table-settings td { overflow-wrap: anywhere; }
+.table-settings input, .table-settings select { width: 100%; }
+.table-settings code { font-size: 12px; }
 
 input, select, textarea { font: inherit; font-size: 15px; height: 44px; padding: 0 14px; border: 1px solid var(--field); border-radius: 12px; background: var(--surface); color: var(--ink); max-width: 100%; }
 textarea { height: auto; padding: 10px 14px; }

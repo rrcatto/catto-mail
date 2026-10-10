@@ -83,7 +83,7 @@ func Build(m Message) ([]byte, error) {
 	}
 	var h bytes.Buffer
 	header := func(name, value string) { h.WriteString(name + ": " + value + "\r\n") }
-	header("Date", m.Date.UTC().Format(time.RFC1123Z))
+	header("Date", m.Date.Local().Format(time.RFC1123Z))
 	header("From", address(m.FromName, m.FromEmail))
 	if m.ReplyToEmail != "" {
 		header("Reply-To", address(m.ReplyToName, m.ReplyToEmail))

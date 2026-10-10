@@ -109,7 +109,7 @@ func Parse(raw []byte) *Report {
 	r.DeliveredTo = first(msg.Header, "Delivered-To")
 	r.OriginalTo = first(msg.Header, "X-Original-To")
 	if d, err := mail.ParseDate(msg.Header.Get("Date")); err == nil {
-		r.Date = d.UTC()
+		r.Date = d.Local()
 	}
 	r.Subject = clip(msg.Header.Get("Subject"), 300)
 	r.walk(textproto.MIMEHeader(msg.Header), msg.Body, 0)
@@ -239,7 +239,7 @@ func (r *Report) parseDeliveryStatus(b []byte) {
 	r.EnvelopeID = xtextDecode(strings.TrimSpace(perMessage["original-envelope-id"]))
 	r.PostfixQueueID = firstToken(perMessage["x-postfix-queue-id"])
 	if d, err := mail.ParseDate(perMessage["arrival-date"]); err == nil {
-		r.ArrivalDate = d.UTC()
+		r.ArrivalDate = d.Local()
 	}
 	for _, g := range groups {
 		if len(r.Recipients) >= maxRecipients {
@@ -259,7 +259,7 @@ func (r *Report) parseDeliveryStatus(b []byte) {
 			r.problem("malformed Status %q", clip(g["status"], 50))
 		}
 		if d, err := mail.ParseDate(g["last-attempt-date"]); err == nil {
-			rc.LastAttempt = d.UTC()
+			rc.LastAttempt = d.Local()
 		}
 		if rc.FinalRecipient == "" && rc.OriginalRecipient == "" && rc.Action == "" && rc.Status == "" {
 			continue // not a recipient block
@@ -297,7 +297,7 @@ func (r *Report) parseFeedback(b []byte) {
 			f.OriginalRcptTo = fieldAddress(g["original-rcpt-to"])
 		}
 		if d, err := mail.ParseDate(g["arrival-date"]); err == nil && f.ArrivalDate.IsZero() {
-			f.ArrivalDate = d.UTC()
+			f.ArrivalDate = d.Local()
 		}
 	}
 	f.Type = strings.ToLower(firstToken(f.Type))

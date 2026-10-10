@@ -335,9 +335,9 @@ final class TrackingTest extends ApiTestCase
         // Two unkeyed tracking events coexist; a transport key is still unique.
         $o = Db::owner();
         $o->insert('message_events', ['id' => SchemaFixtures::id(), 'message_id' => $t['message'], 'event_type' => 'deferred',
-            'event_source' => 'postfix_log', 'source_event_key' => 'k-'.$t['message'], 'occurred_at' => gmdate('Y-m-d H:i:s')]);
+            'event_source' => 'postfix_log', 'source_event_key' => 'k-'.$t['message'], 'occurred_at' => date('Y-m-d H:i:s')]);
         $this->expectException(\Doctrine\DBAL\Exception\UniqueConstraintViolationException::class);
         $o->insert('message_events', ['id' => SchemaFixtures::id(), 'message_id' => $t['message'], 'event_type' => 'deferred',
-            'event_source' => 'postfix_log', 'source_event_key' => 'k-'.$t['message'], 'occurred_at' => gmdate('Y-m-d H:i:s')]);
+            'event_source' => 'postfix_log', 'source_event_key' => 'k-'.$t['message'], 'occurred_at' => date('Y-m-d H:i:s')]);
     }
 }

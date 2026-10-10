@@ -42,7 +42,7 @@ import (
 const HeartbeatFile = "/tmp/smarthost-delivery-heartbeat"
 
 // Version is the catto-mail software version (app/src/Version.php).
-const Version = "0.2.2"
+const Version = "0.2.3"
 
 func main() {
 	cmd := "run"
@@ -107,6 +107,8 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 64
 	}
+	// Every time the daemon writes or parses as text is in the installation's zone.
+	time.Local = cfg.TimeZone
 	log := logx.New(cfg.LogLevel, cfg.LogFormat)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()

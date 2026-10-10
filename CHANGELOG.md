@@ -4,7 +4,67 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.11.
 
-## [Unreleased]
+## [0.2.3] - 2026-10-10
+
+Every time in the installation's time zone, a short grouped `infra/.env`, and the operational
+settings in the dashboard (owner decisions). Software version 0.2.3 (Symfony application, Go
+delivery daemon, validator, production image tag). One new migration (`setting_overrides` and the
+`settings.apply` host request).
+
+**Upgrading from 0.2.2:** once, as root (log in as `ubuntu`, then `sudo -i`), set the server's
+time zone: `timedatectl set-timezone Africa/Johannesburg`. Then as the service user
+(`sudo -iu cattomail`, `cd ~/catto-mail`): `git fetch --tags`, `git checkout v0.2.3`,
+`infra/bin/smarthostctl prod env-migrate`, `prod check` and `prod upgrade 0.2.3` (the upgrade runs
+`env-migrate` too).
+
+### Changed
+- **Every time is in the installation's time zone**, `SMARTHOST_TIMEZONE` (default
+  `Africa/Johannesburg`, SAST, UTC+2), not only the dashboard's: API responses and webhook payloads
+  (RFC 3339 with the zone's offset, e.g. `2026-10-10T10:48:56.123456+02:00` instead of `...Z`),
+  CSV and JSON exports, the logs of the application, the webhook worker, the validator and the
+  delivery daemon, PostgreSQL sessions and logs, the Postfix log, queue snapshot and backup names,
+  the host agent's reports, the preflight and the installer log. Every container gets `TZ`,
+  PostgreSQL runs with `timezone` and `log_timezone` set, and the installer sets the server's own
+  zone (`--timezone` chooses another). HTTP date headers stay GMT and `Smarthost-Signature` keeps
+  Unix time, as their standards require. API clients that parse RFC 3339 need no change.
+- `APP_TIMEZONE` is now `SMARTHOST_TIMEZONE` and reaches every service. `env-migrate` renames it;
+  `prod check` names it until then.
+- **`infra/.env` holds only the settings an operator sets**, grouped under plain headings, without
+  the per-variable phase and consumer comments (about 110 lines instead of 330). Internal wiring
+  (database host and role names, ports and mount points inside the topology, certificate paths,
+  worker identities, subnets), values that follow from the environment, the settings of the other
+  environment and the seven long-term retention periods that no deletion command reads yet are
+  built in; a `.env` may still name one to change it.
+  `smarthostctl env-migrate` (`prod env-migrate`) rewrites an older file keeping every value and
+  keeps the old one as `infra/.env.v<version>-<date and time>`; a rollback restores it.
+- Scripts read settings through the renderer (`smarthost_render.py get`), so built-in values are
+  found too; `smarthostctl prod` finds the service user's systemd under `sudo -iu cattomail`.
+- The guides and the help say how to reach the service user: log in with your own account,
+  `sudo -i`, then `sudo -iu cattomail` (it has no password).
+
+### Added
+- **System › Settings**: the operational settings (pacing, validation, webhooks, API and client
+  limits, reputation thresholds, retention, time zone, log level; in production also backups and
+  certificate renewal) with their `infra/.env` value, the value set in the dashboard and the value
+  in force. A dashboard value takes precedence over the file without changing it; every change
+  needs a reason and is audited; *Apply changes* asks the host agent to render the configuration
+  with the dashboard values and restart only the services whose settings changed
+  (`smarthostctl prod settings-apply`; development: `smarthostctl settings-apply`). The renderer
+  checks each value with the same rules as the page and ignores one that breaks them, so a bad value
+  never stops the services. Permission `SYSTEM.SETTINGS.MANAGE`; console
+  `smarthost:settings list|set|reset`. The catalogue is `docs/contracts/settings.json`.
+- Diagnostics › Host warns when the server's time zone differs from the installation's.
+- `VPS-INSTALL.md` §15 *Starting again from scratch*: how to remove an installation (or reinstall
+  the server) before going live.
+
+### Removed
+- `MAILER_DSN`, which nothing read (the sign-in mail uses `APP_MAIL_SUBMISSION_*`).
+
+### Fixed
+- Diagnostics › Host firewall reported the firewall as missing when it was applied the way the
+  installation guide and `install-catto-mail --apply-firewall` do it (an `include` of
+  `/home/cattomail/catto-mail-firewall.nft` in `/etc/nftables.conf`), and every re-run of the
+  installer with `--apply-firewall` added the `include` line again.
 
 ## [0.2.2] - 2026-10-10
 

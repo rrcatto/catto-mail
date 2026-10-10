@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App;
 
 use App\Config\SafetyGuard;
+use App\Util\InstallationTime;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 
@@ -16,6 +17,8 @@ class Kernel extends BaseKernel
     {
         // Fail closed before any request or command runs (environment contract rule 4).
         SafetyGuard::assertSafe();
+        // Every time the application computes, stores or writes is in the installation's zone.
+        InstallationTime::applyProcessDefault();
         parent::boot();
     }
 

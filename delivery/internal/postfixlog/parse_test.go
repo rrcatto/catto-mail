@@ -53,6 +53,19 @@ func TestYearInferenceAndISOTimestamps(t *testing.T) {
 	}
 }
 
+// Postfix writes local time in the installation's zone; the record is read in
+// the same zone, so 10:00 SAST is 08:00 UTC.
+func TestSyslogTimestampInInstallationZone(t *testing.T) {
+	sast, err := time.LoadLocation("Africa/Johannesburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := Parse("Oct 04 10:00:00 h postfix/qmgr[1]: ABCDEF123: removed", time.Date(2026, 10, 4, 12, 0, 0, 0, sast))
+	if !ok || !r.Time.Equal(time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC)) || r.Time.Location() != sast {
+		t.Errorf("SAST record %v %v", r.Time, ok)
+	}
+}
+
 func classify(t *testing.T, rest string) Event {
 	t.Helper()
 	r, ok := Parse("Oct 04 01:00:00 h postfix/smtp[9]: ABCDEF1234: "+rest, now)

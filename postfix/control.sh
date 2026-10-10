@@ -24,7 +24,7 @@ case "${1:-status}" in
     pause)
         shift || true
         mkdir -p "$obs/control"
-        printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${*:-no reason given}" > "$flag"
+        printf '%s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%:z)" "${*:-no reason given}" > "$flag"
         chmod 0640 "$flag"
         postconf -e 'defer_transports = smtp'
         postfix reload >/dev/null 2>&1 || true

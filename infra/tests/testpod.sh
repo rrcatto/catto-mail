@@ -13,6 +13,8 @@ PG_IMAGE=docker.io/library/postgres:16.15-trixie
 APP_TEST_IMAGE=localhost/smarthost-app-test:dev
 POD="smarthost-test-$$"
 DB=smarthost
+# The installation's time zone, as the topologies set it (SMARTHOST_TIMEZONE).
+TEST_TZ=Africa/Johannesburg
 
 rnd() { head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32; }
 ADMIN_PW="$(rnd)"; OWNER_PW="$(rnd)"; APP_PW="$(rnd)"; WEBHOOK_PW="$(rnd)"; VALIDATOR_PW="$(rnd)"; DELIVERY_PW="$(rnd)"
@@ -20,6 +22,7 @@ ENC_KEY="test1:$(head -c 32 /dev/urandom | base64)"
 APP_SECRET_VALUE="$(rnd)"
 
 common_env=(
+  -e TZ="$TEST_TZ"
   -e SMARTHOST_DB_HOST=127.0.0.1 -e SMARTHOST_DB_PORT=5432 -e SMARTHOST_DB_SSLMODE=disable
   -e SMARTHOST_DB_OWNER_USER=smarthost_owner -e APP_DB_USER=smarthost_app -e APP_WEBHOOK_DB_USER=smarthost_webhook
   -e VALIDATOR_DB_USER=smarthost_validator -e DELIVERY_DB_USER=smarthost_delivery
@@ -37,7 +40,7 @@ app_env=(
   -e TRUSTED_PROXIES=127.0.0.1 -e APP_API_RATE_LIMIT_PER_MINUTE=100000 -e APP_API_MAX_REQUEST_BYTES=10485760
   -e APP_SEND_JOB_MAX_RECIPIENTS=10000 -e APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH=500
   -e APP_ENCRYPTION_KEYS="$ENC_KEY" -e APP_WEBHOOK_SECRET_OVERLAP_HOURS=24 -e APP_DOMAIN_VERIFICATION_RECHECK_HOURS=24
-  -e APP_ADMIN_EMAIL=admin@smarthost-dev.test -e APP_MAIL_FROM=no-reply@smarthost-dev.test -e APP_LOGIN_LINK_TTL_SECONDS=900 -e APP_TIMEZONE=Africa/Johannesburg
+  -e APP_ADMIN_EMAIL=admin@smarthost-dev.test -e APP_MAIL_FROM=no-reply@smarthost-dev.test -e APP_LOGIN_LINK_TTL_SECONDS=900 -e SMARTHOST_TIMEZONE="$TEST_TZ"
   -e APP_WEBHOOK_DB_PASSWORD="$WEBHOOK_PW" -e APP_WEBHOOK_MAX_ATTEMPTS=4 -e APP_WEBHOOK_TIMEOUT_SECONDS=2 -e APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS=2 -e APP_WEBHOOK_LEASE_SECONDS=5
   -e APP_WEBHOOK_RETRY_BASE_SECONDS=1 -e APP_WEBHOOK_RETRY_MAX_SECONDS=30 -e APP_WEBHOOK_POLL_INTERVAL_SECONDS=1
   -e APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS=
@@ -64,7 +67,8 @@ testpod_up() {
   podman build -q --target test -t "$APP_TEST_IMAGE" -f "$REPO/app/Containerfile" "$REPO" >/dev/null
   podman pod create --name "$POD" --network none --label project=smarthost >/dev/null
   podman run -d --pod "$POD" --name "$POD-postgres" --label project=smarthost \
-    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD="$ADMIN_PW" -e POSTGRES_DB="$DB" "$PG_IMAGE" >/dev/null
+    -e TZ="$TEST_TZ" -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD="$ADMIN_PW" -e POSTGRES_DB="$DB" \
+    "$PG_IMAGE" postgres -c "timezone=$TEST_TZ" -c "log_timezone=$TEST_TZ" >/dev/null
   for _ in $(seq 1 60); do
     podman exec "$POD-postgres" pg_isready -q -h 127.0.0.1 -U postgres -d "$DB" 2>/dev/null && break; sleep 1
   done

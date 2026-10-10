@@ -33,8 +33,8 @@ final class ClientDashboardTest extends DashboardTestCase
         $send = DashboardFixtures::sendJob($o, $id, $domain, 6, ['track_opens' => true, 'track_clicks' => true, 'external_reference' => 'newsletter-7']);
         DashboardFixtures::transportEvents($o, $send['job']);
         DashboardFixtures::link($o, $send['messages'][0], 1, 'https://shop.example.test/offer');
-        DashboardFixtures::trackingEvent($o, $send['messages'][0], 'open_recorded', gmdate('Y-m-d H:i:s', time() + 3600));
-        DashboardFixtures::trackingEvent($o, $send['messages'][0], 'click_recorded', gmdate('Y-m-d H:i:s', time() + 3660), 1);
+        DashboardFixtures::trackingEvent($o, $send['messages'][0], 'open_recorded', date('Y-m-d H:i:s', time() + 3600));
+        DashboardFixtures::trackingEvent($o, $send['messages'][0], 'click_recorded', date('Y-m-d H:i:s', time() + 3660), 1);
         DashboardFixtures::usage($o, $id, 'validation_address', 30, 'validation_job', $validation);
         DashboardFixtures::usage($o, $id, 'message_submitted', 6, 'send_job', $send['job']);
 
@@ -280,7 +280,7 @@ final class ClientDashboardTest extends DashboardTestCase
         $aMessage = $a['send']['messages'][1];
         $o->executeStatement("UPDATE messages SET recipient_address = ?, current_status = 'suppressed', postfix_queue_id = NULL WHERE id = ?", [$shared, $aMessage]);
         $o->insert('message_events', ['id' => SchemaFixtures::id(), 'message_id' => $aMessage, 'event_type' => 'message_suppressed',
-            'event_source' => 'delivery_daemon', 'source_event_key' => 'message_suppressed:'.$aMessage, 'occurred_at' => gmdate('Y-m-d H:i:s'),
+            'event_source' => 'delivery_daemon', 'source_event_key' => 'message_suppressed:'.$aMessage, 'occurred_at' => date('Y-m-d H:i:s'),
             'metadata_json' => json_encode(['suppression_id' => $optOut, 'reason' => 'recipient_global_opt_out', 'checked' => 'before_submission'])]);
 
         $this->signIn($this->newUser(false, $a['client'], ClientMembershipRole::Admin));

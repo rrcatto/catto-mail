@@ -159,7 +159,9 @@ attempt fails with `read-only file system`.
 * A systemd user timer runs a snapshot step in the Postfix container every
   `POSTFIX_QUEUE_SNAPSHOT_INTERVAL_SECONDS`:
   1. `postqueue -j > queue/.tmp-<ts>`.
-  2. Only if the exit status is 0, `rename` it to `queue/snapshot-<UTC ts>.jsonl`.
+  2. Only if the exit status is 0, `rename` it to `queue/snapshot-<ts>.jsonl`, where `<ts>` is the
+     local time in the installation's zone with its offset (`20261010T105500+0200`; snapshots
+     written before 0.2.3 are named in UTC, `20261010T085500Z`, and are still read).
 
   The rename is atomic, so Go never sees a partial file, and an empty file genuinely means an
   empty queue. A failed run produces no snapshot.
@@ -357,8 +359,9 @@ These clarify the mechanics above as implemented and observed against Postfix 3.
   any submission, and re-scans the log for the later records of every recovered queue id.
 * **Log format.** `postlogd` writes syslog-style records with no year
   (`Oct 04 08:23:16 smarthost postfix/qmgr[235]: <QID>: from=<…>, size=696, nrcpt=1 (queue active)`),
-  in UTC in the container. Go infers the year (the latest year that does not put the record more than
-  a day into the future) and also accepts ISO 8601 timestamps.
+  in the installation's local time (`TZ=SMARTHOST_TIMEZONE` in the container). Go reads them in the
+  same zone (its `time.Local`, set from the same variable), infers the year (the latest year that does
+  not put the record more than a day into the future) and also accepts ISO 8601 timestamps.
 * **Observed record sequence** of a delivered message: `submission/smtpd … client=… sasl_username=…`,
   `cleanup … message-id=<…>`, `qmgr … from=<…> (queue active)`, `smtp … to=<…>, relay=…, dsn=2.0.0,
   status=sent (…)`, `qmgr … removed`. With the relay down: `status=deferred (connect to …:

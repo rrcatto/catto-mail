@@ -56,6 +56,7 @@ final class HelpCatalog
             'sending-domains' => 'Sending domains',
         ],
         'Operations' => [
+            'settings' => 'Settings, infra/.env and the time zone',
             'backups' => 'Backups and restore',
             'logs' => 'Logs',
             'upgrades' => 'Upgrades and rollback',

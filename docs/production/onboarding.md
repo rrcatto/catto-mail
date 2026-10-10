@@ -111,7 +111,7 @@ How they behave:
 
 - Empty means no client-specific limit; the ceiling still applies.
 - Quotas, usage summaries and billing statements use the calendar days and months of the
-  installation's time zone (`APP_TIMEZONE`, Africa/Johannesburg by default).
+  installation's time zone (`SMARTHOST_TIMEZONE`, Africa/Johannesburg by default).
 - A refused request is `429 quota-exceeded` with `Retry-After` (seconds until the period
   resets) and the client's own figures. Concurrent requests cannot exceed a quota together.
 - Lowering a limit below current usage refuses new work until the period resets; nothing

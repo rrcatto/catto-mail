@@ -1,5 +1,6 @@
 // Package snapshot reads the atomic Postfix queue snapshots
-// (postfix-integration.md §4, V-3): queue/snapshot-<UTC %Y%m%dT%H%M%SZ>.jsonl,
+// (postfix-integration.md §4, V-3): queue/snapshot-<%Y%m%dT%H%M%S%z>.jsonl in the
+// installation's time zone (snapshot-<%Y%m%dT%H%M%SZ>.jsonl before 0.2.3),
 // JSON Lines from `postqueue -j`, written by rename, so a file is never partial
 // and an empty file means an empty queue.
 package snapshot
@@ -17,7 +18,7 @@ import (
 // Snapshot is one snapshot file.
 type Snapshot struct {
 	Path string
-	Time time.Time // from the file name (UTC)
+	Time time.Time // from the file name, in the installation's zone
 }
 
 // List returns the snapshots in dir, oldest first.
@@ -32,11 +33,14 @@ func List(dir string) ([]Snapshot, error) {
 		if !strings.HasPrefix(n, "snapshot-") || !strings.HasSuffix(n, ".jsonl") {
 			continue
 		}
-		t, err := time.Parse("20060102T150405Z", strings.TrimSuffix(strings.TrimPrefix(n, "snapshot-"), ".jsonl"))
+		stamp := strings.TrimSuffix(strings.TrimPrefix(n, "snapshot-"), ".jsonl")
+		t, err := time.Parse("20060102T150405-0700", stamp)
 		if err != nil {
-			continue
+			if t, err = time.Parse("20060102T150405Z", stamp); err != nil { // written before 0.2.3
+				continue
+			}
 		}
-		out = append(out, Snapshot{Path: filepath.Join(dir, n), Time: t.UTC()})
+		out = append(out, Snapshot{Path: filepath.Join(dir, n), Time: t.Local()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
 	return out, nil

@@ -81,6 +81,10 @@ OBS_DIR=${SMARTHOST_POSTFIX_OBSERVABILITY_DIR}
 SPOOL_DIR=${SMARTHOST_DSN_SPOOL_DIR}
 DELIVERY_UID=${SMARTHOST_DELIVERY_UID}
 SPOOL_GID=${SMARTHOST_SPOOL_GID}
+# The installation's time zone: every container gets TZ, PostgreSQL also its
+# timezone and log_timezone settings (environment contract, SMARTHOST_TIMEZONE).
+TIMEZONE=${SMARTHOST_TIMEZONE}
+PG_ZONE_ARGS=(postgres -c "timezone=$TIMEZONE" -c "log_timezone=$TIMEZONE")
 
 # Start order; stop runs it backwards. No mailpit, no fake-smtp in production.
 SERVICES=(postgres opendkim postfix symfony-app webhook-worker nginx validator delivery)
@@ -160,7 +164,7 @@ service() {
   local name="$1"; shift
   mapfile -t h < <(hosts)
   podman create --name "$I-$name" --hostname "$name" --label project=smarthost --label "smarthost.instance=$I" \
-    --label smarthost.topology=production --pull never --restart "${restart:-on-failure}" "${h[@]}" "$@" >/dev/null
+    --label smarthost.topology=production --pull never --restart "${restart:-on-failure}" --env "TZ=$TIMEZONE" "${h[@]}" "$@" >/dev/null
   say "created container $I-$name"
 }
 
@@ -171,7 +175,7 @@ create_one() {
         -v "$I-postgres-data:/var/lib/postgresql/data" \
         --health-cmd "pg_isready -h 127.0.0.1 -U $POSTGRES_USER -d $POSTGRES_DB -q" \
         --health-interval 10s --health-start-period 30s --health-retries 6 \
-        "$PG_IMAGE" ;;
+        "$PG_IMAGE" "${PG_ZONE_ARGS[@]}" ;;
     opendkim)
       # The only container that mounts the DKIM key volume.
       service opendkim "$(internal opendkim opendkim)" "$(env_file opendkim)" \
@@ -189,7 +193,9 @@ create_one() {
         --health-cmd smarthost-postfix-healthcheck --health-interval 15s --health-start-period 15s --health-retries 4 \
         "$(image postfix)" ;;
     symfony-app)
+      # The rendered settings in force (System › Settings shows them), read-only.
       service symfony-app "$(egress)" "$(internal symfony-app symfony-app)" "$(env_file app)" \
+        -v "$GENERATED/settings.json:/etc/smarthost/settings.json:ro" \
         --health-cmd smarthost-fpm-healthcheck --health-interval 15s --health-start-period 10s --health-retries 4 \
         "$(image app)" ;;
     webhook-worker)
@@ -248,7 +254,7 @@ run_task() {
   mapfile -t h < <(hosts)
   podman rm --force --ignore "$I-$task" >/dev/null
   if podman run --rm --name "$I-$task" --network "$NET_INT" "${h[@]}" --label project=smarthost \
-      --label "smarthost.instance=$I" --pull never "${args[@]}" | sed "s/^/  $task: /"; then
+      --label "smarthost.instance=$I" --pull never --env "TZ=$TIMEZONE" "${args[@]}" | sed "s/^/  $task: /"; then
     say "task $task ok"
   else
     die "task $task failed"

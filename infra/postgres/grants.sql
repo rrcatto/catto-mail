@@ -95,6 +95,8 @@ GRANT INSERT ON audit_log TO :"webhook", :"validator", :"delivery";
 -- Operator self-service (specification 2.11). The host agent writes through the application
 -- console (role app); the web application only records requests and reads results.
 GRANT SELECT, INSERT, UPDATE ON system_requests, system_state, setup_steps TO :"app";
+-- Settings changed in the dashboard; the host tooling reads them with the PostgreSQL administrator.
+GRANT SELECT, INSERT, UPDATE, DELETE ON setting_overrides TO :"app";
 -- A check the host agent no longer reports leaves the current results (its history stays).
 GRANT SELECT, INSERT, UPDATE, DELETE ON system_checks TO :"app";
 GRANT SELECT, INSERT ON system_check_runs TO :"app";

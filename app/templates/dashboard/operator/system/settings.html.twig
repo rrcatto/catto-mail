@@ -1,0 +1,68 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Settings{% endblock %}
+{% block body %}
+<div class="pagehead">
+    <div>
+        <h1>Settings</h1>
+        <p class="sub">The operational settings of this installation. A value set here takes precedence over the configuration file (infra/.env) without changing it;
+            empty a field to use the file's value again. Changes take effect when they are applied, which restarts the services that use them.
+            Secrets, the database, networks, certificates, host names and the live-delivery switch are set only in the file. {{ ui.help('settings') }}</p>
+    </div>
+</div>
+
+<section class="banner{% if pending > 0 or (state and state.errors is not empty) %} banner-HELD{% endif %}" aria-labelledby="apply-h">
+    <div class="banner-text">
+        {% if state is null %}
+            <h2 id="apply-h">The settings in force are not visible</h2>
+            <p>The application container has no copy of the rendered settings yet. {% if environment == 'production' %}Run <code>infra/bin/smarthostctl prod recreate</code> once on the server.{% else %}Run <code>infra/bin/smarthostctl recreate</code>.{% endif %}</p>
+        {% elseif pending > 0 %}
+            <h2 id="apply-h">{{ pending }} {{ pending == 1 ? 'change is' : 'changes are' }} waiting to be applied</h2>
+            <p>{% if environment == 'production' %}Applying restarts the services that use the changed settings (a few seconds each; a time zone change restarts every service).{% else %}In development, run <code>infra/bin/smarthostctl settings-apply</code> (it recreates the pod with the new values).{% endif %}</p>
+        {% else %}
+            <h2 id="apply-h">Every setting is in force</h2>
+            <p>Last rendered {{ state.rendered_at|ts }}.</p>
+        {% endif %}
+        {% if state and state.errors is not empty %}<p><strong>The last render ignored every dashboard value:</strong> {{ state.errors|join(' ') }}</p>{% endif %}
+        {% if last_apply %}<p><small>Last apply request: {{ last_apply.status }}, {{ last_apply.requested_at|ts }}{% if last_apply.result_summary %}: {{ last_apply.result_summary }}{% endif %}</small></p>{% endif %}
+    </div>
+    {% if can_manage and environment == 'production' and pending > 0 %}
+    <form method="post" action="{{ path('dashboard_operator_settings_apply') }}" class="actions">{{ ui.csrf() }}
+        <button type="submit">Apply changes</button>
+    </form>
+    {% if agent_age is null %}<p class="warn">The host agent has never reported, so nothing is applied until it runs (<code>smarthostctl prod install</code>).</p>{% endif %}
+    {% endif %}
+</section>
+
+{% for g in groups %}
+<section class="card card-flush" id="{{ g.slug }}" aria-labelledby="{{ g.slug }}-h">
+    <div class="card-head"><h2 id="{{ g.slug }}-h">{{ g.title }}</h2></div>
+    <div class="scroll"><table class="dense table-settings">
+        <thead><tr><th scope="col">Setting</th><th scope="col">In <code>infra/.env</code></th><th scope="col">Set in the dashboard</th><th scope="col">In force</th></tr></thead>
+        <tbody>{% for name, s in g.rows %}<tr>
+            <td><label for="v-{{ name }}">{{ s.label }}</label><br><small class="muted"><code>{{ name }}</code></small></td>
+            <td>{{ s.config is null ? '—' : (s.config is same as('') ? 'empty' : s.config) }}</td>
+            <td>{% if can_manage %}
+                {% if s.kind == 'choice' %}
+                    <select id="v-{{ name }}" name="value[{{ name }}]" form="f-{{ g.slug }}"><option value="">Use infra/.env</option>{% for c in s.choices %}<option value="{{ c }}"{% if s.override and s.override.value == c %} selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+                {% else %}
+                    <input id="v-{{ name }}" name="value[{{ name }}]" form="f-{{ g.slug }}" type="text" value="{{ s.override.value ?? '' }}" placeholder="{{ s.config ?? '' }}"
+                        {% if s.kind == 'integer' %}inputmode="numeric"{% elseif s.kind == 'decimal' %}inputmode="decimal"{% endif %} autocomplete="off" spellcheck="false">
+                {% endif %}
+                {% if s.min is defined %}<br><small class="muted">{{ s.min }} to {{ s.max }}{% if s.empty|default(false) %}, or empty{% endif %}</small>{% endif %}
+            {% else %}{{ s.override.value ?? '—' }}{% endif %}
+            {% if s.override %}<br><small class="muted">{{ s.override.updated_by ?? 'system' }}, {{ s.override.updated_at|ts }}: {{ s.override.reason }}</small>{% endif %}</td>
+            <td>{{ s.in_force is null ? '—' : (s.in_force is same as('') ? 'empty' : s.in_force) }}
+                {% if s.pending %}<br><span class="tag tag-warn">waiting to be applied</span>{% endif %}
+                {% if s.ignored %}<br><span class="tag tag-bad">ignored: {{ s.ignored }}</span>{% endif %}</td>
+        </tr>{% endfor %}</tbody>
+    </table></div>
+    {% if can_manage %}
+    <form method="post" action="{{ path('dashboard_operator_settings_save') }}" id="f-{{ g.slug }}" class="card-foot form-grid">{{ ui.csrf() }}
+        <input type="hidden" name="group" value="{{ g.title }}">
+        <label>Reason for the change (required, audited) <input type="text" name="reason" minlength="3" maxlength="1000"></label>
+        <div class="form-actions"><button type="submit">Save {{ g.title|lower }}</button></div>
+    </form>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

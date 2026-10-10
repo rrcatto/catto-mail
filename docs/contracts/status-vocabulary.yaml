@@ -437,7 +437,7 @@ quota_metric:
     send_recipients: {origin: contract, meaning: Recipients accepted in recipient batches.}
 
 quota_period:
-  description: client_quota_usage.period - calendar periods in the installation's time zone, APP_TIMEZONE (specification 2.10).
+  description: client_quota_usage.period - calendar periods in the installation's time zone, SMARTHOST_TIMEZONE (specification 2.10).
   values:
     day: {origin: contract}
     month: {origin: contract}
@@ -612,6 +612,7 @@ system_request_action:
     dkim.generate: {origin: contract, meaning: "Generate a new DKIM key for a domain and selector (not yet signing)."}
     dkim.activate: {origin: contract, meaning: "Activate a published DKIM selector after its DNS record matches the key."}
     tls.renew: {origin: contract, meaning: "Obtain or renew the Let's Encrypt certificate (DNS-01) and install it."}
+    settings.apply: {origin: contract, meaning: "Render the configuration again with the settings changed in the dashboard (setting_overrides over infra/.env) and restart the services whose settings changed (smarthostctl prod settings-apply)."}
 
 system_request_status:
   description: system_requests.status.
@@ -660,7 +661,7 @@ system_check_source:
 system_check_trigger:
   description: system_check_runs.run_trigger - why a result was kept in the history.
   values:
-    scheduled: {origin: contract, meaning: "The first scheduled result of the check on a UTC day."}
+    scheduled: {origin: contract, meaning: "The first scheduled result of the check on a day of the installation's time zone."}
     requested: {origin: contract, meaning: "An administrator asked for the run."}
     changed: {origin: contract, meaning: "The result differs from the previous one."}
 

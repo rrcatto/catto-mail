@@ -6,6 +6,7 @@
 !docs/api/openapi.v1.yaml
 !docs/api/integration-guide.md
 !docs/contracts/status-vocabulary.yaml
+!docs/contracts/settings.json
 !docs/schema/reference-schema.sql
 !docs/schema/schema.md
 !docs/contracts/address-normalization-vectors.json

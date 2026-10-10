@@ -81,8 +81,14 @@ services:
             $webhookEndpointLimit: '%app.client.webhook_endpoint_limit%'
             $sendingDomainLimit: '%app.client.sending_domain_limit%'
 
+    # Settings an administrator may change in the dashboard, and what the last render applied.
+    App\System\SettingCatalog:
+        arguments: ['%kernel.project_dir%/config/contracts/settings.json']
+    App\System\AppliedSettings:
+        arguments: ['/etc/smarthost/settings.json']
+
     App\Util\InstallationTime:
-        arguments: ['%env(APP_TIMEZONE)%']
+        arguments: ['%env(SMARTHOST_TIMEZONE)%']
 
     App\Reputation\ReputationThresholds:
         factory: ['App\Reputation\ReputationThresholds', 'fromConfiguration']

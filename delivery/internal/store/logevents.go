@@ -330,7 +330,7 @@ func (s *Store) MarkOutcomeUnknown(ctx context.Context, c Candidate, detail map[
 		return false, nil // resolved meanwhile
 	}
 	inserted, err := t.appendEvent(ctx, m, Event{MessageID: c.MessageID, Type: "transport_outcome_unknown", Source: "queue_reconciliation",
-		Key: c.MessageID + ":" + c.QueueID, OccurredAt: time.Now().UTC(), Metadata: detail})
+		Key: c.MessageID + ":" + c.QueueID, OccurredAt: time.Now(), Metadata: detail})
 	if err != nil {
 		return false, err
 	}

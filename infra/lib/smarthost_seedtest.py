@@ -94,7 +94,7 @@ def cmd_send(a: argparse.Namespace) -> int:
     if not a.i_own_these_addresses:
         sys.exit("refusing: a seed test goes only to addresses you own and name; add --i-own-these-addresses")
     api = Api(a.base_url or base_url(), Path(a.api_key_file).read_text(encoding="utf-8").strip(), a.insecure)
-    tag = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    tag = time.strftime("%Y%m%dT%H%M%S%z")  # local time with its offset (the server keeps the installation zone)
     job = api.must("POST", "/send-jobs", {"external_reference": f"seed-test-{tag}", "message_class": "transactional",
                                           "sender_identity": {"email": a.sender, "name": "catto-mail seed test"}}, 201)
     recipients = [{"external_recipient_reference": f"seed-{i}", "email_address": to,

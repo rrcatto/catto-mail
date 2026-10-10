@@ -17,7 +17,7 @@ use Doctrine\DBAL\Connection;
  *
  * admit() runs inside the transaction that admits the work (validation job creation,
  * send job creation, a recipient batch). For the current calendar day and month in the
- * installation's time zone (APP_TIMEZONE, InstallationTime) it adds the amount to
+ * installation's time zone (SMARTHOST_TIMEZONE, InstallationTime) it adds the amount to
  * client_quota_usage with one statement,
  *
  *   INSERT ... ON CONFLICT (client_id, metric, period, period_start)

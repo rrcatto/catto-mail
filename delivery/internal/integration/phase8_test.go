@@ -151,7 +151,7 @@ func TestThrottledClientAndGlobalCeiling(t *testing.T) {
 // newest snapshot, delivery state, warm-up ceiling).
 func TestDeliveryHeartbeatRecordsStateAndQueueDepth(t *testing.T) {
 	e := newEnv(t)
-	now := time.Now().UTC().Truncate(time.Second)
+	now := time.Now().Truncate(time.Second)
 	e.snapshot(now, "Q1", "Q2", "Q3")
 	at, counts, ok, err := snapshot.Depth(filepath.Join(e.obs, "queue"))
 	if err != nil || !ok || counts["deferred"] != 3 {

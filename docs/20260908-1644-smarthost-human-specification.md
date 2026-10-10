@@ -1141,7 +1141,12 @@ The core Smarthost schema includes:
 
 Time-ordered UUIDs (UUIDv7) are used consistently across all three languages.
 
-Timestamps use timezone-aware PostgreSQL timestamps and are handled consistently in UTC internally.
+Timestamps use timezone-aware PostgreSQL timestamps. Every time is in the installation's time
+zone, `SMARTHOST_TIMEZONE` (default `Africa/Johannesburg`, South African Standard Time, UTC+2;
+owner decision): the database sessions, the computation in every service, the dashboard, API and
+webhook timestamps (RFC 3339 with the zone's offset, for example `2026-10-10T10:48:56+02:00`),
+exports, logs and file names. Only fields whose format a standard fixes keep it: HTTP date headers
+(GMT) and the Unix time in `Smarthost-Signature`.
 
 Important indexes include:
 
@@ -1465,7 +1470,7 @@ The installation-wide kill switch remains the Phase 8 delivery pause.
 - `usage_records` remains the only metering source: validation addresses per job, and one
   `message_submitted` unit per message accepted by Postfix (enforced unique).
 - Summaries cover the current day, the current month, the previous month and custom ranges
-  (calendar days of the installation's time zone, `APP_TIMEZONE`).
+  (calendar days of the installation's time zone, `SMARTHOST_TIMEZONE`).
 - Reconciliation compares metered units with validation jobs and accepted messages and names
   every inconsistency.
 - Billing statements (draft → finalized → exported, or void) freeze an ended period's
@@ -1701,10 +1706,30 @@ address, a domain, an external reference or a name; in a client workspace it cov
 client.
 
 Charts use Chart.js, vendored in the application; the Outfit font is served by the application;
-the Content Security Policy allows no inline styles. The dashboard shows times in the
-installation's time zone (`APP_TIMEZONE`, default `Africa/Johannesburg`, SAST), and the overview
-buckets and the quota, usage and billing days and months follow it. Storage, the API, webhooks and
-exports keep UTC timestamps. Screenshots of every page are in `docs/screenshots/`.
+the Content Security Policy allows no inline styles. Every time is in the installation's time zone
+(`SMARTHOST_TIMEZONE`, default `Africa/Johannesburg`, SAST), the overview buckets and the quota,
+usage and billing days and months included. Screenshots of every page are in `docs/screenshots/`.
+
+## Settings in the dashboard and the .env file (owner decision, 2026-10-10)
+
+`infra/.env` holds only the settings an operator sets, grouped under plain headings (installation,
+web address, mail server and domains, sign-in, delivery pacing, bounces, validation, API and client
+limits, webhooks, reputation alerts, data retention, certificates, backups, secrets). Every other
+contract variable is built in: container names, ports inside the topology, paths and database role
+names are supplied by the renderer, and a `.env` may still name one to change it.
+`smarthostctl env-migrate` (production: `prod env-migrate`, which `prod upgrade` runs) rewrites an
+older file in this layout and keeps the old one as `infra/.env.v<version>-<date and time>`.
+
+**System › Settings** lists the operational settings (`docs/contracts/settings.json`) with their
+`infra/.env` value, the value set in the dashboard and the value in force. A dashboard value is
+stored in the database and takes precedence over `infra/.env` without changing the file; emptying
+it restores the file's value. Every change needs a reason and is audited; changing and applying
+need `SYSTEM.SETTINGS.MANAGE`. A change takes effect when it is applied: the host agent renders the
+configuration again with the dashboard values and restarts only the services whose settings
+changed (`smarthostctl prod settings-apply`; in development `smarthostctl settings-apply`). A
+value that breaks a rule is ignored and shown, so a bad value never stops the services. Secrets,
+the database, networks and ports, certificates, host names, domains, addresses and the safety
+switches (live delivery, SMTP probing) are set only in `infra/.env`.
 
 ## Dashboard sign-in and access control (specification 2.7)
 

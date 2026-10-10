@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // SMARTHOST_TIMEZONE resolves even without the image's zoneinfo
 )
 
 // Config is everything the daemon reads from its environment.
@@ -23,6 +24,9 @@ type Config struct {
 	LogFormat       string
 	LiveDelivery    bool
 	AllowUnverified bool
+	// TimeZone is the installation's time zone (SMARTHOST_TIMEZONE): every time the
+	// daemon writes or reads as text (logs, Postfix log records, file names) is in it.
+	TimeZone *time.Location
 
 	BounceDomain  string
 	VERPLocalPart string
@@ -113,6 +117,19 @@ func (r *reader) seconds(name string, min int) time.Duration {
 	return time.Duration(r.integer(name, min)) * time.Second
 }
 
+func (r *reader) location(name string) *time.Location {
+	v := r.required(name)
+	if v == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(v)
+	if err != nil || v == "Local" {
+		r.errs = append(r.errs, fmt.Sprintf("%s must be an IANA time zone name such as Africa/Johannesburg (got %q)", name, v))
+		return nil
+	}
+	return loc
+}
+
 func (r *reader) boolean(name string) bool {
 	switch v := r.required(name); v {
 	case "true":
@@ -138,6 +155,7 @@ func Load(get func(string) string) (*Config, error) {
 		LogFormat:           r.optional("SMARTHOST_LOG_FORMAT", "json"),
 		LiveDelivery:        r.boolean("SMARTHOST_LIVE_DELIVERY_ENABLED"),
 		AllowUnverified:     r.boolean("SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS"),
+		TimeZone:            r.location("SMARTHOST_TIMEZONE"),
 		BounceDomain:        strings.ToLower(r.required("SMARTHOST_BOUNCE_DOMAIN")),
 		VERPLocalPart:       r.required("SMARTHOST_VERP_LOCAL_PART"),
 		VERPDelimiter:       r.required("SMARTHOST_VERP_DELIMITER"),
@@ -226,6 +244,6 @@ func (c *Config) SubmissionAddr() string {
 // DSN is the libpq connection string of the delivery role.
 func (c *Config) DSN() string {
 	q := func(s string) string { return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'" }
-	return fmt.Sprintf("host=%s port=%s dbname=%s sslmode=%s user=%s password=%s connect_timeout=10 application_name=smarthost-delivery",
-		q(c.DBHost), q(c.DBPort), q(c.DBName), q(c.DBSSLMode), q(c.DBUser), q(c.DBPassword))
+	return fmt.Sprintf("host=%s port=%s dbname=%s sslmode=%s user=%s password=%s connect_timeout=10 application_name=smarthost-delivery timezone=%s",
+		q(c.DBHost), q(c.DBPort), q(c.DBName), q(c.DBSSLMode), q(c.DBUser), q(c.DBPassword), q(c.TimeZone.String()))
 }

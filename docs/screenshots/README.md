@@ -1,8 +1,8 @@
 # Screenshots
 
-Every page of the dashboard as of version 0.2.2, taken on the development pod (`smarthostctl`) at 1,440 pixels wide unless
+Every page of the dashboard as of version 0.2.3, taken on the development pod (`smarthostctl`) at 1,440 pixels wide unless
 noted, signed in as the administrator. The figures come from the end-to-end test suites, so the clients, addresses and
-domains are test data. Times are shown in the installation time zone (`APP_TIMEZONE`, here SAST). The development pod is
+domains are test data. Every time is in the installation time zone (`SMARTHOST_TIMEZONE`, here SAST). The development pod is
 always in HELD mode: live delivery is off and mail goes to Mailpit.
 
 ## Operator console
@@ -90,6 +90,12 @@ always in HELD mode: live delivery is off and mail goes to Mailpit.
 `/dashboard/operator/system/diagnostics`
 
 ![System › Diagnostics](operator-system-diagnostics.png)
+
+### System › Settings
+
+`/dashboard/operator/system/settings` · Each operational setting with its value in `infra/.env`, the value set in the dashboard (which takes precedence without changing the file) and the value in force; changes need a reason and take effect when applied.
+
+![System › Settings](operator-system-settings.png)
 
 ### Host requests
 

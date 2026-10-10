@@ -3,7 +3,7 @@ import pytest
 from smarthost_validator.config import Config, ConfigError
 
 BASE = {
-    "SMARTHOST_ENV": "test", "SMARTHOST_LOG_LEVEL": "info", "SMARTHOST_LOG_FORMAT": "json",
+    "SMARTHOST_ENV": "test", "SMARTHOST_LOG_LEVEL": "info", "SMARTHOST_LOG_FORMAT": "json", "SMARTHOST_TIMEZONE": "Africa/Johannesburg",
     "SMARTHOST_DB_HOST": "postgres", "SMARTHOST_DB_PORT": "5432", "SMARTHOST_DB_NAME": "smarthost", "SMARTHOST_DB_SSLMODE": "disable",
     "VALIDATOR_DB_USER": "smarthost_validator", "VALIDATOR_DB_PASSWORD": "pw", "VALIDATOR_WORKER_ID": "w1",
     "VALIDATOR_CHUNK_SIZE": "250", "VALIDATOR_LEASE_SECONDS": "300", "VALIDATOR_POLL_INTERVAL_SECONDS": "10",
@@ -22,6 +22,12 @@ def test_parses_the_contract_variables():
     assert c.worker_id == "w1"
 
 
+def test_installation_time_zone_reaches_the_database_session():
+    c = Config.from_env(BASE)
+    assert c.timezone.key == "Africa/Johannesburg"
+    assert "timezone=Africa/Johannesburg" in c.conninfo
+
+
 def test_empty_worker_id_means_hostname():
     assert Config.from_env({**BASE, "VALIDATOR_WORKER_ID": ""}).worker_id
 
@@ -36,6 +42,8 @@ def test_empty_worker_id_means_hostname():
     ({"VALIDATOR_SMTP_ROUTE_OVERRIDE": "fake-smtp"}, "host:port"),
     ({"VALIDATOR_RETRY_MAX_SECONDS": "10"}, "must not be below"),
     ({"SMARTHOST_ENV": "staging"}, "SMARTHOST_ENV"),
+    ({"SMARTHOST_TIMEZONE": "Mars/Olympus"}, "SMARTHOST_TIMEZONE"),
+    ({"SMARTHOST_TIMEZONE": ""}, "SMARTHOST_TIMEZONE"),
 ])
 def test_fails_closed(override, message):
     with pytest.raises(ConfigError, match=message):

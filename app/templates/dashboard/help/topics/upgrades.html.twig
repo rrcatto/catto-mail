@@ -1,16 +1,18 @@
 {% extends 'dashboard/help/_topic.html.twig' %}
 {% block content %}
-<p>catto-mail is installed from an exact <strong>release tag</strong> (for example <code>v0.2.0</code>), never from the moving <code>main</code> branch. Each release's notes and source downloads (zip and tar.gz with SHA-256 checksums) are on <a href="https://github.com/rrcatto/catto-mail/releases" rel="noopener noreferrer">the releases page</a>; the upgrade itself uses the Git tag, which is the same code.</p>
+<p>catto-mail is installed from an exact <strong>release tag</strong> (for example <code>v0.2.3</code>), never from the moving <code>main</code> branch. Each release's notes and source downloads (zip and tar.gz with SHA-256 checksums) are on <a href="https://github.com/rrcatto/catto-mail/releases" rel="noopener noreferrer">the releases page</a>; the upgrade itself uses the Git tag, which is the same code.</p>
+<p>Log in to the server with your own account (for example <code>ubuntu</code>), become root with <code>sudo -i</code>, then switch to the service user with <code>sudo -iu cattomail</code> (no password is asked from root; nobody logs in as <code>cattomail</code> directly).</p>
 <pre class="cmd">cd ~/catto-mail
 git fetch --tags
 git tag --sort=-v:refname | head        # available releases
 git describe --tags                     # the installed one
-git checkout v0.2.2                     # the new release (read its CHANGELOG first)
-infra/bin/smarthostctl prod check       # names any new setting you must add to infra/.env
-infra/bin/smarthostctl prod upgrade 0.2.2</pre>
-<p><code>prod upgrade</code> checks the running system, takes a backup, builds the new images, recreates the containers (migrations and grants run at start), and checks again. Then run all diagnostics.</p>
+git checkout v0.2.3                     # the new release (read its CHANGELOG first)
+infra/bin/smarthostctl prod env-migrate # infra/.env in the release's layout (the old file is kept)
+infra/bin/smarthostctl prod check       # names any setting that still needs a value
+infra/bin/smarthostctl prod upgrade 0.2.3</pre>
+<p><code>prod upgrade</code> rewrites <code>infra/.env</code> in the release's layout if needed (keeping the old file as <code>infra/.env.v&lt;old version&gt;-&lt;date and time&gt;</code>), checks the running system, takes a backup, builds the new images, recreates the containers (migrations and grants run at start), and checks again. Then run all diagnostics. Settings changed in the dashboard (System › Settings) stay in force across the upgrade.</p>
 <h2>Rollback</h2>
-<pre class="cmd">git checkout v0.2.0
-infra/bin/smarthostctl prod rollback 0.2.0 &lt;the backup directory the upgrade made&gt;</pre>
-<p>Rollback restores the previous images and the database from before the upgrade. Anything recorded after that backup is lost, so pause first and roll back promptly.</p>
+<pre class="cmd">git checkout v0.2.2
+infra/bin/smarthostctl prod rollback 0.2.2 &lt;the backup directory the upgrade made&gt;</pre>
+<p>Rollback restores the previous images, the configuration file the upgrade kept for that version and the database from before the upgrade. Anything recorded after that backup is lost, so pause first and roll back promptly.</p>
 {% endblock %}

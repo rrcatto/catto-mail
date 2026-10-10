@@ -17,4 +17,5 @@ enum SystemRequestAction: string
     case DkimGenerate = 'dkim.generate';
     case DkimActivate = 'dkim.activate';
     case TlsRenew = 'tls.renew';
+    case SettingsApply = 'settings.apply';
 }

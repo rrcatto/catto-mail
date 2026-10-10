@@ -7,13 +7,18 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, tzinfo
 
 
 class _JsonFormatter(logging.Formatter):
+    def __init__(self, zone: tzinfo | None) -> None:
+        super().__init__()
+        self.zone = zone
+
     def format(self, record: logging.LogRecord) -> str:
+        at = datetime.fromtimestamp(record.created, self.zone) if self.zone else datetime.fromtimestamp(record.created).astimezone()
         fields = {
-            "ts": datetime.fromtimestamp(record.created, UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "ts": at.isoformat(timespec="milliseconds"),  # the installation's zone, e.g. 2026-10-10T10:48:56.123+02:00
             "level": record.levelname.lower(),
             "service": "validator",
             "msg": record.getMessage(),
@@ -30,9 +35,9 @@ class _TextFormatter(logging.Formatter):
         return f"{record.levelname} {record.getMessage()} {json.dumps(ctx, default=str) if ctx else ''}".rstrip()
 
 
-def setup(level: str = "info", fmt: str = "json") -> None:
+def setup(level: str = "info", fmt: str = "json", zone: tzinfo | None = None) -> None:
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(_JsonFormatter() if fmt == "json" else _TextFormatter())
+    handler.setFormatter(_JsonFormatter(zone) if fmt == "json" else _TextFormatter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())

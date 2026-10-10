@@ -87,11 +87,11 @@ final class WebhookDashboardTest extends DashboardTestCase
         [$endpoint, $secret] = $this->container()->get(\App\Webhook\WebhookEndpointService::class)->create($this->reload($client), 'https://ops.example.test/h', ['send.completed'], self::actor());
         $event = \App\Tests\Schema\SchemaFixtures::id();
         Db::owner()->insert('webhook_events', ['id' => $event, 'client_id' => $client->getId()->toRfc4122(), 'event_type' => 'webhook.test',
-            'subject_type' => 'webhook_endpoint', 'subject_id' => $endpoint->getId()->toRfc4122(), 'fanned_out_at' => gmdate('Y-m-d H:i:s')]);
+            'subject_type' => 'webhook_endpoint', 'subject_id' => $endpoint->getId()->toRfc4122(), 'fanned_out_at' => date('Y-m-d H:i:s')]);
         Db::owner()->insert('webhook_deliveries', ['id' => \App\Tests\Schema\SchemaFixtures::id(), 'client_id' => $client->getId()->toRfc4122(), 'webhook_event_id' => $event,
             'webhook_endpoint_id' => $endpoint->getId()->toRfc4122(), 'event_type' => 'webhook.test', 'payload_json' => '{}', 'payload_hash' => str_repeat('0', 64),
             'status' => 'failed', 'attempt_count' => 8, 'last_response_status' => 500, 'last_error' => 'HTTP 500 Attempts exhausted.']);
-        Db::owner()->insert('webhook_worker_heartbeats', ['worker_id' => 'w-'.bin2hex(random_bytes(3)), 'version' => '0.1.6', 'started_at' => gmdate('Y-m-d H:i:s'), 'last_seen_at' => gmdate('Y-m-d H:i:s')]);
+        Db::owner()->insert('webhook_worker_heartbeats', ['worker_id' => 'w-'.bin2hex(random_bytes(3)), 'version' => '0.1.6', 'started_at' => date('Y-m-d H:i:s'), 'last_seen_at' => date('Y-m-d H:i:s')]);
         $this->signIn($this->newUser(true));
         $r = $this->page('/dashboard/operator/webhooks?status=failed&client='.$client->getId()->toRfc4122());
         self::assertSame(200, $r->getStatusCode());

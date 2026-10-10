@@ -59,7 +59,7 @@ func (l *Logger) log(level, msg string, kv []any) {
 		}
 		rec[fmt.Sprint(kv[i])] = kv[i+1]
 	}
-	rec["ts"] = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	rec["ts"] = time.Now().Format("2006-01-02T15:04:05.000Z07:00") // the installation's zone (time.Local)
 	rec["level"] = level
 	rec["service"] = "delivery"
 	rec["msg"] = msg

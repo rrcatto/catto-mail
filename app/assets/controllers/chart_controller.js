@@ -20,7 +20,7 @@ Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, Li
 
 const C = { ink: '#0E1411', muted: '#66726B', grid: '#EEF3EF', green: '#0E8A44', dark: '#0B6B35', neon: '#22D56B', line: '#CFE3D6', bad: '#C4202F' };
 const number = new Intl.NumberFormat('en-US');
-/* Dates in the dashboard's time zone (APP_TIMEZONE, sent with the chart data). */
+/* Dates in the installation's time zone (SMARTHOST_TIMEZONE, sent with the chart data). */
 const dates = (timeZone) => ({
     day: new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone }),
     dayTime: new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone }),
@@ -281,7 +281,7 @@ export default class extends Controller {
         const highest = Math.max(0, ...c.series.flatMap((s) => s.points.map((p) => p.y)));
         // A rate never exceeds 100 %: once the scale would reach it, 100 % is the top.
         const top = Math.max(c.warning * 1.6, highest * 1.15);
-        const { day, dayTime, hour } = dates(c.timeZone || 'UTC');
+        const { day, dayTime, hour } = dates(c.timeZone || 'Africa/Johannesburg');
         const ticks = c.hourly ? hour : day;
         return {
             type: 'scatter',

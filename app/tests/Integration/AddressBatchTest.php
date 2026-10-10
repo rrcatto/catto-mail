@@ -119,7 +119,7 @@ final class AddressBatchTest extends DashboardTestCase
         self::validated($id, 'user@gmial.com', 'probably_deliverable', ['suggest' => 'user@gmail.com']);
         // unknown@example.org stays pending
         $o->insert('suppressions', ['id' => SchemaFixtures::id(), 'client_id' => null, 'address_or_domain' => 'bounced@example.org',
-            'scope_type' => 'address', 'reason' => 'hard_bounce', 'created_at' => gmdate('Y-m-d H:i:s')]);
+            'scope_type' => 'address', 'reason' => 'hard_bounce', 'created_at' => date('Y-m-d H:i:s')]);
 
         $s = $read->summary($id);
         self::assertSame(['entries' => 9, 'imported' => 7, 'duplicate' => 1, 'malformed' => 1, 'pending' => 1, 'valid' => 4, 'invalid' => 1,

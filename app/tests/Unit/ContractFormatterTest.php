@@ -18,7 +18,7 @@ final class ContractFormatterTest extends TestCase
         self::assertSame(['ts', 'level', 'service', 'msg', 'channel', 'client_id'], array_keys($data));
         self::assertSame('warning', $data['level']);
         self::assertSame('symfony-app', $data['service']);
-        self::assertMatchesRegularExpression('/Z$/', $data['ts']);
+        self::assertMatchesRegularExpression('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}\+02:00$/', $data['ts'], 'log times carry the installation zone (SAST)');
     }
 
     public function testUnknownFormatIsRejected(): void

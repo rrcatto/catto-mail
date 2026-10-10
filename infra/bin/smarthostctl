@@ -34,7 +34,8 @@ DEV_DKIM_DOMAIN="smarthost-dev.test"   # RFC 2606 reserved: disposable test doma
 DEV_DKIM_SELECTOR="phase1"
 
 die() { echo "smarthostctl: $*" >&2; exit 1; }
-envval() { grep -E "^$1=" "$REPO/infra/.env" | head -n1 | cut -d= -f2-; }
+# A setting's value: the .env's, else the built-in one (docs/contracts/environment.md).
+envval() { $RENDER get "$1" --env "$REPO/infra/.env"; }
 
 # Run the helper inside the engine's systemd namespace.
 machine() {
@@ -50,6 +51,18 @@ machine() {
 }
 
 pod() { [[ -x "$PODSH" ]] || die "$PODSH missing: run 'smarthostctl render' (or install)"; "$PODSH" "$@"; }
+
+# Render with the settings changed in the dashboard (System › Settings), read from the running
+# database into $GEN/overrides.json; when PostgreSQL is not running the last copy is used.
+do_render() {
+  local out
+  mkdir -p "$GEN"
+  if out="$(podman exec smarthost-postgres psql -X -At -U "$(envval POSTGRES_USER)" -d "$(envval SMARTHOST_DB_NAME)" \
+      -c "SELECT coalesce(json_object_agg(name, value), '{}') FROM setting_overrides" 2>/dev/null)" && [[ "$out" == \{* ]]; then
+    printf '%s\n' "$out" > "$GEN/overrides.json"
+  fi
+  $RENDER render --overrides "$GEN/overrides.json"
+}
 unit_active() { [[ "$(machine systemctl is-active smarthost.service 2>/dev/null)" == active ]]; }
 
 # start: ordered start of the existing pod (PostgreSQL, DB tasks, all services,
@@ -129,6 +142,10 @@ usage() {
   cat <<USAGE
 usage: smarthostctl <command>        (development; production: smarthostctl prod help)
   init-env          create infra/.env with random development secrets (never overwrites)
+  env-migrate       rewrite an older infra/.env in the current grouped layout, keeping every
+                    value; the old file stays as infra/.env.v<version>-<timestamp>
+  settings-apply    apply the settings changed in the dashboard (System › Settings): render with
+                    them and recreate the pod (volumes are kept)
   render            render per-service env files, the pod script and systemd units into infra/.generated/
   build             build all Smarthost images
   secrets           create disposable development TLS certificates as Podman secrets
@@ -187,18 +204,20 @@ esac
 
 case "${1:-}" in
   init-env) $RENDER init-env ;;
-  render) $RENDER render ;;
+  env-migrate) $RENDER migrate-env --env "$REPO/infra/.env" ;;
+  render) do_render ;;
   build) cmd_build ;;
   secrets) cmd_secrets ;;
   install)
-    $RENDER render && machine install
+    do_render && machine install
     if pod exists; then echo "pod smarthost exists (kept; use 'recreate' to replace it)"; else pod create; fi ;;
-  create) $RENDER render && pod create ;;
+  create) do_render && pod create ;;
   dkim-dev-key) shift; cmd_dkim_dev_key "$@" ;;
   start) cmd_start ;;
   stop) cmd_stop ;;
   restart) cmd_stop && cmd_start ;;
-  recreate) $RENDER render && cmd_stop && pod remove && pod create && cmd_start && cmd_status ;;
+  recreate) do_render && cmd_stop && pod remove && pod create && cmd_start && cmd_status ;;
+  settings-apply) do_render && cmd_stop && pod remove && pod create && cmd_start && cmd_status ;;
   remove) cmd_stop && pod remove ;;
   status) cmd_status ;;
   logs)

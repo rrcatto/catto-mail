@@ -46,12 +46,14 @@ PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "  PASS  $*"; }
 fail() { FAIL=$((FAIL+1)); echo "  FAIL  $*"; }
 prod() { SMARTHOST_DOTENV="$ENVF" SMARTHOST_GENERATED="$GEN" "$REPO/infra/bin/smarthostctl" prod "$@"; }
-ev() { grep -E "^$1=" "$ENVF" | head -n1 | cut -d= -f2-; }
+ev() { python3 "$REPO/infra/lib/smarthost_render.py" get "$1" --env "$ENVF"; }
 setv() { python3 - "$ENVF" "$1" "$2" <<'PY'
 import re, sys
 p, k, v = sys.argv[1:]
 t = open(p).read()
-t = re.sub(rf"^{re.escape(k)}=.*$", lambda m: f"{k}={v}", t, count=1, flags=re.M)
+t, n = re.subn(rf"^{re.escape(k)}=.*$", lambda m: f"{k}={v}", t, count=1, flags=re.M)
+if n == 0:  # a built-in setting the file does not name yet
+    t = t.rstrip("\n") + f"\n{k}={v}\n"
 open(p, "w").write(t)
 PY
 }

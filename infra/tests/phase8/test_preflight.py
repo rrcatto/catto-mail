@@ -144,7 +144,7 @@ class GrantMatrixTest(unittest.TestCase):
 
     def test_schema_md_matrix(self) -> None:
         m = pf.grant_matrix((ROOT / "docs/schema/schema.md").read_text())
-        self.assertEqual(48, len(m))
+        self.assertEqual(49, len(m))
         self.assertEqual({"S", "I", "U"}, m["delivery_heartbeats"]["delivery"])
         self.assertEqual({"S", "I"}, m["client_notes"]["app"])
         self.assertEqual(set(), m["client_alerts"]["delivery"])

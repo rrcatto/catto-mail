@@ -605,7 +605,7 @@ func TestReconciliationConcludesOnlyFromFreshAbsence(t *testing.T) {
 	// log has status=sent; ms[3] absent from only one fresh snapshot.
 	// Snapshots must postdate the last event (+ grace 0): wait for the clock.
 	time.Sleep(3 * time.Second)
-	now := time.Now().UTC()
+	now := time.Now()
 	r := &reconcile.Reconciler{Store: e.st, Log: logx.New("error", "json"), ObservabilityDir: e.obs, BounceDomain: bounceDomain,
 		Interval: time.Second, Grace: 0, MinSnapshots: 2, SnapshotInterval: time.Minute}
 	// stale snapshots only: no conclusion at all

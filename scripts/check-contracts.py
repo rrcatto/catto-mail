@@ -33,6 +33,8 @@ except ImportError:  # pragma: no cover - environment guard
     sys.exit("check-contracts: PyYAML is required (python3 -m pip install pyyaml)")
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "infra/lib"))
+import smarthost_render as render  # noqa: E402  (the .env layout and built-in values)
 SPEC = ROOT / "docs/20260908-1644-smarthost-llm-spec.yaml"
 HUMAN = ROOT / "docs/20260908-1644-smarthost-human-specification.md"
 VOCAB = ROOT / "docs/contracts/status-vocabulary.yaml"
@@ -443,18 +445,40 @@ def check_environment(spec: dict, api: dict, env_md: str, env_example: str) -> N
         unknown = {c.strip() for c in consumers.split(",")} - ENV_CONSUMERS
         check(not unknown, f"environment.md: {name} has unknown consumers {sorted(unknown)}")
 
-    example: dict[str, str] = {}
+    template: dict[str, str] = {}
     for lineno, line in enumerate(env_example.splitlines(), 1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         m = re.match(r"^([A-Z][A-Z0-9_]*)=(.*)$", line)
         check(m is not None, f".env.example:{lineno}: not KEY=value")
         if m:
-            check(m.group(1) not in example, f".env.example: '{m.group(1)}' defined twice")
-            example[m.group(1)] = m.group(2)
+            check(m.group(1) not in template, f".env.example: '{m.group(1)}' defined twice")
+            template[m.group(1)] = m.group(2)
 
-    check(set(contract) == set(example),
-          f"environment contract and .env.example differ: {sorted(set(contract) ^ set(example))}")
+    # The .env holds the layout's settings (grouped); every other contract variable is built in.
+    placed = [name for _, rows in render.LAYOUT for name, _ in rows]
+    check(len(placed) == len(set(placed)), "smarthost_render.LAYOUT names a variable twice")
+    check(not set(placed) - set(contract), f"smarthost_render.LAYOUT names non-contract variables {sorted(set(placed) - set(contract))}")
+    check(list(template) == render.layout_names("development"),
+          f".env.example must hold exactly the development layout: {sorted(set(template) ^ set(render.layout_names('development')))}")
+    # The settings the dashboard may change (docs/contracts/settings.json): non-secret settings
+    # of the .env layout, never a safety switch, with a rule the renderer and the app both apply.
+    entries = render.catalog()
+    never = {"SMARTHOST_ENV", "SMARTHOST_LIVE_DELIVERY_ENABLED", "SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS",
+             "VALIDATOR_SMTP_PROBE_ENABLED", "SMARTHOST_IMAGE_TAG", "APP_ADMIN_EMAIL"}
+    for name, entry in entries.items():
+        check(name in placed, f"settings.json: {name} is not a setting of the .env layout")
+        check(not contract.get(name, False), f"settings.json: {name} is a secret")
+        check(name not in never, f"settings.json: {name} must stay in infra/.env only")
+        check(entry.get("kind") in ("integer", "decimal", "choice", "timezone", "text"), f"settings.json: {name} has an unknown kind")
+        for env_name in ("development", "production"):
+            if entry.get("production_only") and env_name == "development":
+                continue
+            default = render.defaults(env_name)[name]
+            check(render.override_error(entry, default, env_name) is None,
+                  f"settings.json: the {env_name} default of {name} ({default!r}) breaks its own rule")
+    # The checks below apply to what a development installation runs with (built-in values included).
+    example = {**render.defaults("development"), **template}
     for name, is_secret in contract.items():
         if is_secret:
             check(example.get(name, "") == "", f".env.example: secret '{name}' must be empty")
@@ -496,8 +520,10 @@ def check_production_template(contract: dict[str, bool]) -> None:
     check(path.is_file(), "infra/production.env.example missing (smarthost_render.py env-example)")
     if not path.is_file():
         return
-    prod = dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", path.read_text(encoding="utf-8"), re.M))
-    check(set(prod) == set(contract), f"production.env.example and the contract differ: {sorted(set(prod) ^ set(contract))}")
+    written = dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", path.read_text(encoding="utf-8"), re.M))
+    check(list(written) == render.layout_names("production"),
+          f"production.env.example must hold exactly the production layout: {sorted(set(written) ^ set(render.layout_names('production')))}")
+    prod = {**render.defaults("production"), **written}   # what production runs with
     for name, is_secret in contract.items():
         if is_secret:
             check(prod.get(name, "") == "", f"production.env.example: secret '{name}' must be empty")

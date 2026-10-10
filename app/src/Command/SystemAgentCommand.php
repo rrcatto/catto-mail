@@ -77,7 +77,7 @@ final class SystemAgentCommand extends AdminCommand
                         $this->state->put($key, $value);
                     }
                 }
-                $this->state->put(SystemState::AGENT, ['at' => gmdate('c')]);
+                $this->state->put(SystemState::AGENT, ['at' => date('c')]);
                 $io->writeln("recorded $n checks".($retired > 0 ? ", retired $retired no longer reported" : ''));
 
                 return Command::SUCCESS;

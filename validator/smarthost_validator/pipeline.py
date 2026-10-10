@@ -16,7 +16,7 @@ from .classify import Facts, classify, retry_delay
 from .config import Config
 from .dns_check import DnsChecker
 from .limits import AcceptAllPolicy, Limits, ProviderBackoff
-from .models import ClaimedAddress, Evidence, FinalResult, RetryResult, utcnow
+from .models import ClaimedAddress, Evidence, FinalResult, RetryResult, now
 from .normalize import normalize
 from .smtp_probe import ProbeResult, SmtpProber
 
@@ -111,4 +111,4 @@ class Evaluator:
         if a.attempt_count >= self.cfg.max_attempts:
             return None
         delay = max(retry_delay(a.attempt_count, self.cfg.retry_base_seconds, self.cfg.retry_max_seconds), min_delay)
-        return RetryResult(a.id, a.job_id, utcnow() + timedelta(seconds=delay), reason, tuple(evidence))
+        return RetryResult(a.id, a.job_id, now() + timedelta(seconds=delay), reason, tuple(evidence))

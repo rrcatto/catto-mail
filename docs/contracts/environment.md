@@ -3,9 +3,49 @@
 **Status:** normative contract for specification 2.11 · **Templates:** [`infra/.env.example`](../../infra/.env.example) (development), [`infra/production.env.example`](../../infra/production.env.example) (production, from the *Production profile* below)
 
 This is the single list of configuration variables that Smarthost services may read. A service
-must not read a variable that is not listed here. Adding a variable means updating this table and
-`infra/.env.example` together. `scripts/check-contracts.py` checks that the two match, that no
-secret has a value in the template, and that safety switches default to safe values.
+must not read a variable that is not listed here. Adding a variable means adding it to this table
+and either to the `.env` layout or to the built-in variables (see *The .env file* below), then
+regenerating the templates (`python3 infra/lib/smarthost_render.py env-example`).
+`scripts/check-contracts.py` checks that the templates hold exactly the layout, that no secret has a
+value in them, and that safety switches default to safe values.
+
+## The .env file
+
+`infra/.env` holds only the settings an operator sets, grouped under plain headings (the order of
+`LAYOUT` in `infra/lib/smarthost_render.py`): Installation; Set by smarthostctl; Server
+(production); Web address; Mail server and domains; Dashboard sign-in; Delivery pacing; Bounces and
+reconciliation; Email validation; API and client limits; Webhooks; Reputation alerts; Data
+retention; Certificates (production); Backups (production); Development mail viewer (development);
+Secrets. The templates [`infra/.env.example`](../../infra/.env.example) and
+[`infra/production.env.example`](../../infra/production.env.example) show the result.
+
+Every other variable is **built in**: the renderer supplies its value (the *Example* column, in
+production the *Production profile* value) when it writes each container's environment. These are
+internal wiring the topology fixes (database host, port, name and role names, mount points, the
+spool group and delivery UID, the milter address, the submission accounts and ports, certificate
+mount targets, the FastCGI address, worker identities, the instance name and subnets), values that
+follow from the environment (`APP_ENV`, `TRUSTED_PROXIES`, `POSTFIX_RELAYHOST`,
+`VALIDATOR_SMTP_ROUTE_OVERRIDE`, `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`,
+`APP_PUBLIC_ONBOARDING_ENABLED`, `SMARTHOST_LOG_FORMAT`), the settings of the other environment, and
+the long-term retention periods that no deletion command uses yet. A `.env` may still name a
+built-in variable to change its value (a production rehearsal does); `smarthostctl prod check`
+applies the same rules to it.
+
+`smarthostctl env-migrate` (production: `smarthostctl prod env-migrate`, which `prod upgrade`
+runs) rewrites an older `.env` in this layout, keeps every value, drops built-in variables that
+still have their default, renames variables that were renamed (`APP_TIMEZONE` became
+`SMARTHOST_TIMEZONE` in 0.2.3), and keeps the old file beside it as
+`.env.v<version>-<YYYYmmddTHHMMSS>` (the installation's time). A rollback to that version restores
+it.
+
+**Settings changed in the dashboard.** The operational settings listed in
+[`settings.json`](settings.json) can be changed in System › Settings. A dashboard value is stored in
+`setting_overrides` and takes precedence over the `.env` without changing it; the renderer merges
+the values over the `.env` (each checked with the rule in `settings.json`; one that breaks it is
+ignored and reported) when the configuration is applied (`smarthostctl prod settings-apply`, the
+host agent's `settings.apply`) and at every later render. Secrets, the database, networks and
+ports, certificates and keys, host names, domains, addresses and the safety switches are never
+changeable there.
 
 ## Rules
 
@@ -27,7 +67,7 @@ secret has a value in the template, and that safety switches default to safe val
    * `SMARTHOST_` is for variables shared across services.
    * A service prefix is used for variables owned by one service: `APP_`, `VALIDATOR_`,
      `DELIVERY_`, `POSTFIX_`, `OPENDKIM_`, `POSTGRES_`, `MAILPIT_`, `FAKE_SMTP_`, `PROXY_`.
-   * Framework-standard names (`APP_ENV`, `APP_SECRET`, `MAILER_DSN`, `TRUSTED_PROXIES`) keep their
+   * Framework-standard names (`APP_ENV`, `APP_SECRET`, `TRUSTED_PROXIES`) keep their
      standard form.
 7. **Allowed dev/prod differences** (spec `environment_parity.allowed_differences`): secrets,
    domain names, certificates, DKIM keys, live-delivery enablement, Mailpit versus live relay,
@@ -60,6 +100,7 @@ secret has a value in the template, and that safety switches default to safe val
 | `SMARTHOST_PUBLIC_BASE_URL` | app, delivery | no | 2 | `https://localhost:8443` | Public HTTPS origin for the API, tracking URLs and emailed dashboard sign-in links (which are built from it, never from a request's Host header). No trailing slash. In development it is the published nginx port, so links in Mailpit open in the browser. |
 | `SMARTHOST_LOG_LEVEL` | app, webhook-worker, validator, delivery | no | 1 | `info` | `debug`, `info`, `warning` or `error`. |
 | `SMARTHOST_LOG_FORMAT` | app, webhook-worker, validator, delivery | no | 1 | `json` | `json` (default), or `text` for local debugging only. |
+| `SMARTHOST_TIMEZONE` | app, webhook-worker, validator, delivery, deployment | no | 10 | `Africa/Johannesburg` | The installation's time zone, an IANA name; the default `Africa/Johannesburg` is SAST (UTC+2). Every time catto-mail shows, writes or computes is in this zone (owner decision): the dashboard, API responses, webhook payloads, CSV and JSON exports, the logs of every service, PostgreSQL sessions, the Postfix log, snapshot and backup names, and the calendar days and months of quotas, usage and billing (a daily quota resets at its midnight). Timestamps carry the zone's offset, for example `2026-10-10T10:48:56.123456+02:00`. The topologies give every container `TZ` set to this value (PostgreSQL, Postfix, OpenDKIM, nginx, Mailpit and the fake SMTP service included) and start PostgreSQL with `timezone` and `log_timezone` set to it; the installer sets the host's time zone to it. An unknown name is a startup error. Fields whose format a protocol fixes keep it: HTTP date headers (GMT) and the Unix time in `Smarthost-Signature`. |
 | `SMARTHOST_LIVE_DELIVERY_ENABLED` | postfix, delivery | no | 1 | `false` | Capture/held/live switch. When it is `false` outside production (capture mode), Postfix relays every outbound message to `POSTFIX_RELAYHOST` (Mailpit) and refuses to start without one. When it is `false` in production (held mode, before live activation, specification 2.9), Postfix has no relayhost and refuses outbound recipients temporarily (450) except the dashboard sign-in mail (`APP_MAIL_FROM`), and the Go daemon claims no send jobs. `true` (live mode) is accepted **only** with `SMARTHOST_ENV=production` and an empty `POSTFIX_RELAYHOST`; any other combination is a startup error. It is switched on only by `smarthostctl prod live-enable`, after the activation preflight passes. In development, the internal Podman network additionally has no Internet route. |
 | `SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS` | app, delivery | no | 2 | `false` | Controlled local/test mode that lets unverified or DKIM-inactive sending domains be used. It is never permitted in production. |
 | `SMARTHOST_BOUNCE_DOMAIN` | delivery, postfix | no | 4 | `bounce.smarthost.localhost` | Dedicated domain for VERP return paths, Message-ID domains and inbound DSNs. |
@@ -129,7 +170,6 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `APP_ENV` | app, webhook-worker | no | 1 | `dev` | Symfony environment: `dev`, `test` or `prod`. |
 | `APP_SECRET` | app, webhook-worker | **yes** | 1 | | Symfony kernel secret (CSRF, signed URIs). |
 | `TRUSTED_PROXIES` | app, webhook-worker | no | 1 | `10.89.20.0/24` | Addresses whose `X-Forwarded-For`/`X-Forwarded-Proto` Symfony trusts. Development: the pod's internal network (`smarthost-internal`, `infra/podman/smarthost-pod.sh.in`). **Empty in production:** no proxy stands in front of nginx. nginx accepts the client's TCP connection itself (the socket systemd hands it) and passes the peer address as FastCGI `REMOTE_ADDR`, so Symfony's client address is `REMOTE_ADDR` and forwarded headers are ignored. |
-| `MAILER_DSN` | app | **yes** | 2 | | Symfony Mailer transport for Smarthost's own low-volume notifications only. Never used for tracked sends. |
 | `APP_API_RATE_LIMIT_PER_MINUTE` | app | no | 2 | `600` | Default per-API-key request limit. |
 | `APP_API_MAX_REQUEST_BYTES` | app | no | 2 | `10485760` | Request body limit (10 MiB, 413 above it). It is not raised to fit large send jobs. |
 | `APP_SEND_JOB_MAX_RECIPIENTS` | app | no | 2 | `10000` | Maximum recipients per send job. It may lower, but not raise, the contract ceiling of 10000. |
@@ -158,7 +198,6 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `APP_MAIL_FROM` | app, postfix | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail"). Its domain should be DKIM-signed by OpenDKIM. Postfix lets only the web application's submission account use it as envelope sender, and in production held mode it is the only sender Postfix delivers. |
 | `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |
 | `APP_REPERMISSION_RESPONSE_DAYS` | app | no | 10 | `60` | How long the answer links of a re-permission message (`/p/<token>`: confirm, unsubscribe from this list, global opt-out) stay valid (specification 2.11). |
-| `APP_TIMEZONE` | app | no | 10 | `Africa/Johannesburg` | The installation's time zone, an IANA name such as `Africa/Johannesburg` (SAST, UTC+2) or `UTC`. The dashboard shows times in it and groups the operator overview's hours and days by it, and the quota, usage and billing periods are its calendar days and months (a daily quota resets at its midnight). The database stores UTC, and the API, webhooks and CSV exports carry UTC timestamps. An unknown name is a startup error. |
 | `APP_MAIL_SUBMISSION_HOST` | app | no | 6 | `postfix` | Postfix submission host for the web application's own mail (sign-in links). |
 | `APP_MAIL_SUBMISSION_PORT` | app | no | 6 | `587` | Authenticated submission port (STARTTLS, OpenDKIM milter). |
 | `APP_MAIL_SUBMISSION_USERNAME` | app, postfix | no | 6 | `smarthost-app` | SASL account of the web application on Postfix submission (separate from the delivery daemon's). |
@@ -294,7 +333,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |
 | `SMARTHOST_PUBLIC_IPV4` | `203.0.113.10` | The host's public IPv4 (placeholder: TEST-NET-3). |
 | `SMARTHOST_EGRESS_ENABLED` | `true` | Postfix, validator, webhook worker and application DNS reach the Internet. |
-| `SMARTHOST_IMAGE_TAG` | `0.2.2` | The released version being deployed. |
+| `SMARTHOST_IMAGE_TAG` | `0.2.3` | The released version being deployed. |
 | `ACME_SERVER` | `https://acme-v02.api.letsencrypt.org/directory` | Let's Encrypt production; the installer fills in `ACME_EMAIL` and the provider when you choose automatic certificates. |
 | `BACKUP_SCHEDULE` | `*-*-* 03:15:00` | A daily backup. Set `BACKUP_OFFHOST_TARGET` before relying on it. |
 | `SMARTHOST_LOG_LEVEL` | `info` | |
@@ -322,7 +361,10 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 
 ## Retention settings in production
 
-Empty means **no automatic deletion**; the data stays until a period is configured. Only
+Empty means **no automatic deletion**; the data stays until a period is configured. Only the
+staged-content and tracking periods, the DSN file retention and the Postfix log retention are read
+by a service today; the other categories are built in (not in the `.env`) until a deletion command
+uses them. Only
 `APP_RETENTION_STAGED_CONTENT_DAYS` has a default, because rendered content is transient by design.
 No deletion command exists yet for the long-term categories. The production runbook requires the
 operator to record a decision for each category before long-term operation; choosing a period is a

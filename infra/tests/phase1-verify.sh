@@ -24,11 +24,10 @@ SPOOL=/var/lib/smarthost/dsn-spool
 SERVICES=(postgres symfony-app webhook-worker nginx validator delivery postfix opendkim mailpit fake-smtp)
 CLEAN=false; [[ "${1:-}" == "--clean" ]] && CLEAN=true
 
+ev() { python3 "$REPO/infra/lib/smarthost_render.py" get "$1" --env "$REPO/infra/.env"; }  # .env value, else built-in
 mkdir -p "$GEN/verify"; chmod 700 "$GEN"
-LOG="$GEN/verify/phase1-$(date -u +%Y%m%dT%H%M%SZ).log"
+LOG="$GEN/verify/phase1-$(TZ="$(ev SMARTHOST_TIMEZONE)" date +%Y%m%dT%H%M%S%z).log"
 PASS=0; FAIL=0; FAILED=()
-
-ev() { grep -E "^$1=" "$REPO/infra/.env" | head -n1 | cut -d= -f2-; }
 note() { echo "    $*" | tee -a "$LOG"; }
 pass() { PASS=$((PASS+1)); echo "  PASS  $*" | tee -a "$LOG"; }
 fail() { FAIL=$((FAIL+1)); FAILED+=("$*"); echo "  FAIL  $*" | tee -a "$LOG"; }

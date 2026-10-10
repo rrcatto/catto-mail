@@ -46,7 +46,7 @@ final class ReputationEvaluator
     /** @return array{evaluated_clients: int, opened: int, updated: int, resolved: int, skipped: bool, computed_at: string} */
     public function evaluate(?\DateTimeImmutable $now = null): array
     {
-        $now = ($now ?? Clock::now())->setTimezone(new \DateTimeZone('UTC'));
+        $now = ($now ?? Clock::now())->setTimezone(Clock::zone());
         $result = ['evaluated_clients' => 0, 'opened' => 0, 'updated' => 0, 'resolved' => 0, 'skipped' => false,
             'computed_at' => (string) Clock::rfc3339($now)];
 

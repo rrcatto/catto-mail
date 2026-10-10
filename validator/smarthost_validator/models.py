@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, tzinfo
 from typing import Any
 
+_zone: tzinfo | None = None
 
-def utcnow() -> datetime:
-    return datetime.now(UTC)
+
+def set_zone(zone: tzinfo) -> None:
+    """Use the installation's time zone (SMARTHOST_TIMEZONE) for every timestamp the worker makes."""
+    global _zone
+    _zone = zone
+
+
+def now() -> datetime:
+    """The current time in the installation's zone (before set_zone: the process's local zone, TZ)."""
+    return datetime.now(_zone) if _zone is not None else datetime.now().astimezone()
 
 
 @dataclass(frozen=True)
@@ -19,7 +28,7 @@ class Evidence:
     provider_host: str | None = None
     response_code: int | None = None
     enhanced_status_code: str | None = None
-    occurred_at: datetime = field(default_factory=utcnow)
+    occurred_at: datetime = field(default_factory=now)
 
 
 @dataclass(frozen=True)

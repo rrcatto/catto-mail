@@ -380,6 +380,7 @@ project_boundaries:
       - system_check_runs
       - system_state
       - setup_steps
+      - setting_overrides
       - delivery_controls
       - address_batches
       - address_batch_entries
@@ -1629,7 +1630,12 @@ list_hygiene_principles:
 schema:
   owner: Symfony Doctrine migrations only
   identifier_strategy: UUIDv7_or_equivalent_time_ordered_UUID_consistently_across_services
-  timestamp_strategy: timestamptz_UTC
+  timestamp_strategy: >-
+    timestamptz; every time is in the installation's time zone, SMARTHOST_TIMEZONE (default
+    Africa/Johannesburg, SAST, UTC+2; owner decision): PostgreSQL sessions, computation, the
+    dashboard, API and webhook timestamps (RFC 3339 with the zone's offset), exports, logs and file
+    names. Only fields a standard fixes keep their form (HTTP date headers in GMT, the Unix time of
+    Smarthost-Signature).
   reference: docs/schema/reference-schema.sql
   tables:
     clients:
@@ -2014,7 +2020,7 @@ schema:
         - max_sending_domains
     client_quota_usage:
       purpose: >-
-        admitted-work counters per client, metric and day/month (APP_TIMEZONE), incremented in the
+        admitted-work counters per client, metric and day/month (SMARTHOST_TIMEZONE), incremented in the
         transaction that admits the work (concurrency-safe quota enforcement, Phase 9)
       key_fields:
         - client_id
@@ -2163,6 +2169,14 @@ schema:
         - step_key
         - state
         - note
+        - updated_at
+        - updated_by_user_id
+    setting_overrides:
+      purpose: "settings changed in the dashboard (System > Settings, docs/contracts/settings.json); each row takes precedence over the same infra/.env variable without changing the file and is applied by rendering the configuration again (owner decision)"
+      key_fields:
+        - name
+        - value
+        - reason
         - updated_at
         - updated_by_user_id
     delivery_controls:
@@ -2387,7 +2401,7 @@ saas_operations:
       client limit can only lower them. Volume quotas have no installation ceiling.
     enforcement: >-
       Volume quotas are counters in client_quota_usage per client, metric, period (day, month;
-      calendar periods of the installation's time zone, APP_TIMEZONE) admitted with a single INSERT ... ON CONFLICT DO UPDATE ... RETURNING inside the
+      calendar periods of the installation's time zone, SMARTHOST_TIMEZONE) admitted with a single INSERT ... ON CONFLICT DO UPDATE ... RETURNING inside the
       transaction that creates the work, so concurrent requests can never jointly exceed a quota
       and a rolled-back request releases its admission. Recipients are counted when added to a
       send job. Count limits (keys, endpoints, domains) are re-checked under a row lock on the
@@ -2407,7 +2421,7 @@ saas_operations:
       job (written by the validator) and one message_submitted unit per message accepted by
       Postfix (written by the Go daemon); usage_records_message_once_uq guarantees at most one
       unit per message.
-    periods: current_day, current_month, previous_month, custom (dates in APP_TIMEZONE, at most 366 days); daily breakdowns
+    periods: current_day, current_month, previous_month, custom (dates in SMARTHOST_TIMEZONE, at most 366 days); daily breakdowns
     reconciliation: >-
       smarthost:usage:reconcile (and the operator usage page) compares metered units with
       validation jobs (done addresses) and accepted messages for a client and period; findings:
@@ -2517,7 +2531,7 @@ operator_self_service:
   diagnostics:
     storage: system_checks (latest result per check), system_check_runs (history), system_state (agent reports)
     results: PASS, WARN, FAIL, SKIPPED, INFO, each with a human explanation, a fix and a help topic
-    history: every requested run, every change of result, and the first scheduled result of a check per UTC day; secrets are redacted before storage
+    history: every requested run, every change of result, and the first scheduled result of a check per day of the installation's time zone; secrets are redacted before storage
     application_checks: database role, schema version, web health, tracking endpoints, a deterministic validation job (syntax-invalid addresses only, no network), delivery and webhook heartbeats, the host agent, bounce processing, the emergency stop
     host_checks: host, boot, containers, security, backups, TLS renewal, and the preflight sections config, host, runtime, exposure, ingress, tls, dns, dkim, postfix, delivery
   setup_wizard: >-
@@ -2646,7 +2660,7 @@ production_operations:
     the secrets on the host); `prod check` and every rendering apply the production safety rules.
   configuration_safety_rules:
     - APP_ENV=prod; no unverified-domain bypass; no webhook private-host allowlist; no relayhost (no Mailpit or capture relay) in held or live mode
-    - every secret present (MAILER_DSN optional), at least 16 characters; a valid APP_ENCRYPTION_KEYS keyring
+    - every secret present, at least 16 characters; a valid APP_ENCRYPTION_KEYS keyring
     - SMARTHOST_PUBLIC_BASE_URL = https://PROXY_SERVER_NAME; fully qualified, non-reserved names (a rehearsal without egress may use reserved names); a dedicated bounce domain
     - SMARTHOST_PUBLIC_IPV4 a public address when egress is enabled; live delivery requires egress
     - TRUSTED_PROXIES empty (no proxy in front of nginx; client addresses come from the ingress socket); /24 private non-overlapping subnets; service addresses are the topology aliases
@@ -2875,10 +2889,20 @@ user_interfaces:
     (/dashboard/c/{client}/search, through ClientAccess). Charts are drawn with Chart.js 4, vendored through the AssetMapper import map
     and loaded only on pages with a chart; the Outfit font is served by the application (SIL Open
     Font License); every style lives in the stylesheet (the Content-Security-Policy allows no inline
-    styles). APP_TIMEZONE (default Africa/Johannesburg, SAST) is the installation's time zone: the
-    dashboard shows times in it, and the Overview's hours and days and the quota, usage and billing
-    calendar days and months are its own (owner decision, 2026-10-10); storage, the API, webhooks
-    and exports carry UTC timestamps.
+    styles). SMARTHOST_TIMEZONE (default Africa/Johannesburg, SAST) is the installation's time zone:
+    every time catto-mail shows, writes or computes is in it, the Overview's hours and days and the
+    quota, usage and billing calendar days and months included (owner decision, 2026-10-10; see
+    schema.timestamp_strategy). System > Settings (owner decision, 2026-10-10) lists the operational
+    settings of docs/contracts/settings.json with their infra/.env value, the value set in the
+    dashboard and the value in force; a dashboard value is stored in setting_overrides and takes
+    precedence over infra/.env without changing the file. Viewing needs PLATFORM.SYSTEM.VIEW,
+    changing and applying SYSTEM.SETTINGS.MANAGE (audited with a reason). Applying is the host
+    request settings.apply: the configuration is rendered again with the dashboard values (the same
+    rules as the page; a value that breaks one is ignored and shown) and only the services whose
+    settings changed restart. Secrets, the database, networks and ports, certificates, host names,
+    domains, addresses and the safety switches stay in infra/.env only. The .env holds only the
+    settings an operator sets, grouped under headings; every other contract variable is built in
+    (docs/contracts/environment.md, "The .env file").
   phase_6_implementation:
     # Specification 2.6: what the Phase 6 dashboards provide and how.
     authentication: >-

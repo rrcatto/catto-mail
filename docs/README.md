@@ -23,4 +23,5 @@
 | `schema/schema.md` | ERD, tenant ownership, indexes, table access matrix |
 | `schema/reference-schema.sql` | Reference PostgreSQL 16 DDL (normative; not a migration) |
 | `contracts/status-vocabulary.yaml` | Canonical status/event/classification vocabulary |
-| `contracts/environment.md` | Environment-variable contract |
+| `contracts/environment.md` | Environment-variable contract, the grouped `.env` layout and the built-in variables |
+| `contracts/settings.json` | The operational settings an administrator may change in System › Settings, with their rules |

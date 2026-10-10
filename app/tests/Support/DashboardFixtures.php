@@ -24,7 +24,7 @@ final class DashboardFixtures
      */
     public static function sendJob(Connection $o, string $clientId, string $domainId, int $n, array $options = []): array
     {
-        $created = $options['created_at'] ?? gmdate('Y-m-d H:i:s');
+        $created = $options['created_at'] ?? date('Y-m-d H:i:s');
         $job = SchemaFixtures::sendJob($o, $clientId, $domainId, [
             'external_reference' => $options['external_reference'] ?? 'job-'.bin2hex(random_bytes(3)),
             'status' => $options['status'] ?? 'dispatched', 'queued_at' => $created, 'dispatch_completed_at' => $created,
@@ -93,8 +93,8 @@ final class DashboardFixtures
     {
         $job = SchemaFixtures::id();
         $o->insert('validation_jobs', ['id' => $job, 'client_id' => $clientId, 'external_reference' => $externalReference,
-            'idempotency_key' => SchemaFixtures::id(), 'request_hash' => 'h', 'status' => 'completed', 'started_at' => gmdate('Y-m-d H:i:s'),
-            'completed_at' => gmdate('Y-m-d H:i:s'), 'total_addresses' => $n, 'processed_count' => $n]);
+            'idempotency_key' => SchemaFixtures::id(), 'request_hash' => 'h', 'status' => 'completed', 'started_at' => date('Y-m-d H:i:s'),
+            'completed_at' => date('Y-m-d H:i:s'), 'total_addresses' => $n, 'processed_count' => $n]);
         $o->executeStatement(<<<'SQL'
             INSERT INTO validation_addresses (id, job_id, original_address, normalized_address, syntax_status, domain_status, smtp_status,
                 is_role, is_disposable, is_catch_all_or_accept_all, is_domain_typo_suspected, suggested_address, suggestion_reason_code,
@@ -120,6 +120,6 @@ final class DashboardFixtures
     public static function usage(Connection $o, string $clientId, string $type, int $quantity, string $referenceType, string $referenceId): void
     {
         $o->insert('usage_records', ['id' => SchemaFixtures::id(), 'client_id' => $clientId, 'usage_type' => $type, 'quantity' => $quantity,
-            'reference_type' => $referenceType, 'reference_id' => $referenceId, 'occurred_at' => gmdate('Y-m-d H:i:s')]);
+            'reference_type' => $referenceType, 'reference_id' => $referenceId, 'occurred_at' => date('Y-m-d H:i:s')]);
     }
 }

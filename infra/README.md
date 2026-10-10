@@ -1,7 +1,10 @@
 # infra/ — Podman network and persistent pod, systemd units, nginx, database bootstrap, environment templates
 
-- `.env.example` is the safe environment template (no secrets). The normative contract is
-  `docs/contracts/environment.md`. Never commit a filled-in copy.
+- `.env.example` is the safe environment template (no secrets): only the settings an operator
+  sets, grouped under headings; every other contract variable is built in (the renderer supplies
+  it). The normative contract is `docs/contracts/environment.md`. Never commit a filled-in copy.
+  `smarthostctl env-migrate` rewrites an older `infra/.env` in the current layout and keeps the old
+  file as `infra/.env.v<version>-<timestamp>`.
 
 Contents (see `docs/PROJECT.md` for every file):
 - **nginx** (the only public HTTP entry), which hands every request to the Symfony front

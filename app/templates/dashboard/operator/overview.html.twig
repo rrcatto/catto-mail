@@ -190,7 +190,7 @@
         {% if activity is empty %}<p class="empty">No audited activity yet.</p>{% else %}
         <ol class="activity">{% for a in activity %}
             <li><span class="avatar av-{{ a.actor|tone_slot }}" aria-hidden="true">{{ a.who }}</span>
-                <span><span class="act-line"><strong>{{ a.actor }}</strong> {{ a.action|lower }}</span><span class="act-meta">{{ a.target }} · <time datetime="{{ a.at|date('c', 'UTC') }}" title="{{ a.at|ts }}">{{ a.at|ago }}</time></span></span></li>
+                <span><span class="act-line"><strong>{{ a.actor }}</strong> {{ a.action|lower }}</span><span class="act-meta">{{ a.target }} · <time datetime="{{ a.at|date('c', time_zone()) }}" title="{{ a.at|ts }}">{{ a.at|ago }}</time></span></span></li>
         {% endfor %}</ol>
         {% endif %}
     </section>

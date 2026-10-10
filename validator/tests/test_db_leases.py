@@ -8,7 +8,7 @@ import psycopg
 import pytest
 
 from smarthost_validator import db
-from smarthost_validator.models import Evidence, FinalResult, RetryResult, utcnow
+from smarthost_validator.models import Evidence, FinalResult, RetryResult, now
 from tests.db import make_job, one, owner, q, validator_conninfo
 
 pytestmark = pytest.mark.db
@@ -160,7 +160,7 @@ async def test_concurrent_finalisation_of_one_job_by_two_workers_completes_once(
 async def test_retry_is_fenced_and_delays_reclaim(conn):
     _, job = make_job(["a@x.test"])
     [a] = await db.claim(conn, "w", 10, 60)
-    later = utcnow() + timedelta(seconds=120)
+    later = now() + timedelta(seconds=120)
     assert await db.write_retries(conn, "other", [RetryResult(a.id, job, later, "smtp.rcpt.4.2.1")]) == set()
     assert await db.write_retries(conn, "w", [RetryResult(a.id, job, later, "smtp.rcpt.4.2.1",
                                                           (Evidence("smtp_rcpt_to", {}, "mx", 450, "4.2.1"),))]) == {a.id}

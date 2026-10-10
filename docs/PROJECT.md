@@ -47,6 +47,7 @@ Both are gitignored.
 │   │   ├── Dashboard/             Dashboard read models, keyset pagination, client access, labels, security headers
 │   │   ├── Crypto/                Encryption keyring (webhook signing secrets)
 │   │   ├── Doctrine/Type/         timestamptz and jsonb_map types
+│   │   ├── Doctrine/Middleware/   Every database session in the installation time zone
 │   │   ├── Domain/                Sending domains and DNS TXT verification
 │   │   ├── Dsn/                   Unmatched-DSN operator workflow (match request, dismissal)
 │   │   ├── Entity/                48 entities, one per table
@@ -58,7 +59,7 @@ Both are gitignored.
 │   │   ├── Sending/               Send-job lifecycle, D-18 normalisation, content fingerprint
 │   │   ├── AddressBatch/          Administrator address batches: parsing, import, validation, state dimensions, staged sends, re-permission (2.11)
 │   │   ├── Help/                  The help and tutorial catalogue (2.11)
-│   │   ├── System/                Setup wizard, diagnostics and history, host-agent requests, emergency stop, seed tests (2.11)
+│   │   ├── System/                Setup wizard, diagnostics and history, host-agent requests, emergency stop, seed tests (2.11); dashboard settings
 │   │   ├── Reputation/            Per-client reputation metrics, threshold alerts, acknowledgement (Phase 9)
 │   │   ├── Suppression/           Recipient global opt-out API service, operator suppression administration (D-30)
 │   │   ├── Tenant/                Tenant scope and Doctrine tenant filter
@@ -66,7 +67,7 @@ Both are gitignored.
 │   │   ├── Validation/            Validation-job creation
 │   │   ├── Webhook/               Endpoints and secrets, outbox, webhook worker (dispatcher, signer, SSRF guard, payloads)
 │   │   ├── Util/Clock.php
-│   │   ├── Util/InstallationTime.php   The installation time zone (APP_TIMEZONE): dashboard times, overview buckets, quota/usage/billing days and months
+│   │   ├── Util/InstallationTime.php   The installation time zone (SMARTHOST_TIMEZONE), the zone of every time
 │   │   └── Kernel.php
 │   ├── tests/                     PHPUnit: Unit, Contract, Schema, Integration, Support, bin
 │   ├── docker/
@@ -103,7 +104,7 @@ Both are gitignored.
 │   ├── entrypoint.sh
 │   └── dev-key.sh
 ├── infra/                         Environment, units and tooling
-│   ├── .env.example
+│   ├── .env.example               Development template: the operator's settings, grouped (no secrets)
 │   ├── production.env.example     Production template (the contract's Production profile; no secrets)
 │   ├── README.md
 │   ├── bin/
@@ -111,7 +112,7 @@ Both are gitignored.
 │   │   ├── smarthostctl-prod      `smarthostctl prod`: production operations (Phase 8)
 │   │   └── smarthost-machine-helper.sh
 │   ├── lib/
-│   │   ├── smarthost_render.py    Templates, init-env, validation (incl. production rules), rendering
+│   │   ├── smarthost_render.py    The .env layout and built-in values, templates, init-env, env-migrate, validation (incl. production rules), dashboard overrides, rendering
 │   │   ├── smarthost_preflight.py Production preflight, DNS checklist, firewall ruleset (stdlib)
 │   │   └── smarthost_seedtest.py  Operator-triggered seed test through the public API
 │   ├── nginx/
@@ -177,6 +178,7 @@ Both are gitignored.
     ├── contracts/
     │   ├── environment.md
     │   ├── status-vocabulary.yaml
+    │   ├── settings.json          The settings the dashboard may change, with their rules
     │   └── address-normalization-vectors.json
     ├── production/
     │   ├── README.md              Production topology and network matrix (Phase 8)
@@ -187,7 +189,7 @@ Both are gitignored.
     │   └── onboarding.md          Client onboarding and SaaS operations (Phase 9)
     ├── integration/
     │   └── ctnlist.md             The ctnlist integration and its outstanding re-permission work
-    ├── screenshots/               Every dashboard page (v0.2.2), with README.md as the index
+    ├── screenshots/               Every dashboard page (v0.2.3), with README.md as the index
     └── schema/
         ├── reference-schema.sql
         └── schema.md
@@ -205,7 +207,7 @@ Both are gitignored.
 | `AGENTS.md` | Mandatory instructions for any coding agent: read the specs first; Podman only; no commits without instruction; what to report. |
 | `CLAUDE.md` | Claude Code notes: authority order, commands (setup, tests, narrowing a suite), the cross-component architecture, current phase, local and WSL Podman engine handling, protection of other projects' containers, required checks. |
 | `README.md` | What Smarthost is, an architecture diagram, layout, quick start, status. |
-| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine), 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle) 0.1.5 (Phase 5 complete: inbound DSN, complaint and global suppression processing, D-30) 0.1.6 (Phase 5 corrections; Phase 6 complete: tracking and dashboards; passwordless sign-in, roles and ACL) 0.1.7 (Phase 7 Smarthost side: webhook worker and delivery contract), 0.1.8 (Phases 8 and 9 repository side: production readiness and public SaaS hardening), 0.1.9 (Phase 10: operator self-service; the first GitHub Release) 0.2.0 (development on a local Linux engine with Podman 4.9; documentation aligned) 0.2.1 (the installer works when run from root's home) and 0.2.2 (the dashboard redesign, charts, global search, the installation time zone). |
+| `CHANGELOG.md` | Version history: 0.1 (Phase 0 complete), 0.1.1 (Phase 1 complete, `smarthost` pod), 0.1.2 (Phase 2 complete: Symfony foundation, schema, API primitives) 0.1.3 (Phase 3 complete: Python validation engine), 0.1.4 (Phase 4 complete: Go/Postfix delivery pipeline; persistent pod lifecycle) 0.1.5 (Phase 5 complete: inbound DSN, complaint and global suppression processing, D-30) 0.1.6 (Phase 5 corrections; Phase 6 complete: tracking and dashboards; passwordless sign-in, roles and ACL) 0.1.7 (Phase 7 Smarthost side: webhook worker and delivery contract), 0.1.8 (Phases 8 and 9 repository side: production readiness and public SaaS hardening), 0.1.9 (Phase 10: operator self-service; the first GitHub Release) 0.2.0 (development on a local Linux engine with Podman 4.9; documentation aligned) 0.2.1 (the installer works when run from root's home), 0.2.2 (the dashboard redesign, charts, global search, the installation time zone) and 0.2.3 (every time in the installation's time zone, the grouped `infra/.env`, System › Settings). |
 | `LICENSE` | MIT licence. |
 | `.gitignore` | Keeps `infra/.env`, `infra/.generated/`, keys and certificates out of git. |
 | `.containerignore` | The app and validator images build from the repository root so that they can copy the normative contracts; this admits only `app/` (without `vendor/`, `var/`), `validator/` (without caches), those contract files, the D-32 vectors and the fake SMTP server (validator test stage). |
@@ -222,7 +224,8 @@ Both are gitignored.
 | `api/openapi.v1.yaml` | OpenAPI 3.1 contract for `/v1`: validation jobs, batched send jobs (create → recipients → submit), messages, events and webhooks; limits, quotas (`429 quota-exceeded`) and key expiry. Served publicly at `/docs/api/openapi.v1.yaml`. |
 | `api/integration-guide.md` | The client developers' guide (Phase 9), served at `/docs/api/integration-guide.md`: authentication and keys, limits and quotas, validation and send workflows, webhooks, and what remote acceptance, recorded opens, validation and unsubscribes do and do not mean. Copied into the app image. |
 | `contracts/status-vocabulary.yaml` | Every allowed status, event, event source, failure scope and classification value, with transitions and ranks. |
-| `contracts/environment.md` | The only list of permitted environment variables, with consumers, secrecy and phase. |
+| `contracts/environment.md` | The only list of permitted environment variables, with consumers, secrecy and phase; the `.env` layout (grouped operator settings) and the built-in variables. |
+| `contracts/settings.json` | The operational settings an administrator may change in System › Settings (group, label, kind, range or choices). The application (`SettingCatalog`) and the renderer (`override_error`) apply the same rules; copied into the app image. |
 | `contracts/address-normalization-vectors.json` | Shared D-32 address-normalisation test vectors (87). PHP and Python test against this file; Go must from Phase 4. |
 | `schema/reference-schema.sql` | Reference PostgreSQL 16 DDL (39 tables). This is not a migration. |
 | `schema/schema.md` | ERD, tenant ownership, required indexes, CHECK rules and the database grant matrix. |
@@ -236,14 +239,14 @@ Both are gitignored.
 | `production/onboarding.md` | Client onboarding and SaaS operations (Phase 9): the new-client checklist, lifecycle and its effects, limits and quotas, API keys, reputation alerts, usage, reconciliation and billing statements, notes, permissions, and the criteria for opening public onboarding. |
 | `production/runbook.md` | Production runbook: VPS, installation, secrets, TLS, DNS identity, DKIM keys, preflight, activation, seed tests, warm-up stages, health checks, webhook/DSN/`outcome_unknown` handling, emergency controls, retention, backups, upgrades, recovery, pending external actions. |
 | `architecture/postfix-integration.md` | Postfix/OpenDKIM/Go channels, cursors, reconciliation and the verified V-1…V-7 results. |
-| `screenshots/README.md`, `screenshots/*.png` | Screenshots of every dashboard page as of 0.2.2 (operator console, client workspace, public pages, phone width), taken on the development pod with test data; the README links three of them. Retake them when the pages change. |
+| `screenshots/README.md`, `screenshots/*.png` | Screenshots of every dashboard page as of 0.2.3 (operator console, client workspace, public pages, phone width), taken on the development pod with test data; the README links three of them. Retake them when the pages change. |
 | `architecture/open-decisions.md` | Decision log (D-01…D-38 and the per-phase implementation choices, including Phase 9 and the business decisions left to the owner). Not a source of authority. |
 
 ### `infra/`: environment, units and tooling
 
 | File | Purpose |
 |---|---|
-| `.env.example` | Safe template of every contract variable, with secrets empty. Generated from `docs/contracts/environment.md`. |
+| `.env.example` | Safe development template: the settings an operator sets, grouped under headings, secrets empty; every other variable is built in. Generated by `smarthost_render.py env-example`. |
 | `production.env.example` | The production template: the contract's *Production profile* values (held mode, ingress binds 443/25, empty `TRUSTED_PROXIES`, warm-up stage 0, webhook defaults) with placeholders and empty secrets. `smarthostctl prod init-env` copies it and generates the secrets on the host. |
 | `bin/smarthostctl-prod` | `smarthostctl prod`: production operations. Configuration (init-env, check, render), lifecycle (build with `SMARTHOST_IMAGE_TAG`, TLS secrets, install with units including the ingress socket, start/stop/restart/status, recreate/replace, migrate, logs, console; the host prerequisites are checked before containers are created or started), preflight, `ingress-check` (client addresses preserved), DNS checklist, firewall, DKIM keys, audited live-enable/live-disable/pause/resume, client status, ops status, queue, backup/restore, upgrade/rollback, seed test. Refuses non-production configurations. |
 | `lib/smarthost_agent.py` | The host agent (2.11; stdlib Python): host facts and checks (OS, Podman, lingering, units, disk, memory, clock, firewall, containers, secret file modes, backups, certificate renewal, boot recovery) and the hourly preflight, reported through `smarthost:system:agent report`; claims and carries out dashboard requests (`claim`/`finish`) with `smarthostctl prod`. `run` (the service loop), `once`, `facts`. |
@@ -297,7 +300,7 @@ Both are gitignored.
 | `opendkim/entrypoint.sh` | Writes `opendkim.conf`: sign-only, signs for `MTA ORIGINATING` (Postfix submission) using KeyTable/SigningTable. Logs through busybox syslogd to stdout. |
 | `opendkim/dev-key.sh` | Generates a **disposable** development key inside the keys volume, registers it, and prints the public TXT record. Refuses outside development/test. |
 | `app/Containerfile` | PHP 8.5-FPM with `pdo_pgsql`, `intl`, `pcntl` and `cgi-fcgi`. Stages: `tools` (Composer), `test` (dev dependencies and test-only contract copies), `runtime` (default; no dev dependencies, no tests). Built from the repository root so that the normative OpenAPI and vocabulary files are copied into `config/contracts/`. No PHP HTTP server. |
-| `app/docker/php.ini` | UTC, no `expose_php`, `post_max_size` 12M (the application decides the 10 MiB limit), memory and OPcache settings. |
+| `app/docker/php.ini` | Africa/Johannesburg as the default zone until the kernel applies `SMARTHOST_TIMEZONE`, no `expose_php`, `post_max_size` 12M (the application decides the 10 MiB limit), memory and OPcache settings. |
 | `app/docker/zz-smarthost-fpm.conf` | Pool overrides: listen 9000, ping path, `clear_env = no`. |
 | `app/docker/fpm-healthcheck.sh` | FastCGI ping readiness check. |
 | `app/phase1-probe/db-check.php` | CLI check: connect as the app, webhook or owner role and verify the CREATE privilege boundary (used by the Phase 1 suite). |
@@ -340,10 +343,12 @@ Both are gitignored.
 | `migrations/Version20261008000100.php` | Spec 2.9 / Phase 8: `delivery_heartbeats` (one row per Go daemon: delivery state, warm-up ceiling, Postfix queue depth of the newest snapshot). |
 | `migrations/Version20261010000100.php` | Spec 2.11: `system_requests`, `system_checks`, `system_check_runs`, `system_state`, `setup_steps`, `delivery_controls`, `address_batches`, `address_batch_entries`, `address_batch_sends`; the `repermission.responded` webhook event and `address_batch_entry` subject; PLATFORM.SYSTEM.VIEW and PLATFORM.HELP.VIEW for OPERATOR. |
 | `migrations/Version20261011000100.php` | Dashboard redesign: `message_events_submitted_idx` (submitted_to_postfix events by time, for the submission-rate chart). |
+| `migrations/Version20261012000100.php` | Settings in the dashboard: `setting_overrides` and the `settings.apply` host request. |
 | `migrations/Version20261009000100.php` | Spec 2.10 / Phase 9: client lifecycle and contact columns, `client_limits`, `client_quota_usage`, `client_notes`, `client_policy_acceptances`, `api_keys.expires_at`, `billing_statements` and lines, `client_reputation_metrics`, `client_alerts`, one usage unit per message, the covering usage index, `message_events_reputation_idx`, and the Phase 9 permission keys for OPERATOR. Existing clients are exempt from policy acceptance. |
 | `src/Kernel.php` | Runs the fail-closed safety guard on every boot. |
 | `src/Config/` | `SafetyGuard` (SMARTHOST_ENV values; unverified domains forbidden in production), `SecretEnvVarProcessor` (`X` or `X_FILE`, never both), `Limits` (configuration may lower, never raise, the contract ceilings). |
-| `src/Doctrine/Type/` | `timestamptz` (microseconds, UTC) and `jsonb_map` (`{}` stays an object). |
+| `src/Doctrine/Type/` | `timestamptz` (microseconds, in the installation zone) and `jsonb_map` (`{}` stays an object). |
+| `src/Doctrine/Middleware/SessionTimeZoneMiddleware.php` | Sets every PostgreSQL session of the application to the installation zone (`SET TIME ZONE`). |
 | `src/Entity/` | One entity per table (48; 2.11: read-only mappings of the self-service and batch tables, which their services write with DBAL; Phase 9: `ClientLimits`, `ClientQuotaUsage`, `ClientNote`, `ClientPolicyAcceptance`, `BillingStatement`, `BillingStatementLine`, `ClientReputationMetric`, `ClientAlert`; `GlobalSuppressionRequest` since D-38; `Role`, `RolePermission`, `UserRole`, `LoginToken` since 2.7). Tables written only by Python or Go are mapped read-only. |
 | `src/Enum/` | The vocabularies of `status-vocabulary.yaml` as PHP enums. |
 | `src/Security/` | `ApiKeyManager` (raw key `shk_…`, 256 bits, shown once; SHA-256 stored), `ApiKeyAuthenticator` (Bearer; revoked keys and closed clients rejected; last-used tracking; failure rate limit), `ApiClientUser`, dashboard user provider and checker, login listener, `ClientVoter`. |
@@ -363,7 +368,7 @@ Both are gitignored.
 | `src/Client/AccountAdministration.php` | Clients (created through `ClientLifecycle`), users (case-insensitive login, display name, enable/disable), client memberships (add, change, remove). No passwords. |
 | `src/Client/ClientLifecycle.php`, `ClientStatusTransitions.php` | Phase 9: client creation (operator, or the gated public `apply`), status transitions with a permission per transition and a mandatory reason (checked again under a row lock, audited), account details, private notes, policy acceptance and its requirement. |
 | `src/Client/ClientLimitPolicy.php`, `ClientLimitAdministration.php`, `QuotaEnforcer.php` | Phase 9: effective limits (client limit under the installation ceiling; the throttled API rate), audited limit changes, and quota admission by atomic counter upsert in the creating transaction (`429 quota-exceeded`). |
-| `src/Usage/` | Phase 9: `UsagePeriod` (named, month, custom ≤ 366 days, calendar days of `APP_TIMEZONE`), `UsageReporting` (totals, all clients, daily), `UsageReconciliation` (metered units against jobs and accepted messages), `BillingStatementService` (prepare, finalize, mark exported, void; audited), `UsageExporter` (deterministic JSON/CSV; audited). |
+| `src/Usage/` | Phase 9: `UsagePeriod` (named, month, custom ≤ 366 days, calendar days of `SMARTHOST_TIMEZONE`), `UsageReporting` (totals, all clients, daily), `UsageReconciliation` (metered units against jobs and accepted messages), `BillingStatementService` (prepare, finalize, mark exported, void; audited), `UsageExporter` (deterministic JSON/CSV; audited). |
 | `src/Reputation/` | Phase 9: `ReputationThresholds` (from `APP_REPUTATION_*`), `ReputationEvaluator` (advisory-locked metrics per client and window; open, update, resolve and escalate alerts; never acts on a client), `AlertAdministration` (acknowledgement, audited). |
 | `src/Controller/ApiDocumentationController.php`, `templates/docs/api.html.twig` | Phase 9: public `/docs/api` (index page in the dashboard's style), `/docs/api/openapi.v1.yaml` and `/docs/api/integration-guide.md`; no session, cacheable. |
 | `src/Controller/Dashboard/OperatorClientController.php` | Phase 9: Clients › Clients: create, the client page, lifecycle, account, notes, policy, limits, API keys (create shown once, revoke). |
@@ -371,6 +376,9 @@ Both are gitignored.
 | `src/System/` | 2.11: `SystemRequests` (host-agent work: validated, audited, claimed, finished), `SystemChecks` (latest results and history rules), `SystemState` (agent reports), `CheckCatalog` (plain-language explanation, fix and help topic per check), `ApplicationDiagnostics` (the application's own checks, including a deterministic validator job), `DeliveryControl` (emergency stop, delivery modes), `SetupWizard` (steps, progress, readiness rows), `SeedTestService` (seed and bounce tests judged from recorded evidence), `Redactor` (no secrets stored). |
 | `src/AddressBatch/` | 2.11: `BatchFileParser` (TXT/CSV, cleanup, duplicates, malformed rows, limits), `UploadStore` (upload between preview and import), `AddressBatchService` (import, validation, review and typo decisions, compliance approval), `EntryStates` (the separate state dimensions in SQL), `BatchReadModel` (counts, progress, filters, CSV, timelines, send reports), `BatchSender` (staged sends with personal answer links), `RepermissionService` (tokens, answers, global opt-out, webhook). |
 | `src/Help/HelpCatalog.php`, `templates/dashboard/help/` | 2.11: the help topics and their pages. |
+| `src/System/SettingCatalog.php`, `SettingOverrides.php`, `AppliedSettings.php`, `src/Entity/SettingOverride.php` | System › Settings: the catalogue and its rules (`docs/contracts/settings.json`), the dashboard values (`setting_overrides`; audited with a reason), and the settings in force (the rendered `infra/.generated/settings.json`, mounted read-only at `/etc/smarthost/settings.json`). |
+| `src/Controller/Dashboard/OperatorSettingsController.php`, `templates/dashboard/operator/system/settings.html.twig` | System › Settings: view (`PLATFORM.SYSTEM.VIEW`), change per group with a reason and apply (`SYSTEM.SETTINGS.MANAGE`, host request `settings.apply`). |
+| `src/Command/SettingsCommand.php` | `smarthost:settings list\|set\|reset [--all]`, audited with `--operator`: the dashboard values from the console. |
 | `src/Controller/Dashboard/OperatorSystemController.php` | 2.11: Mail flow › Delivery (health, host requests, stop/resume, live request, host actions), System › Diagnostics (and history) and System › System setup (wizard steps, seed/bounce tests, test webhook). |
 | `src/Controller/Dashboard/AddressBatchController.php` | 2.11: Clients › Address batches (upload, preview, import, batch page, progress JSON, filtered addresses, CSV export, timelines, validate, review, typo, approval, List-Id, send, send report). |
 | `src/Controller/Dashboard/HelpController.php`, `src/Controller/RepermissionController.php` | 2.11: Help; the public re-permission page `/p/{token}` (no session, GET shows, POST answers, RFC 8058 one-click). |
@@ -393,6 +401,7 @@ Both are gitignored.
 | `tests/Schema/` | Reference-schema equivalence, migration up/down/up, ORM mapping vs database, vocabulary CHECKs, the grant matrix parsed from `schema.md`, least privilege, critical constraints. |
 | `tests/Integration/` | Authentication, client status (D-31), tenant isolation, idempotency (including multi-process concurrency), validation jobs, send jobs, sending domains, dashboard users, webhooks, console commands, health and audit, the global opt-out API (`GlobalSuppressionApiTest`) and the Phase 5 operator commands (`Phase5OperatorCommandTest`). Every API response is validated against the OpenAPI contract. Phase 6: `TrackingTest` (opens, clicks, open-redirect attacks, expiry, privacy, logs), `TrackingStatisticsTest` (aggregates against known event sets), `ClientDashboardTest` (pages, filters, keyset pagination, CSV export, actions, terminology, headers, tenant isolation), `OperatorDashboardTest` (operator-only access, client administration, DSN workflow, suppressions, audit), `DashboardLargeDatasetTest` (10,000-address and 10,000-message jobs: query counts, memory, EXPLAIN ANALYZE of every page query; report in `infra/.generated/test-output/`). Phase 7: `WebhookWorkerTest` (the worker against a local signature-verifying receiver and the stub resolver: contract, fan-out, retry policy, leases and fencing, SSRF, limits, rotation) and `WebhookDashboardTest` (client management, secret shown once, viewer/foreign denial, operator visibility) Phase 8: `OpsCommandTest` (audited delivery controls and their permission, `smarthost:ops:status`, the delivery-state card from `delivery_heartbeats`). `WebProcessIsolationTest` (the web kernel in a subprocess without the worker's database credentials, as in the `symfony-app` container: no 5xx, the worker connection never built) and `WebhookQueryPlanTest` (180,000 deliveries: EXPLAIN ANALYZE of every worker and webhook-page statement, no whole-table scans; report `phase7-webhook-query-plans.txt` in `infra/.generated/test-output/`). Phase 9: `ClientLifecycleTest` (transitions, permissions, reasons, policy gate, onboarding gate), `QuotaTest` (every limit, ceilings, an 8-process quota race, throttled API rate, key expiry), `UsageBillingTest` (periods, reconciliation findings, statements, export), `ReputationTest` (metrics, alerts, resolution, escalation, no automatic action), `Phase9DashboardTest` (flows and per-action permissions), `Phase9TenantIsolationTest` (two clients through API and dashboard), `Phase9QueryPlanTest` (EXPLAIN ANALYZE at 1,000,000 usage records; `phase9-query-plans.txt`). The dashboard redesign: `DashboardSearchTest` (search in both scopes, tenant isolation, the submission-rate chart, the client overview's period). |
 | `tests/Phase3/e2e.php` | Phase 3 end-to-end driver (`prepare`, `verify`): creates jobs through `/v1` and checks results, counters, usage and the outbox after the worker run. |
+| `tests/Integration/SettingsTest.php` | System › Settings: the catalogue rules, changes with a reason and their audit, the page and who may change or apply, the applied-state file, the console command, and the installation zone in PHP and in the database sessions. |
 | `tests/Integration/AddressBatchTest.php`, `RepermissionTest.php`, `SystemTest.php` | 2.11: parsing and limits, import, validation linking, state dimensions, suppression filtering, typo and review decisions, CSV reports, staged sends that wait while held, the dashboard flow; the re-permission page (GET never answers, idempotent answers, global opt-out, expiry, one-click, webhook payload); diagnostics and history, the agent protocol, redaction, the emergency stop, the wizard and first-login redirect, help pages, permissions, the bootstrap link. |
 | `tests/Support/Phase9Fixtures.php` | Metered validation and send jobs and transport events for the Phase 9 tests. |
 | `tests/Support/`, `tests/bin/request.php`, `tests/bin/web-without-worker-role.php` | Test base classes (`ApiTestCase`, `DashboardTestCase`), direct database connections, catalog comparison, DNS stub, bulk Phase 6 fixtures (`DashboardFixtures`), the test-only SQL recorder (`QueryRecorder`, a DBAL middleware), and the concurrent-request worker. |
@@ -557,7 +566,7 @@ flowchart LR
     D["Owner decision"] --> S["Spec YAML (authoritative)"]
     S --> H["Human spec"]
     S --> V["vocabulary · OpenAPI · DDL · env contract · postfix-integration"]
-    V --> X["infra/.env.example (generated)"]
+    V --> X["infra/.env.example, production.env.example (generated, grouped)"]
     S & H & V & X --> CK["scripts/check-contracts.py"]
     CK -- pass --> OK["Ready to implement"]
     D -. "recorded in" .-> LOG["open-decisions.md (log only)"]

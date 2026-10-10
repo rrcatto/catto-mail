@@ -153,7 +153,13 @@ points span components and need several files to see:
 - **Dashboard redesign** (v0.2.2, owner decision, spec `user_interfaces.dashboard_layout`): one
   shell (`app/templates/dashboard/layout.html.twig`, `App\Dashboard\Navigation`), Chart.js charts
   (`app/assets/controllers/chart_controller.js`), global search (`App\Dashboard\Search`), period
-  choice on both overviews, times in `APP_TIMEZONE`. Screenshots of every page: `docs/screenshots/`.
+  choice on both overviews. Screenshots of every page: `docs/screenshots/`.
+- **Installation time zone, grouped .env, settings in the dashboard** (v0.2.3, owner
+  decisions): every time is in `SMARTHOST_TIMEZONE` (SAST by default); `infra/.env` holds only the
+  operator's settings, grouped (`LAYOUT` in `infra/lib/smarthost_render.py`; the rest is built in;
+  `env-migrate` converts older files); System › Settings overrides the operational settings of
+  `docs/contracts/settings.json` without changing the file (`setting_overrides`, applied by
+  `settings-apply`).
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## Public repository
@@ -221,8 +227,29 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - New pages use the shell's areas and pills (`Navigation`, gated by permission keys) and the
     existing card, table and chart patterns; charts go through `chart_controller.js`.
   - Show times with the `ts` filter and compute dashboard days, quota days and billing months with
-    `App\Util\InstallationTime` (`APP_TIMEZONE`); storage, the API, webhooks and logs stay UTC.
+    `App\Util\InstallationTime`.
   - When pages change visibly, retake the affected `docs/screenshots/` images (test data only).
+- **Every time is in the installation's time zone** (`SMARTHOST_TIMEZONE`, default
+  `Africa/Johannesburg`; owner decision). Never write UTC or a `Z` suffix:
+  - PHP: the kernel sets the default zone on boot; use `Clock::now()` and `Clock::rfc3339()` (offset
+    `+02:00`); `SessionTimeZoneMiddleware` sets every database session.
+  - Go: `time.Local` is set from the config; never call `.UTC()` for anything written or shown.
+    Postfix logs local time (`TZ` in its container) and `postfixlog.Parse` reads it in `now`'s zone.
+  - Python: `models.now()` and the log formatter use `Config.timezone`.
+  - Shell and host tools: `zdate` / `TZ="$(envval SMARTHOST_TIMEZONE)" date ... %z`.
+  - Every container gets `TZ` and PostgreSQL `-c timezone`/`log_timezone` from the topology
+    scripts; the installer sets the host's zone. Only HTTP date headers (GMT) and the Unix time in
+    `Smarthost-Signature` keep their standard form.
+- **The .env layout and dashboard settings.**
+  - `infra/.env` holds only the settings in `LAYOUT` (`infra/lib/smarthost_render.py`); every other
+    contract variable is built in (`defaults()`), and scripts read values with
+    `smarthost_render.py get NAME` (`envval`/`ev`), never by grepping the file.
+  - A new variable goes into the contract table and into `LAYOUT` or stays built in; then
+    `env-example` and `check-contracts.py`. A renamed one goes into `RENAMED` so `env-migrate`
+    handles old files.
+  - A setting the dashboard may change goes into `docs/contracts/settings.json` (never a secret,
+    database, network, certificate, host or domain value, or a safety switch). The renderer
+    (`override_error`) and `App\System\SettingCatalog` apply the same rule: change both together.
 - **Dashboard sign-in is passwordless** (spec 2.7): emailed single-use links (`LoginLinkService`),
   `APP_ADMIN_EMAIL` always gets ADMIN. Operator pages require permission keys
   (`App\Access\PermissionCatalog`, `#[IsGranted('PLATFORM.…')]`), never role names; ADMIN holds
@@ -287,7 +314,16 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - The `smarthost-internal` network has no route out.
   - Live mode is accepted only with `SMARTHOST_ENV=production`.
 - **Change control.** Do not commit, push, tag or release unless the user explicitly asks in that
-  turn.
+  turn. When the owner asks to commit and push a version, do all of it without asking or debating:
+  - bump the version in `app/src/Version.php`, `delivery/cmd/smarthost-delivery/main.go`,
+    `validator/smarthost_validator/__init__.py`, the help page `upgrades.html.twig`, the contract's
+    production profile `SMARTHOST_IMAGE_TAG` (then `env-example`), `infra/tests/phase8/test_render.py`
+    (`TAG=`), the `VPS-INSTALL.md` example, the README status line and the `CHANGELOG.md` heading;
+  - commit, create the annotated tag `vX.Y.Z`, push `main` and the tag;
+  - publish a GitHub Release for the tag (`gh release create`) with the notes (install, upgrade,
+    downloads, not yet proven, the CHANGELOG entry) and the assets `catto-mail-vX.Y.Z.zip`,
+    `catto-mail-vX.Y.Z.tar.gz` (`git archive` of the tag) and `SHA256SUMS`. Every pushed version
+    gets a release.
 
 ## Checks before reporting completion
 - `python3 scripts/check-contracts.py` must pass.

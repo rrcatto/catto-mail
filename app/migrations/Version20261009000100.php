@@ -17,7 +17,7 @@ use Symfony\Component\Uid\Uuid;
  *    their creation time when they already operate, and are exempt from the policy
  *    acceptance (new clients require it by default);
  *  - client_limits (per-client limits below the installation ceilings) and
- *    client_quota_usage (admitted-work counters per UTC day and month);
+ *    client_quota_usage (admitted-work counters per calendar day and month);
  *  - client_notes (private operator notes) and client_policy_acceptances (policy
  *    version accepted, by whom, how);
  *  - api_keys.expires_at;

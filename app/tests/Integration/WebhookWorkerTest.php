@@ -443,7 +443,7 @@ final class WebhookWorkerTest extends ApiTestCase
         Db::owner()->executeStatement("UPDATE messages SET current_status = 'hard_bounced', resolved_at = now() WHERE id = ?", [$message]);
         Db::owner()->insert('message_events', ['id' => SchemaFixtures::id(), 'message_id' => $message, 'event_type' => 'hard_bounce', 'event_source' => 'dsn_spool',
             'source_event_key' => 'k-'.$message, 'smtp_code' => 550, 'enhanced_status_code' => '5.1.1', 'failure_scope' => 'recipient',
-            'diagnostic' => 'smtp; 550 5.1.1 user unknown', 'occurred_at' => gmdate('Y-m-d H:i:s')]);
+            'diagnostic' => 'smtp; 550 5.1.1 user unknown', 'occurred_at' => date('Y-m-d H:i:s')]);
         $event = $this->event($client, WebhookEventType::MessageHardBounced, WebhookSubjectType::Message, $message);
         $this->work($this->dispatcher());
         $body = json_decode($this->requests[0]['body'], true);

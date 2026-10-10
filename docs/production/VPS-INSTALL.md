@@ -67,7 +67,7 @@ for the administrator's address would come to this server.
 
 ## 2. Install
 
-catto-mail is installed from an exact **release**: a Git tag such as `v0.2.0`, which always
+catto-mail is installed from an exact **release**: a Git tag such as `v0.2.3`, which always
 names the same code (unlike the `main` branch, which moves). List the releases:
 
 ```sh
@@ -78,7 +78,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.2`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.3`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -96,8 +96,9 @@ and the sign-in sender (defaults are offered). To run it unattended, give everyt
 ```
 
 Optional: `--acme-email you@example.com --acme-provider cloudflare --acme-credentials /root/acme-dns.env`
-obtains a Let's Encrypt certificate during installation (§5), and `--apply-firewall` applies the
-firewall rules (§8). `--help` lists every option.
+obtains a Let's Encrypt certificate during installation (§5), `--apply-firewall` applies the
+firewall rules (§8), and `--timezone Area/City` sets another installation time zone than
+`Africa/Johannesburg` (SAST). `--help` lists every option.
 
 ### What the installer does
 
@@ -140,7 +141,8 @@ In detail:
    `rsync`, `openssh-client` and the ACME client `lego`. Nothing else: PHP, PostgreSQL, Postfix,
    Go and Python libraries are inside the container images.
 5. Creates the unprivileged user `cattomail` (with a subordinate UID/GID range for rootless
-   Podman). Everything catto-mail runs belongs to this user.
+   Podman). Everything catto-mail runs belongs to this user. It has no password and nobody logs
+   in as it: from root, `sudo -iu cattomail` switches to it.
 6. Enables **lingering**: the user's own systemd runs without anyone logged in and starts at
    boot.
 7. Writes `/etc/sysctl.d/60-catto-mail-ports.conf` with `net.ipv4.ip_unprivileged_port_start=25`
@@ -152,7 +154,8 @@ In detail:
    that is an upgrade, §12).
 10. Creates `infra/.env` from the production template with your answers and freshly generated
     secrets (mode 0600; the secrets exist only on this server and in its backups).
-11. Validates it against the production safety rules (`smarthostctl prod check`).
+11. Validates it against the production safety rules (`smarthostctl prod check`) and sets the
+    server's time zone to the installation's (`SMARTHOST_TIMEZONE`).
 12. Builds the container images, tagged with the release version.
 13. Installs a certificate: Let's Encrypt if you gave the ACME options and DNS already points
     here, otherwise a temporary self-signed one so everything can start (§5 replaces it).
@@ -207,13 +210,26 @@ sudo -iu cattomail /home/cattomail/catto-mail/infra/bin/smarthostctl prod admin-
    trusted: that is expected until §5; continue to the site.
 3. You land in **System setup**. Every new installation opens it until the last step is done.
 
-From now on all commands are run as `cattomail` in `/home/cattomail/catto-mail`:
+From now on all commands are run as `cattomail` in `/home/cattomail/catto-mail`. You never log
+in as `cattomail`: the installer created it without a password, as the account the services run
+under. Log in with your own account (on most VPSs `ubuntu`), become root, and switch to it; from
+root the switch asks for no password:
 
 ```sh
-sudo -iu cattomail
+sudo -i                                   # as ubuntu: become root
+sudo -iu cattomail                        # as root: become the service user
 cd ~/catto-mail
 infra/bin/smarthostctl prod status        # every component and the ingress socket
 ```
+
+**Configuration.** The settings are in `/home/cattomail/catto-mail/infra/.env`, grouped under
+headings (installation and time zone, web address, mail server, sign-in, delivery pacing, bounces,
+validation, API and client limits, webhooks, reputation alerts, retention, certificates, backups,
+secrets); each is explained in `docs/contracts/environment.md`. The operational ones can also be
+changed in the dashboard under **System › Settings**: a value set there takes precedence over the
+file without changing it, and *Apply changes* restarts the services that use it. The installation's
+time zone is `SMARTHOST_TIMEZONE` (default `Africa/Johannesburg`, SAST); every time catto-mail shows
+or writes is in it, and the installer sets the server's time zone to it too.
 
 ## 4. DNS
 
@@ -480,12 +496,22 @@ Start with your seed addresses, then a controlled sample — never a whole list.
 - **Available releases:** `git ls-remote --tags https://github.com/rrcatto/catto-mail.git`, or in
   the installation `git fetch --tags && git tag --sort=-v:refname`.
 - **Installed release:** `git -C ~/catto-mail describe --tags` (also in System setup › Host).
-- **Upgrade** (read the CHANGELOG first):
+- **Upgrade** (read the CHANGELOG first). Log in as `ubuntu`, then `sudo -i` and
+  `sudo -iu cattomail`:
   ```sh
   cd ~/catto-mail
   git fetch --tags && git checkout vX.Y.Z
-  infra/bin/smarthostctl prod check            # names any new setting to add to infra/.env
+  infra/bin/smarthostctl prod env-migrate      # infra/.env in this release's layout (old file kept)
+  infra/bin/smarthostctl prod check            # names any setting that still needs a value
   infra/bin/smarthostctl prod upgrade X.Y.Z    # backup, build, recreate (migrations), checks
+  ```
+  `env-migrate` keeps every value, renames settings that were renamed and keeps the previous file
+  as `infra/.env.v<old version>-<date and time>`; `prod upgrade` runs it too, and a rollback to
+  the old version puts that file back.
+- **From 0.2.2 or earlier to 0.2.3 or later**, set the server's time zone once, as root (the
+  installer does this on new servers; Diagnostics › Host warns until it is done):
+  ```sh
+  timedatectl set-timezone Africa/Johannesburg
   ```
 - **Rollback:**
   ```sh
@@ -581,6 +607,27 @@ the Git tag, which names exactly the same code. An unpacked archive's installer 
 | Images fail to build | Disk space (`df -h`), network to the image registries; re-run. |
 
 Everything else: Help › Troubleshooting in the dashboard, and the [runbook](runbook.md).
+
+### Starting again from scratch
+
+Before you go live, the simplest clean start is to reinstall Ubuntu Server 26.04 from the
+provider's panel and follow §2 again. To remove catto-mail from the server instead, run this as
+root (log in as `ubuntu`, then `sudo -i`). It **deletes everything catto-mail holds**: the
+database, DKIM keys, certificates, backups kept on the server and `infra/.env`. Messages such as
+"no such user" only mean that step was never reached.
+
+```sh
+systemctl --user -M cattomail@ stop 'smarthost*'          # the units and containers
+loginctl disable-linger cattomail
+loginctl terminate-user cattomail; sleep 5; pkill -KILL -u cattomail
+userdel -r cattomail                                       # the user and /home/cattomail (code, images, volumes)
+sed -i '/^cattomail:/d' /etc/subuid /etc/subgid
+sed -i '\#catto-mail-firewall.nft#d' /etc/nftables.conf; nft delete table inet catto_mail
+rm -rf /root/catto-mail-installer /var/log/catto-mail-install.log /etc/sysctl.d/60-catto-mail-ports.conf
+```
+
+The packages (Podman and its helpers) stay; the installer finds them. DKIM keys are new after a
+reinstall, so publish the new DKIM record (§6).
 
 ## 16. What was tested locally and what only a real VPS can prove
 

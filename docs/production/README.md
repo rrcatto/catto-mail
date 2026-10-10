@@ -175,7 +175,8 @@ activation preflight fails.
 |---|---|---|---|
 | PostgreSQL | `<instance>-postgres-data` | **yes**: everything durable | `pg_dump` (`prod backup`) |
 | DKIM private keys, KeyTable/SigningTable | `<instance>-opendkim-keys`, `-tables` | **yes**: lost keys mean new DNS records | volume export |
-| Configuration and secrets, incl. `APP_ENCRYPTION_KEYS` (webhook signing secrets) and DB passwords | `infra/.env` on the host (0600) | **yes** | copied into the backup (encrypt it) |
+| Configuration and secrets, incl. `APP_ENCRYPTION_KEYS` (webhook signing secrets) and DB passwords | `infra/.env` on the host (0600); `env-migrate` and upgrades keep the previous file as `infra/.env.v<version>-<date and time>` | **yes** | copied into the backup (encrypt it) |
+| Settings changed in the dashboard (System › Settings) | PostgreSQL `setting_overrides` | **yes**: they override `infra/.env` | in `pg_dump` |
 | TLS certificates and keys | Podman secrets `<instance>-*-tls-*` | renewable from the CA/ACME client | exported when Podman allows, else keep the source files |
 | Postfix queue | `<instance>-postfix-queue` | transient (mail in flight) | optional (`--with-queue`, pause first) |
 | DSN spool, Postfix logs, queue snapshots | `<instance>-dsn-spool`, `-postfix-observability` | transient (parsed into PostgreSQL) | optional |

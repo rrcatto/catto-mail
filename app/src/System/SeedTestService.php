@@ -90,7 +90,7 @@ final class SeedTestService
             throw new DomainRuleViolation(trim(($p->detail ?? $p->title).' '.implode(' ', array_map(static fn (array $e): string => (string) ($e['message'] ?? ''), $p->errors))));
         }
         $tests = $this->tests();
-        array_unshift($tests, ['job_id' => $jobId, 'kind' => $kind, 'client_id' => $client->getId()->toRfc4122(), 'started_at' => gmdate('c'),
+        array_unshift($tests, ['job_id' => $jobId, 'kind' => $kind, 'client_id' => $client->getId()->toRfc4122(), 'started_at' => date('c'),
             'started_by' => $user->getEmail(), 'confirmed' => []]);
         $this->state->put(SystemState::SEED_TESTS, ['tests' => \array_slice($tests, 0, 20)]);
         $this->audit->record(AuditActor::user($user), 'system.'.$kind.'_test_started', 'send_job', $jobId, ['recipients' => \count($clean)]);
@@ -112,7 +112,7 @@ final class SeedTestService
         $tests = $this->tests();
         foreach ($tests as &$t) {
             if ($t['job_id'] === $jobId) {
-                $t['confirmed'][$what] = ['by' => $user->getEmail(), 'at' => gmdate('c')];
+                $t['confirmed'][$what] = ['by' => $user->getEmail(), 'at' => date('c')];
             }
         }
         unset($t);
