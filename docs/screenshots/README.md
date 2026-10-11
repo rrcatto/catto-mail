@@ -1,6 +1,6 @@
 # Screenshots
 
-Every page of the dashboard as of version 0.2.4 with the Bootstrap 6 four-column grid (taken just before the version number changed, so the footers read 0.2.3), taken on the
+Every page of the dashboard as of version 0.2.5 with the Bootstrap 6 four-column grid (most were taken at 0.2.3 and 0.2.4, so their footers show those numbers), taken on the
 development pod (`smarthostctl`) at 1,440 pixels wide unless noted, signed in as the administrator. The grid was designed
 for 2,560 pixels; at 1,440 a half holding a wide table takes the full width. The figures come from the end-to-end test suites, so the clients, addresses and
 domains are test data. Every time is in the installation time zone (`SMARTHOST_TIMEZONE`, here SAST). The development pod is

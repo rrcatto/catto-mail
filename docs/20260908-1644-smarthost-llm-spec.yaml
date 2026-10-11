@@ -2966,7 +2966,7 @@ user_interfaces:
     404: a sign-in link, the API documentation (/docs/api), and for recipients of its mail that it
     was sent for the client named as the sender, how to stop it (the message's unsubscribe link or
     the sender), the re-permission pages, how to report unwanted mail (the administrator's
-    address) and what tracked links and images record; it states that there is no public sign-up
+    address) and what tracked links and images record; it offers the public sign-up when APP_PUBLIC_ONBOARDING_ENABLED is true and otherwise states that there is none
     and offers none. It is static and public: no session, cookie, script or form, laid out in the
     same four-column grid. Every HTML page (owner decision, 2026-10-10: the front page, the
     dashboard signed in and out, the error page, the API documentation and the re-permission

@@ -306,7 +306,8 @@ The owner also accepted the remaining Phase 8 review items as launch decisions.
 Made while implementing public SaaS hardening on the repository side. They are recorded in
 specification 2.10 (`saas_operations`). The owner's instructions fixed four things:
 - extend the existing client model;
-- keep public onboarding disabled with no public route;
+- keep public onboarding disabled with no public route (superseded on 2026-10-11 by the public
+  sign-up decision, see *Operator self-service* below);
 - choose no billing provider;
 - take no automatic action on alerts.
 

@@ -4,11 +4,17 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.11.
 
-## [Unreleased]
+## [0.2.5] - 2026-10-11
 
-Upgrading: `infra/.env` gains the group *Public sign-up* (`APP_PUBLIC_ONBOARDING_ENABLED=false` and
-the six starter settings). Run `prod env-migrate` before `prod check` (in development
-`smarthostctl env-migrate`); `prod upgrade` runs it too. It keeps the old file beside it.
+Public sign-up into a starter tier (off until the operator turns it on), the client overview's
+*Get started*, and the production preflight counting unfinished client domains in one line. One
+new migration (`auth_login_tokens.purpose` and `organisation_name`).
+
+Upgrading from 0.2.4: `git checkout v0.2.5`, `prod env-migrate`, `prod check`, `prod upgrade
+0.2.5`. `infra/.env` gains the group *Public sign-up* (`APP_PUBLIC_ONBOARDING_ENABLED=false` and
+the six starter settings); `env-migrate` adds it and keeps the old file beside it (`prod upgrade`
+runs it too; in development `smarthostctl env-migrate`). From 0.2.3 or earlier, also follow the
+0.2.4 notes (port 80 in the firewall) and, from 0.2.2 or earlier, the 0.2.3 notes (time zone).
 
 ### Added
 - Public sign-up (owner decision; off by default). With `APP_PUBLIC_ONBOARDING_ENABLED=true`, the

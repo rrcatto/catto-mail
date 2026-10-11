@@ -1771,7 +1771,7 @@ usage and billing days and months included. Screenshots of every page are in `do
 installation's address sees a public front page at `/` instead of a 404: what the service is, a
 sign-in link and the API documentation, and for recipients of its mail whom it was sent for, how to
 stop it, how to report unwanted mail to the administrator and what tracked links and images record.
-It says there is no public sign-up and offers none; it has no session, cookie, script or form.
+When public sign-up is turned on it offers it; otherwise it says there is none. It has no session, cookie, script or form.
 Every HTML page names the software version in its head
 (`<meta name="application-name" content="catto-mail v<version>">`) and ends with the same footer:
 what catto-mail is, the version, the administrator's address (`APP_ADMIN_EMAIL`) and the time zone.

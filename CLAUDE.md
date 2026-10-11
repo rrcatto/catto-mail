@@ -160,7 +160,7 @@ points span components and need several files to see:
   `env-migrate` converts older files); System › Settings overrides the operational settings of
   `docs/contracts/settings.json` without changing the file (`setting_overrides`, applied by
   `settings-apply`).
-- **v0.2.4** (owner decisions) and, since then, unreleased: every page has the version in its head and
+- **v0.2.4 and v0.2.5** (owner decisions): every page has the version in its head and
   the footer (`templates/_site.html.twig`, `PageFrameTest`); Bootstrap 6.0.0-alpha.1 is the base
   of the design and every dashboard page uses its four-column `.grid`, with the area buttons in the
   top bar; the public front page at `/` (`FrontPageController`, `templates/front.html.twig`); production

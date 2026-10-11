@@ -17,8 +17,8 @@ use Symfony\Component\Security\Http\Util\TargetPathTrait;
  * Dashboard entry points (D-12, passwordless since specification 2.7). The user
  * enters an email address and receives a single-use sign-in link
  * (LoginLinkService); the link is redeemed by LoginLinkAuthenticator. There are no
- * passwords and no self-service registration: an operator creates users in the
- * dashboard, and APP_ADMIN_EMAIL can always sign in. Sign-out is a POST with a
+ * passwords. An operator creates users in the dashboard, the public sign-up creates its client
+ * admins when it is turned on (PublicSignUpController), and APP_ADMIN_EMAIL can always sign in. Sign-out is a POST with a
  * CSRF token (the firewall's logout listener handles it).
  */
 #[Route('/dashboard')]

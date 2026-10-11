@@ -24,6 +24,11 @@ success.
 
 ## 2. Authentication
 
+Your account is created by the operator of the installation, or, where the installation offers
+it, by signing up at `https://<your Smarthost host>/dashboard/sign-up` (a new account starts with
+low limits that the operator can raise). Your client admin then manages keys, sending domains and
+webhook endpoints in the dashboard.
+
 Send your API key as a bearer token on every request:
 
 ```http

@@ -124,7 +124,7 @@ Migration `Version20261007000100`.
   `g-col-4 xl:g-col-3` + `g-col-4 xl:g-col-1` a main and a side column, `g-col-4` full width).
 - The public front page `/` (`FrontPageController`, `templates/front.html.twig`, owner decision,
   2026-10-10): what the service is, sign-in, the API documentation and a word for recipients of
-  its mail, in the same grid. No session, cookie, script or form; there is no public sign-up.
+  its mail, in the same grid. No session, cookie, script or form; it offers the public sign-up only when it is turned on.
 - `App\Dashboard\Search`: the global search, tenant-scoped in a client workspace.
 - `App\Util\InstallationTime`: the installation time zone (`SMARTHOST_TIMEZONE`, SAST by
   default). The kernel makes it PHP's default zone on boot and `SessionTimeZoneMiddleware` sets it
