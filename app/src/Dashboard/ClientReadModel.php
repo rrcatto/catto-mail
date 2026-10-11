@@ -377,9 +377,15 @@ final class ClientReadModel
     public function sendingDomains(string $clientId): array
     {
         return $this->connection->fetchAllAssociative(<<<'SQL'
-            SELECT id::text AS id, domain, status, verification_token, verified_at, last_checked_at, last_check_error,
-                   dkim_selector, dkim_status, created_at
-              FROM sending_domains WHERE client_id = ? ORDER BY domain
+            SELECT d.id::text AS id, d.domain, d.status, d.verification_token, d.verified_at, d.last_checked_at, d.last_check_error,
+                   d.dkim_selector, d.dkim_status, d.dkim_public_key, d.created_at,
+                   r.action AS request_action, r.status AS request_status, r.requested_at AS request_requested_at, r.finished_at AS request_finished_at
+              FROM sending_domains d
+              LEFT JOIN LATERAL (
+                   SELECT action, status, requested_at, finished_at FROM system_requests
+                    WHERE action IN ('dkim.generate', 'dkim.activate') AND params_json->>'sending_domain_id' = d.id::text
+                    ORDER BY requested_at DESC LIMIT 1) r ON true
+             WHERE d.client_id = ? ORDER BY d.domain
             SQL, [$clientId]);
     }
 

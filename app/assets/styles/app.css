@@ -360,6 +360,14 @@ dl.rows > dt:last-of-type, dl.rows > dd:last-of-type { border-bottom: 0; }
 .stepper a { color: var(--ink); text-decoration: none; font-weight: 500; }
 .stepper a:hover { text-decoration: underline; }
 .stepper .step-state { margin-left: auto; font-size: 12px; color: var(--muted); }
+/* A sending domain's progress in the client dashboard: the same steps in one row. */
+.stepper.stepper-row { flex-direction: row; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.stepper.stepper-row li { padding: 6px 14px 6px 6px; background: var(--soft); }
+.stepper.stepper-row li.current { background: var(--surface); }
+.domain-setup h3 { margin: 18px 0 8px; font-size: 1.05rem; }
+.records td:last-child { min-width: 18rem; }
+.records .rec-name { min-width: 15rem; }
+.records-notes { display: grid; gap: 6px; margin-top: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px 16px; }
 .form-grid label { display: block; font-size: 14px; color: var(--ink-2); }
 .form-grid label > input:not([type="checkbox"]):not([type="radio"]), .form-grid label > select, .form-grid label > textarea { display: block; width: 100%; margin-top: 6px; }

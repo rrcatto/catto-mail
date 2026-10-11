@@ -27,7 +27,7 @@ Contents: [What is catto-mail?](#what-is-catto-mail) · [Screenshots](#screensho
 | Bounces and events | Postfix logs, queue snapshots, inbound DSNs and ARF complaints become append-only message events, correlated to the exact message (or kept as unmatched DSNs for the operator). Reconciliation catches lost events. |
 | Engagement tracking | Opt-in per job: an open pixel and click redirects with opaque per-message tokens record *recorded* opens and clicks (never claimed as proof of reading); redirects go only to targets stored when the message was built. |
 | Sign-in and access control | Passwordless: the dashboard emails a single-use sign-in link (captured by Mailpit in development). `APP_ADMIN_EMAIL` is always the administrator (ADMIN: every permission); other users, roles, permissions and client memberships are managed in the browser. |
-| Dashboards | Server-rendered Twig + Stimulus pages: a client dashboard (validation results and CSV export, send jobs, message timelines, suppressions, sending domains, usage) and an operator dashboard (system health from durable signals, clients, unmatched DSNs, suppressions, audit log, webhook deliveries and workers) and client webhook-endpoint management. |
+| Dashboards | Server-rendered Twig + Stimulus pages: a client dashboard (validation results and CSV export, send jobs, message timelines, suppressions, sending domains set up by the client itself, usage) and an operator dashboard (system health from durable signals, clients, unmatched DSNs, suppressions, audit log, webhook deliveries and workers) and client webhook-endpoint management. |
 | Reputation safety | Global transport suppressions (recipient-specific hard bounce, complaint, repeated recipient soft bounce) that apply to every client, explicit recipient global opt-outs from operator-authorised clients, sending-domain verification and operator controls. |
 | Integration | A versioned HTTPS API (`/v1`) and signed webhooks. Clients never touch Smarthost's database. |
 
@@ -128,6 +128,13 @@ path, tracking, List-Unsubscribe) and submits it to Postfix at a controlled pace
 it and Postfix delivers it. Results come from Postfix's log, queue snapshots, and bounces and
 complaints received on port 25. catto-mail reports **remote accepted**, never "delivered to the
 inbox". New installations send in stages: a seed test, a controlled sample, a gradual rollout.
+
+A client sets up its own sending domains under Settings › Sending domains: a client admin adds the
+domain and publishes the TXT record shown, and *Check DNS now* verifies it. The host agent then
+generates the domain's DKIM key inside OpenDKIM; the private key never leaves it. The page shows
+the DKIM and DMARC records to publish, and the key is activated as soon as DNS shows the record.
+Each domain shows its progress: added, TXT verified, DKIM pending in DNS, active. No operator
+console work is needed; the console commands still work.
 
 ## How tracking works
 
@@ -263,6 +270,7 @@ python3 scripts/check-contracts.py
 | 10: Operator self-service | **Repository side implemented** (v0.1.9; specification 2.11). The one-command installer for Ubuntu Server 26.04 LTS (exercised on Ubuntu 26.04 under systemd), the bootstrap sign-in link, the host agent, the administrator setup wizard, diagnostics with history and the system health dashboard, the web emergency stop, Let's Encrypt DNS-01 automation, scheduled encrypted off-host backups and restore rehearsals, log shortcuts, help and tutorials, address batches (10,000 addresses) with separate state dimensions and staged sends, and the re-permission page. **Outstanding:** the real VPS steps, and ctnlist's handling of `repermission.responded`. |
 | Dashboard redesign | **Complete** (v0.2.2; owner decision, specification `user_interfaces.dashboard_layout`). Every page in one full-width shell with area buttons and page pills, Chart.js charts, global search, a period choice on both overviews, a submission-rate chart and times, quota days and billing months in the installation time zone. [Screenshots](docs/screenshots/README.md). |
 | Time zone, configuration and settings | **Complete** (v0.2.3; owner decisions). Every time — database sessions, API and webhook timestamps, exports, every service's logs, Postfix, file names, quota and billing days — is in `SMARTHOST_TIMEZONE` (SAST by default, offset `+02:00`). `infra/.env` holds only the operator's settings under plain headings (`smarthostctl env-migrate` converts an older file and keeps it as `infra/.env.v<version>-<date and time>`). System › Settings overrides 69 operational settings without changing the file, with a reason and an audit record for every change. |
+| Sending domains in the client dashboard | **Implemented, not yet released** (owner decision). A client admin adds a domain within the client's limit, and verification requests its DKIM key from the host agent. The agent generates the key inside OpenDKIM. The page shows the DKIM, DMARC and SPF guidance, and the key is activated when the record appears in DNS: from *Check DNS now*, or by the host agent's periodic check. `smarthostctl test phase2` covers adding, the limit, the request and activation, and isolation between clients. **Not yet proven on a VPS.** |
 
 See [CHANGELOG.md](CHANGELOG.md).
 

@@ -205,7 +205,8 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Settings › Sending domains
 
-`/dashboard/c/{client}/sending-domains`
+`/dashboard/c/{client}/sending-domains` · Each domain's progress (added, TXT verified, DKIM pending in DNS, active) with
+the records to publish, *Check DNS now*, and for client admins *Add a sending domain* within the client's limit.
 
 ![Settings › Sending domains](client-settings-sending-domains.png)
 

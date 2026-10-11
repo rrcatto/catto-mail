@@ -43,6 +43,9 @@ parameters:
     app.client.api_key_limit: '%env(int:APP_CLIENT_API_KEY_LIMIT)%'
     app.client.webhook_endpoint_limit: '%env(int:APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT)%'
     app.client.sending_domain_limit: '%env(int:APP_CLIENT_SENDING_DOMAIN_LIMIT)%'
+    # Sending domains in the client dashboard: the SPF guidance names the envelope-sender domain.
+    app.bounce_domain: '%env(default:app.no_bounce_domain:SMARTHOST_BOUNCE_DOMAIN)%'
+    app.no_bounce_domain: ''
 
 services:
     _defaults:
@@ -61,6 +64,7 @@ services:
             string $trackingRetentionDays: '%app.tracking.retention_days%'
             bool $publicOnboardingEnabled: '%app.public_onboarding_enabled%'
             string $policyVersion: '%app.policy_version%'
+            string $bounceDomain: '%app.bounce_domain%'
 
     App\:
         resource: '../src/'

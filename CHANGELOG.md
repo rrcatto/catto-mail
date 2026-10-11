@@ -7,6 +7,30 @@ the *specification* version, which is 2.11.
 ## [Unreleased]
 
 ### Added
+- Sending domains are set up in the client dashboard, without operator console work (owner
+  decision). Under Settings › Sending domains a client admin adds a domain within the client's
+  limit (its own `max_sending_domains`, never above `APP_CLIENT_SENDING_DOMAIN_LIMIT`) and sees
+  its TXT challenge. *Check DNS now* verifies it, and the domain's DKIM key is then requested from
+  the host agent at once. The agent generates the key inside OpenDKIM (`prod dkim generate`; the
+  private key never leaves the container) and returns only the public half. The page then shows the
+  DKIM record, a DMARC record to start with, and SPF guidance (nothing to add: the envelope sender
+  is the bounce domain). When the DKIM record appears in DNS, catto-mail asks the host agent to
+  activate the selector. The agent compares DNS with the private key again and runs
+  `prod dkim activate`, and the domain is recorded as active, as `smarthost:domain:dkim … active`
+  records it. This happens on *Check DNS now*, or by itself: every five minutes the host agent runs
+  the new `smarthost:system:agent domains`, which looks at each waiting domain at most every ten
+  minutes.
+  - Each domain shows its progress: added, TXT verified, DKIM pending in DNS, active.
+  - Adding a domain and requesting a key again need a client admin; checks need a member.
+  - Every action is POST with CSRF and audited.
+  - Results change only the sending domain the request names.
+  - Refused: a domain another client has also verified (the operator sets that one up), and
+    suspended or closed clients.
+  - Migration `Version20261013000100` adds `sending_domains.dkim_public_key`, the public half of
+    the key.
+  - `SMARTHOST_BOUNCE_DOMAIN` now also reaches the web application, for the SPF guidance.
+  - DKIM host requests now wait per domain, so one client's key never holds up another's.
+  - The console commands (`smarthost:domain:add`, `:verify`, `:dkim`, `prod dkim`) are unchanged.
 - A public front page at `/` (owner decision): someone who types the installation's address sees
   what the service is, a sign-in link, the API documentation, and for recipients of its mail whom
   the mail comes from, how to stop it, how to report it and what tracked links do, instead of a 404.

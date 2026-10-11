@@ -353,7 +353,11 @@ automatic DNS-01 renewal above.
 ## 6. DKIM
 
 Every sending domain needs a DKIM key; the private key never leaves the OpenDKIM container.
-In System setup › DKIM (or with the commands):
+A client's own sending domains are set up by the client in its workspace (Settings › Sending
+domains): once the domain is verified, the host agent generates the key, the page shows the
+records to publish, and the key is activated when DNS shows it (runbook §6a). For the sign-in
+mail sender's domain (`APP_MAIL_FROM`) and any domain you manage yourself, use System setup ›
+DKIM, or the commands:
 
 ```sh
 infra/bin/smarthostctl prod dkim generate news.example.org s2026a   # new key, not signing yet; prints the TXT record

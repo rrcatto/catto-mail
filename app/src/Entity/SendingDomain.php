@@ -43,6 +43,10 @@ class SendingDomain implements TenantOwned
     #[ORM\Column(type: 'text', enumType: DkimStatus::class)]
     private DkimStatus $dkimStatus = DkimStatus::NotConfigured;
 
+    /** The p= value of the selector's DKIM record when the host agent generated the key (public). */
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $dkimPublicKey = null;
+
     #[ORM\Column(type: 'timestamptz')]
     private \DateTimeImmutable $createdAt;
 
@@ -72,6 +76,7 @@ class SendingDomain implements TenantOwned
     public function getLastCheckError(): ?string { return $this->lastCheckError; }
     public function getDkimSelector(): ?string { return $this->dkimSelector; }
     public function getDkimStatus(): DkimStatus { return $this->dkimStatus; }
+    public function getDkimPublicKey(): ?string { return $this->dkimPublicKey; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function getUpdatedAt(): \DateTimeImmutable { return $this->updatedAt; }
 
@@ -108,10 +113,24 @@ class SendingDomain implements TenantOwned
         $this->updatedAt = Clock::now();
     }
 
-    public function setDkim(DkimStatus $status, ?string $selector): void
+    /** A different selector (or none) forgets the stored public key unless a new one is given. */
+    public function setDkim(DkimStatus $status, ?string $selector, ?string $publicKey = null): void
     {
+        if (null !== $publicKey) {
+            $this->dkimPublicKey = $publicKey;
+        } elseif (null === $selector || $selector !== $this->dkimSelector) {
+            $this->dkimPublicKey = null;
+        }
         $this->dkimStatus = $status;
         $this->dkimSelector = $selector;
         $this->updatedAt = Clock::now();
+    }
+
+    /** A successful DNS check of a verified domain (the DKIM record of the client dashboard). */
+    public function recordPassedCheck(\DateTimeImmutable $at): void
+    {
+        $this->lastCheckedAt = $at;
+        $this->lastCheckError = null;
+        $this->updatedAt = $at;
     }
 }

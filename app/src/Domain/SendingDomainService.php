@@ -27,8 +27,9 @@ use Doctrine\ORM\EntityManagerInterface;
  *                `smarthost-verification=<token>`; failures are recorded in
  *                last_checked_at / last_check_error and leave the status unchanged;
  *   disable / enable -> operator control; re-enabling requires verification again;
- *   setDkim   -> records the DKIM selector/status. Symfony never generates DKIM
- *                keys: OpenDKIM owns the signing keys.
+ *   setDkim   -> records the DKIM selector/status (and the public half of a key the host
+ *                agent generated). Symfony never generates DKIM keys: OpenDKIM owns the
+ *                signing keys (client self-service: App\Domain\DkimSetup).
  *
  * Every state change is audited. Phase 9: a client registers at most its effective
  * number of sending domains (App\Client\ClientLimitPolicy::maxSendingDomains); creations
@@ -168,17 +169,24 @@ final class SendingDomainService
             ['method' => 'development_bootstrap_without_dns']);
     }
 
-    public function setDkim(SendingDomain $domain, DkimStatus $status, ?string $selector, AuditActor $actor): void
+    /**
+     * $publicKey: the p= value of the selector's DNS record, when the host agent generated the key
+     * for the client dashboard (App\Domain\DkimSetup); another selector forgets the stored one.
+     */
+    public function setDkim(SendingDomain $domain, DkimStatus $status, ?string $selector, AuditActor $actor, ?string $publicKey = null): void
     {
         $selector = null === $selector ? $domain->getDkimSelector() : strtolower(trim($selector));
         if (DkimStatus::NotConfigured !== $status && (null === $selector || 1 !== preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $selector))) {
             throw new DomainRuleViolation('A DKIM status other than not_configured needs a valid selector (a DNS label).');
         }
+        if (null !== $publicKey && (1 !== preg_match('#^[A-Za-z0-9+/]{100,1996}={0,2}$#', $publicKey) || DkimStatus::NotConfigured === $status)) {
+            throw new DomainRuleViolation('A DKIM public key is the base64 p= value of the selector\'s record.');
+        }
         if (DkimStatus::NotConfigured === $status) {
             $selector = null;
         }
-        $this->change($domain, $actor, 'sending_domain.dkim_changed', static fn () => $domain->setDkim($status, $selector),
-            ['dkim_status' => $status->value, 'dkim_selector' => $selector]);
+        $this->change($domain, $actor, 'sending_domain.dkim_changed', static fn () => $domain->setDkim($status, $selector, $publicKey),
+            ['dkim_status' => $status->value, 'dkim_selector' => $selector] + (null === $publicKey ? [] : ['dkim_public_key_recorded' => true]));
     }
 
     /** @param array<string, mixed> $detail */

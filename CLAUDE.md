@@ -164,7 +164,10 @@ points span components and need several files to see:
   the footer (`templates/_site.html.twig`, `PageFrameTest`); Bootstrap 6.0.0-alpha.1 is the base
   of the design and every dashboard page uses its four-column `.grid`, with the area buttons in the
   top bar; the public front page at `/` (`FrontPageController`, `templates/front.html.twig`); production
-  port 80 redirects to HTTPS (`PROXY_HTTP_BIND`, `infra/nginx/production/http-redirect.conf.template`).
+  port 80 redirects to HTTPS (`PROXY_HTTP_BIND`, `infra/nginx/production/http-redirect.conf.template`);
+  client admins set up sending domains in the client dashboard, the DKIM key through the host agent
+  (`ClientDomainController`, `App\Domain\DkimSetup`, `smarthost:system:agent domains`,
+  `ClientDomainSetupTest`).
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## Public repository
@@ -308,6 +311,11 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - Stored check output and request results go through `Redactor`.
   - Shell code may remove only paths it created (`remove_owned` in `smarthostctl-prod`).
   - Help pages must describe the real implementation; update them with behaviour changes.
+  - Client sending domains (owner decision 2026-10-11) get their DKIM key only through the host
+    agent (`dkim.generate`/`dkim.activate` with `sending_domain_id`). The agent returns only the
+    public half, and `DkimSetup::requestFinished` records the outcome for exactly that domain
+    when the request is finished. Never generate, hold or move a private key in the web
+    application, and never set up self-service DKIM for a domain another client has verified.
 - **SaaS operations (Phase 9, spec 2.10).**
   - Public onboarding stays disabled (`APP_PUBLIC_ONBOARDING_ENABLED=false`) and has no route.
     Never add a public registration route without an explicit owner decision.

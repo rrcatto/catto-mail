@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Domain\DkimSetup;
 use App\Enum\SystemCheckSource;
 use App\System\ApplicationDiagnostics;
 use App\System\SystemChecks;
@@ -26,10 +27,14 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   report [--requested]        record checks and state; stdin {"checks": [...], "state": {"host_report": {...}, ...},
  *                               "complete": true when the checks are the full set (agent checks not in it are retired)}
  *   diagnostics [--requested]   run the application's own checks (prints them as JSON)
+ *   domains                     look again at the sending domains waiting for their DKIM record and ask for
+ *                               the activation of those now published (App\Domain\DkimSetup::advance; JSON)
  *
+ * Finishing a DKIM request of the client dashboard also records its outcome for the sending domain,
+ * in the same transaction (DkimSetup::requestFinished).
  * Nothing here runs a host command; secrets are stripped before anything is stored.
  */
-#[AsCommand('smarthost:system:agent', 'Host-agent protocol: claim and finish requests, record checks and host reports')]
+#[AsCommand('smarthost:system:agent', 'Host-agent protocol: claim and finish requests, record checks and host reports, advance DKIM set-ups')]
 final class SystemAgentCommand extends AdminCommand
 {
     public function __construct(
@@ -37,13 +42,14 @@ final class SystemAgentCommand extends AdminCommand
         private readonly SystemChecks $checks,
         private readonly SystemState $state,
         private readonly ApplicationDiagnostics $diagnostics,
+        private readonly DkimSetup $dkim,
     ) {
         parent::__construct();
     }
 
     protected function configure(): void
     {
-        $this->addArgument('action', InputArgument::REQUIRED, 'claim | finish | report | diagnostics')
+        $this->addArgument('action', InputArgument::REQUIRED, 'claim | finish | report | diagnostics | domains')
             ->addArgument('request-id', InputArgument::OPTIONAL)
             ->addOption('failed', null, InputOption::VALUE_NONE, 'finish: the request failed')
             ->addOption('requested', null, InputOption::VALUE_NONE, 'report/diagnostics: an administrator asked for this run (kept in the history)');
@@ -60,9 +66,17 @@ final class SystemAgentCommand extends AdminCommand
                 return Command::SUCCESS;
             case 'finish':
                 $in = $this->stdin($input);
-                $this->requests->finish((string) $input->getArgument('request-id'), !$input->getOption('failed'),
-                    (string) ($in['summary'] ?? ''), \is_array($in['result'] ?? null) ? $in['result'] : []);
+                $succeeded = !$input->getOption('failed');
+                $result = \is_array($in['result'] ?? null) ? $in['result'] : [];
+                $this->em->getConnection()->transactional(function () use ($input, $in, $succeeded, $result): void {
+                    $finished = $this->requests->finish((string) $input->getArgument('request-id'), $succeeded, (string) ($in['summary'] ?? ''), $result);
+                    $this->dkim->requestFinished($finished['action'], $finished['params'], $succeeded, $result);
+                });
                 $io->writeln('recorded');
+
+                return Command::SUCCESS;
+            case 'domains':
+                $io->writeln(json_encode($this->dkim->advance(), \JSON_THROW_ON_ERROR));
 
                 return Command::SUCCESS;
             case 'report':
@@ -86,7 +100,7 @@ final class SystemAgentCommand extends AdminCommand
 
                 return Command::SUCCESS;
             default:
-                throw new \InvalidArgumentException('Unknown action (claim, finish, report, diagnostics).');
+                throw new \InvalidArgumentException('Unknown action (claim, finish, report, diagnostics, domains).');
         }
     }
 

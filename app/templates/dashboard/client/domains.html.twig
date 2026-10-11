@@ -3,36 +3,129 @@
 {% block title %}Sending domains{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
+{% set stage_label = {added: 'Waiting for the TXT record', verified: 'Verified, no DKIM key yet', key_requested: 'DKIM key being generated',
+    key_failed: 'DKIM key not generated', pending_dns: 'DKIM pending in DNS', activating: 'Activating DKIM', active: 'Active',
+    dkim_disabled: 'DKIM disabled', disabled: 'Disabled'} %}
+{% set stage_class = {added: 'pending', verified: 'pending', key_requested: 'pending', key_failed: 'failed', pending_dns: 'pending',
+    activating: 'pending', active: 'active', dkim_disabled: 'disabled', disabled: 'disabled'} %}
+{# The step the domain is at: earlier steps are done. #}
+{% set step_at = {added: 1, verified: 2, key_requested: 2, key_failed: 2, pending_dns: 2, activating: 3, active: 4, dkim_disabled: 2, disabled: 0} %}
 <div class="pagehead">
     <div>
         <h1>Sending domains</h1>
-        <p class="sub">A job may send only from a verified, enabled domain of this client. Verification publishes a DNS TXT record; DKIM signing needs an active DKIM key published by the operator.</p>
+        <p class="sub">A job sends only from a verified domain of this client, and on a live installation only once the domain's DKIM key is active. Each domain goes through four steps: added, TXT verified, DKIM pending in DNS, active. You publish the DNS records shown here; catto-mail checks them and generates the DKIM key in its signing service.</p>
     </div>
 </div>
 {% if not client.mayCreateWork %}<p class="warn">This client is {{ client.status.value|label('client_status')|lower }}, so no new sending is accepted at the moment.</p>{% endif %}
-{% if domains is empty %}<p class="empty">No sending domains yet. An operator registers them.</p>{% else %}
-<section class="card card-flush" aria-labelledby="dom-h">
-    <div class="card-head"><h2 id="dom-h">Domains</h2><span class="muted small">{{ domains|length }} domain{{ domains|length == 1 ? '' : 's' }}</span></div>
-    <div class="scroll">
-    <table>
-        <thead><tr><th scope="col">Domain</th><th scope="col">Verification</th><th scope="col">Verification record</th><th scope="col">Last check</th><th scope="col">DKIM</th><th scope="col">Sending permitted</th><th scope="col">Action</th></tr></thead>
-        <tbody>
-        {% for d in domains %}
-            <tr>
-                <td><strong>{{ d.domain }}</strong></td>
-                <td>{{ ui.status(d.status, 'domain_status') }}{% if d.verified_at %}<br><small>since {{ d.verified_at|ts }}</small>{% endif %}</td>
-                <td>{% if d.status != 'verified' %}TXT at <code>{{ constant('App\\Domain\\SendingDomainService::TXT_PREFIX') }}{{ d.domain }}</code><br>value <code class="token">{{ constant('App\\Domain\\SendingDomainService::TXT_VALUE_PREFIX') }}{{ d.verification_token }}</code>{% else %}—{% endif %}</td>
-                <td>{{ d.last_checked_at|ts }}{% if d.last_check_error %}<br><small class="text-bad">{{ d.last_check_error }}</small>{% endif %}</td>
-                <td><span class="st st-dkim-{{ d.dkim_status }}">{{ d.dkim_status|label('dkim_status') }}</span>{% if d.dkim_selector %}<br><small>selector {{ d.dkim_selector }}</small>{% endif %}</td>
-                <td>{% if d.status == 'verified' and client.mayCreateWork %}<span class="st st-active">Yes</span>{% else %}<span class="st">No</span>{% endif %}</td>
-                <td>{% if may_operate and d.status != 'disabled' %}
-                    <form method="post" action="{{ path('dashboard_client_domain_verify', {clientId: cid, domainId: d.id}) }}">{{ ui.csrf() }}<button type="submit" class="secondary">Check DNS now</button></form>
-                {% else %}—{% endif %}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-</section>
-{% endif %}
+
+<div class="grid">
+    <section class="card card-flush g-col-4 2xl:g-col-3" aria-labelledby="dom-h">
+        <div class="card-head"><h2 id="dom-h">Domains</h2><span class="muted small">{{ domains|length }} of at most {{ max_domains }}</span></div>
+        {% if domains is empty %}<p class="empty">No sending domains yet.{% if may_admin and may_add %} Add the first one with the form.{% else %} A client admin adds them here.{% endif %}</p>{% else %}
+        <div class="scroll">
+        <table>
+            <thead><tr><th scope="col">Domain</th><th scope="col">Verification</th><th scope="col">Progress</th><th scope="col">DKIM</th><th scope="col">Last check</th><th scope="col">Sending permitted</th></tr></thead>
+            <tbody>
+            {% for d in domains %}
+                <tr>
+                    <td><a href="#d-{{ d.id }}"><strong>{{ d.domain }}</strong></a></td>
+                    <td>{{ ui.status(d.status, 'domain_status') }}{% if d.verified_at %}<br><small>since {{ d.verified_at|ts }}</small>{% endif %}</td>
+                    <td><span class="st st-{{ stage_class[d.stage] }}">{{ stage_label[d.stage] }}</span></td>
+                    <td><span class="st st-dkim-{{ d.dkim_status }}">{{ d.dkim_status|label('dkim_status') }}</span>{% if d.dkim_selector %}<br><small>selector {{ d.dkim_selector }}</small>{% endif %}</td>
+                    <td>{{ d.last_checked_at|ts }}{% if d.last_check_error %}<br><small class="text-bad">{{ d.last_check_error }}</small>{% endif %}</td>
+                    <td>{% if d.status == 'verified' and client.mayCreateWork and (not production or d.dkim_status == 'active') %}<span class="st st-active">Yes</span>{% else %}<span class="st">No</span>{% if production and d.status == 'verified' and d.dkim_status != 'active' %}<br><small>DKIM not active yet</small>{% endif %}{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+    </section>
+    {% if may_admin and may_add %}
+    <section class="card card-accent g-col-4 2xl:g-col-1" aria-labelledby="add-h">
+        <h2 id="add-h">Add a sending domain</h2>
+        {% if domains|length >= max_domains %}
+        <p class="muted">This client has {{ domains|length }} of at most {{ max_domains }} sending domains. Ask the operator for a higher limit.</p>
+        {% else %}
+        <form method="post" action="{{ path('dashboard_client_domain_add', {clientId: cid}) }}" class="stack">
+            {{ ui.csrf() }}
+            <label>Domain your messages come from <input type="text" name="domain" required maxlength="253" placeholder="news.example.org" autocomplete="off" spellcheck="false"></label>
+            <button type="submit">Add domain</button>
+        </form>
+        <p class="muted small">Use the domain of your From addresses (for example news.example.org for newsletter@news.example.org). You need access to its DNS.</p>
+        {% endif %}
+    </section>
+    {% elseif not may_admin %}
+    <section class="card g-col-4 2xl:g-col-1"><p class="muted">Client admins add sending domains.{% if may_operate %} You can check the DNS records of existing domains.{% endif %}</p></section>
+    {% endif %}
+
+    {% for d in domains|filter(d => d.stage != 'disabled') %}
+    {% set r = d.records %}
+    <section class="card g-col-4 domain-setup" id="d-{{ d.id }}" aria-labelledby="d-{{ d.id }}-h">
+        <div class="card-head"><h2 id="d-{{ d.id }}-h">{{ d.domain }}</h2><span class="st st-{{ stage_class[d.stage] }}">{{ stage_label[d.stage] }}</span></div>
+        <ol class="stepper stepper-row" aria-label="Progress of {{ d.domain }}">
+            {% for key, label in steps %}
+            <li class="{{ loop.index0 < step_at[d.stage] ? 'done' : '' }}{{ loop.index0 == step_at[d.stage] ? ' current' : '' }}"{% if loop.index0 == step_at[d.stage] %} aria-current="step"{% endif %}>{{ label }}</li>
+            {% endfor %}
+        </ol>
+
+        {% if d.stage == 'added' %}
+            <h3>Publish this TXT record at the domain's DNS provider</h3>
+            <div class="scroll"><table class="dense records">
+                <thead><tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+                <tbody><tr><td>TXT</td><td class="rec-name"><code class="token">{{ r.txt.name }}</code></td><td><code class="token">{{ r.txt.value }}</code></td></tr></tbody>
+            </table></div>
+            <p class="muted small">It proves that this client controls the domain. Some DNS providers add the domain to the name themselves: then enter only <code>{{ r.txt.name|split('.' ~ d.domain)|first }}</code>. A new record can take a few minutes to appear; then press Check DNS now. Once the domain is verified, its DKIM key is requested automatically.</p>
+        {% elseif d.stage == 'verified' %}
+            <p>{{ d.domain }} is verified. No DKIM key has been requested for it yet.{% if not may_admin %} A client admin requests it.{% endif %}</p>
+        {% elseif d.stage == 'key_requested' %}
+            <p>The DKIM key was requested {{ d.request_requested_at|ts }}. The host agent generates it inside the signing service, usually within a minute or two; the private key never leaves it. Reload this page to see the records to publish.</p>
+        {% elseif d.stage == 'key_failed' %}
+            <p class="warn">The DKIM key could not be generated ({{ d.request_finished_at|ts }}). Request it again; if that fails too, contact the administrator of this installation.</p>
+        {% elseif d.stage == 'dkim_disabled' %}
+            <p class="warn">DKIM is disabled for this domain by the operator, so it cannot send on a live installation. Contact the administrator of this installation.</p>
+        {% endif %}
+
+        {% if r.dkim and d.stage in ['pending_dns', 'activating', 'active'] %}
+            {% if d.stage == 'pending_dns' %}
+            <h3>Publish these records at the domain's DNS provider</h3>
+            <p class="muted small">catto-mail looks for the DKIM record every {{ constant('App\\Domain\\DkimSetup::RECHECK_MINUTES') }} minutes and activates the key as soon as it appears, or press Check DNS now.</p>
+            {% elseif d.stage == 'activating' %}
+            <p>The DKIM record is published. The host agent is activating the key; the domain is active within a minute or two.</p>
+            {% else %}
+            <p>DKIM signing is active with selector <code>{{ d.dkim_selector }}</code>. Keep these records published.</p>
+            {% endif %}
+            {% if d.stage == 'active' %}<details class="figures"><summary>DNS records of {{ d.domain }}</summary>{% endif %}
+            <div class="scroll"><table class="dense records">
+                <thead><tr><th scope="col">Purpose</th><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+                <tbody>
+                    <tr><td>DKIM signing key (required)</td><td>TXT</td><td class="rec-name"><code class="token">{{ r.dkim.name }}</code></td><td><code class="token">{{ r.dkim.value }}</code></td></tr>
+                    <tr><td>DMARC policy (recommended)</td><td>TXT</td><td class="rec-name"><code class="token">{{ r.dmarc.name }}</code></td><td><code class="token">{{ r.dmarc.value }}</code></td></tr>
+                </tbody>
+            </table></div>
+            <ul class="plain small records-notes">
+                <li><strong>DKIM:</strong> enter the value as one record. Most DNS providers split a long value into 255-character strings themselves; in a zone file it reads <code class="token">{{ r.dkim.zone }}</code></li>
+                <li><strong>DMARC:</strong> replace <code>dmarc-reports@{{ d.domain }}</code> with a mailbox you read. Start with <code>p=none</code>, and move to <code>p=quarantine</code> or <code>p=reject</code> once the reports show that your mail passes. If the domain already has a DMARC record, keep only one.</li>
+                <li><strong>SPF:</strong> nothing to add for catto-mail. Every message's envelope sender (Return-Path) is at {% if r.bounce_domain %}<code>{{ r.bounce_domain }}</code>{% else %}this installation's bounce domain{% endif %}, and receivers check SPF against that domain, whose record this installation publishes. DMARC passes through your DKIM signature (<code>d={{ d.domain }}</code>). Keep your domain's own SPF record for the other mail you send.</li>
+            </ul>
+            {% if d.stage == 'active' %}</details>{% endif %}
+        {% elseif d.stage in ['pending_dns', 'activating', 'active'] %}
+            {# A key the operator set up by hand: its public half is not recorded here. #}
+            <p>{% if d.stage == 'active' %}DKIM signing is active with selector <code>{{ d.dkim_selector }}</code>.{% else %}The DKIM key (selector <code>{{ d.dkim_selector }}</code>) was set up by the operator.{% endif %} The operator manages this key; ask the administrator of this installation for its DNS record.</p>
+        {% endif %}
+
+        {% set may_request = may_admin and may_add and d.stage in ['verified', 'key_failed'] %}
+        {% if (may_operate and d.stage not in ['key_requested', 'activating', 'dkim_disabled']) or may_request %}
+        <div class="form-actions">
+            {% if may_operate and d.stage not in ['key_requested', 'activating', 'dkim_disabled'] %}
+            <form method="post" action="{{ path('dashboard_client_domain_verify', {clientId: cid, domainId: d.id}) }}" class="inline">{{ ui.csrf() }}<button type="submit" class="{{ d.stage in ['added', 'pending_dns'] ? '' : 'secondary' }}">Check DNS now</button></form>
+            {% endif %}
+            {% if may_request %}
+            <form method="post" action="{{ path('dashboard_client_domain_dkim', {clientId: cid, domainId: d.id}) }}" class="inline">{{ ui.csrf() }}<button type="submit">{{ d.stage == 'key_failed' ? 'Request the DKIM key again' : 'Request a DKIM key' }}</button></form>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+    {% endfor %}
+</div>
 {% endblock %}

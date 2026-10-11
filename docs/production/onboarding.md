@@ -30,10 +30,15 @@ Before approval:
     (`smarthost:client:account <id> policy-accept <version> --reference …`).
   - A client that requires acceptance cannot be approved without it.
 - [ ] **Limits agreed and set** (section 3). Start low; raise as the reputation record grows.
-- [ ] **Sending domain.**
-  - The client adds its domain and publishes the TXT challenge.
-  - Once the domain is verified, you generate its DKIM key and the client publishes the DKIM,
-    SPF and DMARC records (runbook §6).
+- [ ] **Sending domain.** The client sets it up in its own workspace (Settings › Sending
+  domains, runbook §6a); no console work is needed.
+  - A client admin adds the domain and publishes the TXT challenge, then checks DNS. Its limit
+    (section 3) caps the number of domains.
+  - Once the domain is verified, the host agent generates its DKIM key. The page shows the DKIM
+    and DMARC records to publish, and why SPF needs no change.
+  - The key is activated as soon as the DKIM record is in DNS, and the domain shows *Active*.
+  - A domain another client has also verified is the exception: set up its key by hand (runbook
+    §6, then `smarthost:domain:dkim`).
 - [ ] **Unsubscribe handling understood.**
   - An ordinary unsubscribe is the client's own subscription state; the client stops sending to
     that address.

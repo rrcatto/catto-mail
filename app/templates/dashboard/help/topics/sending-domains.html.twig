@@ -1,11 +1,13 @@
 {% extends 'dashboard/help/_topic.html.twig' %}
 {% block content %}
-<p>A client may only send with a From address at a <strong>sending domain</strong> it has proven to control, and in production only once the domain also has an active DKIM key.</p>
+<p>A client may only send with a From address at a <strong>sending domain</strong> it has proven to control, and in production only once the domain also has an active DKIM key. A client admin sets a domain up in the client workspace, under Settings › Sending domains, without the operator. The page shows each domain's progress: added, TXT verified, DKIM pending in DNS, active.</p>
 <ol>
-<li>The domain is added (client dashboard or <code>smarthost:domain:add</code>); catto-mail shows a TXT record: <code>_smarthost-verification.&lt;domain&gt;</code> with a random token.</li>
-<li>The record is created at the domain's DNS; catto-mail checks it (<code>smarthost:domain:verify</code>, or the dashboard) and marks the domain verified.</li>
-<li>A DKIM key is generated, published and activated (System setup › DKIM).</li>
-<li>Recommended: a DMARC record at the domain.</li>
+<li><strong>Added.</strong> A client admin adds the domain, within the client's limit of sending domains (its own limit, never above <code>APP_CLIENT_SENDING_DOMAIN_LIMIT</code>), or an operator runs <code>smarthost:domain:add</code>. catto-mail shows a TXT record: <code>_smarthost-verification.&lt;domain&gt;</code> with a random token.</li>
+<li><strong>TXT verified.</strong> The record is created at the domain's DNS; <em>Check DNS now</em> (members and admins) or <code>smarthost:domain:verify</code> checks it and marks the domain verified. When the dashboard verifies a domain, it requests the domain's DKIM key from the host agent straight away.</li>
+<li><strong>DKIM pending in DNS.</strong> The host agent generates the key inside OpenDKIM with a new selector (<code>cm</code>, the year and month, and four random characters); the private key never leaves the OpenDKIM container. The page then shows the DKIM record to publish, a DMARC record to start with, and why SPF needs no change: the envelope sender of every message is at the bounce domain, whose SPF record the installation publishes.</li>
+<li><strong>Active.</strong> Every five minutes the host agent lets catto-mail look for the published DKIM records (each domain at most every ten minutes; <em>Check DNS now</em> looks at once). When the record matches the key, catto-mail asks the host agent to activate the selector. The agent compares DNS with the private key again, activates it (<code>smarthostctl prod dkim activate</code>: the signing table changes and OpenDKIM restarts), and the domain is recorded as active.</li>
 </ol>
+<p>Every step is audited, and the requests to the host agent appear under Mail flow › Delivery › Host requests. If generating a key fails, a client admin can request it again. A domain that was verified before the dashboard could request keys (or through the console) shows <em>Request a DKIM key</em> to client admins.</p>
+<p>The dashboard never sets up a key for a domain that another client of the installation has also verified, because one key signs a domain for everyone. The operator sets that one up (System setup › DKIM, then <code>smarthost:domain:dkim</code>). Suspended and closed clients add no domains and get no keys. Without a host agent (the development pod) a requested key stays requested.</p>
 <p>The domain can belong to the client organisation; its DNS records then have to be created by them.</p>
 {% endblock %}

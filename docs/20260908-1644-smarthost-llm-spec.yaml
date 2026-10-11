@@ -1177,7 +1177,30 @@ sending:
       - pending_dns
       - active
       - disabled
-    dkim_fields: the domain model carries the DKIM selector and DKIM configuration status
+    dkim_fields: >-
+      the domain model carries the DKIM selector and DKIM configuration status, and the public half
+      of a key the host agent generated for the client dashboard (dkim_public_key: the p= value of
+      the selector's DNS record; public DNS material)
+    client_self_service: >-
+      owner decision (2026-10-11): a client admin sets a sending domain up in the client dashboard
+      without operator console work. Adding a domain needs CLIENT_ADMIN and stays within the
+      client's max_sending_domains (never above APP_CLIENT_SENDING_DOMAIN_LIMIT); suspended and
+      closed clients add none. "Check DNS now" (CLIENT_OPERATE) runs the TXT verification; when the
+      dashboard verifies a domain it requests the DKIM key from the host agent at once (system
+      request dkim.generate naming the sending domain and a new selector cm<yyyymm><4 hex>). The
+      agent generates the key inside OpenDKIM (`prod dkim generate`; the private key never leaves the
+      OpenDKIM volume) and returns only the public half, which the application records with
+      dkim_status pending_dns when the request is finished. The page then shows the DKIM record, a
+      DMARC record to start with (p=none) and SPF guidance (nothing to add: the envelope sender is
+      SMARTHOST_BOUNCE_DOMAIN). When the published record equals the recorded key - on "Check DNS
+      now" or on the host agent's periodic `smarthost:system:agent domains` (every five minutes,
+      each domain at most every ten) - the application requests dkim.activate; the agent compares
+      DNS with the private key again and runs `prod dkim activate`, and the finish records
+      dkim_status active as `smarthost:domain:dkim ... active` does. Progress shown per domain:
+      added, TXT verified, DKIM pending in DNS, active. A result changes only the sending domain
+      the request names. No self-service key for a domain another client has also verified (one
+      key signs a domain for everyone); the operator sets it up. Every action is POST with CSRF,
+      permission-checked and audited. The console commands keep working.
     live_sending_rule: >-
       live sending rejects an unverified From/sending domain (and, in production, a domain
       without active DKIM) except in explicitly controlled local/test modes
@@ -1715,6 +1738,7 @@ schema:
         - last_checked_at
         - dkim_selector
         - dkim_status
+        - dkim_public_key
         - created_at
     api_keys:
       key_fields:
@@ -2531,7 +2555,11 @@ operator_self_service:
     (system_requests: diagnostics.run, delivery.pause/resume, delivery.live_enable/disable,
     backup.run, backup.restore_rehearsal, dkim.generate/activate, tls.renew) with the existing
     audited tooling. The web application never runs host commands. Protocol: the console command
-    smarthost:system:agent (claim, finish, report, diagnostics), JSON on stdin and stdout.
+    smarthost:system:agent (claim, finish, report, diagnostics, domains), JSON on stdin and stdout.
+    DKIM requests of the client dashboard name their sending domain; the agent returns only a
+    key's public half, the finish records the outcome for that domain in the same transaction, and
+    every five minutes `domains` lets the application request the activation of keys whose record
+    appeared in DNS (sending_domains.client_self_service). DKIM requests wait per domain.
   diagnostics:
     storage: system_checks (latest result per check), system_check_runs (history), system_state (agent reports)
     results: PASS, WARN, FAIL, SKIPPED, INFO, each with a human explanation, a fix and a help topic
@@ -2705,7 +2733,8 @@ production_operations:
       delivery: "heartbeat, state against the configuration, queue snapshot freshness"
     outputs: [text, json, dns checklist, nftables ruleset]
   dkim_key_management: >-
-    smarthost-dkim-key inside OpenDKIM (`prod dkim`): generate (never overwrites; not yet
+    smarthost-dkim-key inside OpenDKIM (`prod dkim`; the host agent runs the same for the client
+    dashboard's sending domains): generate (never overwrites; not yet
     signing), activate (SigningTable; OpenDKIM restarted), retire (never the active selector), dns
     (record from the private key), pubkey, list; multiple domains and selectors; planned rotation
     generate -> publish -> activate -> wait -> retire. Private keys never leave the OpenDKIM volume
@@ -2940,8 +2969,9 @@ user_interfaces:
     client_access: >-
       every client page is under /dashboard/c/{client id}; a client the user may not see (no
       membership, insufficient role, disabled user) is answered exactly like a missing one (404),
-      and every query carries the client id; reads need a viewer role, domain verification a
-      member role, lifting the client's own global opt-out an admin role plus the D-37 rule
+      and every query carries the client id; reads need a viewer role, domain verification and
+      the DKIM record check a member role, adding a sending domain and requesting its DKIM key
+      again an admin role, lifting the client's own global opt-out an admin role plus the D-37 rule
     client_pages:
       - overview (validation and sending counters from the per-job counters, recorded engagement of the last 30 days, sending domains, usage this month)
       - validation jobs (status, external reference and date filters) and job detail with paginated, filterable, sortable address results
@@ -2949,7 +2979,7 @@ user_interfaces:
       - send jobs (filters as for validation jobs) and job detail with transport outcomes, recorded engagement, clicks per link and the paginated message list
       - message event timeline (interpreted fields only; never tokens or source keys)
       - suppressions visible in full (client-scoped and own reported opt-outs) and this client's suppressed messages with only the broad reason of a global suppression, never its reporter, reference or ids
-      - sending domains (verification record, status, DKIM status, whether sending is permitted, DNS check action)
+      - sending domains (each domain's progress - added, TXT verified, DKIM pending in DNS, active - with the TXT, DKIM and DMARC records to publish and SPF guidance, whether sending is permitted, the DNS check action, adding a domain within the client limit and requesting the DKIM key again; sending_domains.client_self_service)
       - usage per month and individual usage records
     operator_pages:
       - system overview from durable database signals (work queues, worker leases, newest results, Postfix-log ingest cursor, messages per status, rates per client over 7 days, suppressions, unmatched DSNs, webhook outbox)

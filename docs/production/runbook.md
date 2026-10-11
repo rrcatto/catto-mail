@@ -153,10 +153,11 @@ Run `infra/bin/smarthostctl prod dns-checklist` for the exact records of this co
 | `<selector>._domainkey.send.example.com TXT` | from `prod dkim dns send.example.com` | the sending domain's DNS |
 | `_dmarc.send.example.com TXT` | `v=DMARC1; p=none; rua=mailto:dmarc@send.example.com` to start | the sending domain's DNS |
 
-Each client sending domain is also verified by Smarthost's TXT challenge
-(`smarthost:domain:add`, then `smarthost:domain:verify`). DMARC alignment comes from DKIM:
-`d=` is the sending domain. The return path is the bounce domain, so SPF aligns only within one
-organisational domain. The preflight validates and reports. It never rewrites DNS.
+Each client sending domain is also verified by Smarthost's TXT challenge. A client admin adds the
+domain and checks it in the client workspace (Settings › Sending domains, section 6a); the console
+equivalent is `smarthost:domain:add`, then `smarthost:domain:verify`. DMARC alignment comes from
+DKIM: `d=` is the sending domain. The return path is the bounce domain, so SPF aligns only within
+one organisational domain. The preflight validates and reports. It never rewrites DNS.
 
 ## 6. Production DKIM keys
 
@@ -180,6 +181,39 @@ prod dkim dns send.example.com                  # the active selector's record (
    selector is refused.
 
 The domain of `APP_MAIL_FROM` needs a key too; it signs the sign-in mail.
+
+## 6a. Client sending domains (client dashboard)
+
+Clients set up their own sending domains; no console work is needed. Under Settings › Sending
+domains in the client workspace:
+
+1. **Added.** A client admin adds the domain. The client's limit applies: its own
+   `max_sending_domains`, never above `APP_CLIENT_SENDING_DOMAIN_LIMIT`. Suspended and closed
+   clients cannot add domains.
+2. **TXT verified.** The client publishes `_smarthost-verification.<domain>` and presses *Check DNS
+   now*.
+3. **DKIM key requested.** The dashboard asks the host agent for a key straight away, as the host
+   request `dkim.generate`. The request names the sending domain and a new selector
+   `cm<yyyymm><4 hex>`.
+4. **DKIM pending in DNS.** The agent runs `prod dkim generate` and returns only the public half.
+   The application records `dkim_status = pending_dns` with the selector and the public key. The
+   page shows the DKIM record, a DMARC record to start with (`p=none`), and SPF guidance: nothing
+   to add, because the envelope sender is the bounce domain.
+5. **Active.** When the published record matches the key, the application queues `dkim.activate`.
+   This happens on *Check DNS now*, or when the agent calls `smarthost:system:agent domains`,
+   every five minutes and at most every ten minutes per domain. The agent compares DNS with the
+   private key again and runs `prod dkim activate` (OpenDKIM restarts). When it finishes the
+   request, the application records `dkim_status = active`, as `smarthost:domain:dkim … active`
+   records it.
+
+The requests appear under Mail flow › Delivery › Host requests, and every step is in the audit
+log. A failed generation shows *Request the DKIM key again* to the client admin. The dashboard
+refuses to set up a key for a domain another client has also verified, because one key signs a
+domain for everyone; set that one up by hand (section 6). Rotation and retirement stay operator
+tasks (section 6).
+
+Each activation restarts OpenDKIM. Mail submitted during the restart is refused with a temporary
+error and retried by the delivery daemon.
 
 ## 7. Production preflight
 
@@ -506,8 +540,9 @@ means the timer has not run for an hour: `prod machine systemctl list-timers`.
 - **First sign-in / recovery:** `prod admin-link` prints a single-use ADMIN link (15 minutes).
 - **Host agent:** `<instance>-host-agent.service` (`prod agent run`). It records the host-side
   checks every minute (the full preflight hourly) and carries out dashboard requests; see them
-  under Mail flow › Delivery › Host requests. `prod agent once --requested` runs everything now;
-  `prod agent facts` prints what it reports. Its log: `prod logs agent`.
+  under Mail flow › Delivery › Host requests. Every five minutes it also lets the application
+  look for the DKIM records of client sending domains (section 6a). `prod agent once --requested`
+  runs everything now; `prod agent facts` prints what it reports. Its log: `prod logs agent`.
 - **Diagnostics:** System › Diagnostics (and its history); System › System setup for the guided checks.
 - **Logs:** `prod logs app|webhook|validator|delivery|postfix|opendkim|nginx|postgres|agent [lines|-f]`.
 - **Address batches and re-permission:** Clients › Address batches; Help › Uploading lists and
@@ -518,7 +553,8 @@ means the timer has not run for an hour: `prod machine systemctl list-timers`.
 - [ ] The VPS (section 1), outbound port 25 unblocked, and the PTR of the sending IP.
 - [ ] DNS records of section 5 for the public hostname, the mail hostname and the bounce domain.
 - [ ] TLS certificates and their automated renewal.
-- [ ] Production DKIM keys and DNS for each sending domain and for the `APP_MAIL_FROM` domain.
+- [ ] Production DKIM key and DNS for the `APP_MAIL_FROM` domain (section 6); clients set up
+      their own sending domains (section 6a).
 - [ ] DMARC records with a reporting mailbox.
 - [ ] `net.ipv4.ip_unprivileged_port_start=25` persisted on the VPS (section 1), and
       `prod preflight --section host` without FAIL.

@@ -101,6 +101,7 @@ erDiagram
         timestamptz verified_at
         text dkim_selector
         text dkim_status
+        text dkim_public_key
     }
     api_keys {
         uuid id PK
@@ -356,7 +357,7 @@ Other indexes:
 | `suppressions` | D-18 normalisation (local part never case-folded). A `recipient_global_opt_out` row, and only it, carries `source_client_id` (and may carry `external_reference`), and is global and address-scoped; its requests and their idempotency keys are in `global_suppression_requests`. `hard_bounce`, `complaint` and `recipient_global_opt_out` never expire; `repeated_soft_bounce` is the temporary reason. `source_event_id` requires `source_message_id`. |
 | `global_suppression_requests` | One row per (`client_id`, `operation`, `idempotency_key`); `operation` from the vocabulary (`create_global_opt_out`); `response_status` is 201 (created) or 200 (already active). |
 | `validation_addresses` | A suggestion has both a reason code and a confidence. A claimed row has a lease. |
-| `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. |
+| `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. `dkim_public_key`, when set, is base64 (at most 2000 characters): the public half of the key the host agent generated for the client dashboard, never a private key. |
 | `clients` | `closed` requires `closed_at`; `origin` is `operator` or `public_application`. |
 | `api_keys` | `expires_at`, when set, is after `created_at`. |
 | `client_limits` | Every limit is non-negative (API rate ≥ 1; recipients per send job 1–10000). |

@@ -50,7 +50,7 @@ nginx (through the ingress socket), the validator, the delivery daemon.
 |---|---|---|
 | `smarthost.service` | Starts the containers at boot (linked into `default.target` of the service user) and stops them at shutdown; never removes them. | `cattomail` (systemd user) |
 | `smarthost-ingress.socket` / `.service` | Bind `0.0.0.0:443`, `0.0.0.0:25` and `0.0.0.0:80` and hand them to nginx, so client addresses are preserved. | `cattomail` |
-| `smarthost-host-agent.service` | The **host agent**: reports host-side checks (Ubuntu, Podman, lingering, units, disk, memory, clock, containers, backups, boot recovery, the production preflight) and carries out dashboard requests. | `cattomail` |
+| `smarthost-host-agent.service` | The **host agent**: reports host-side checks (Ubuntu, Podman, lingering, units, disk, memory, clock, containers, backups, boot recovery, the production preflight) and carries out dashboard requests, among them the DKIM keys of client sending domains (generated inside OpenDKIM, activated when DNS shows them). | `cattomail` |
 | `smarthost-backup.timer` | Daily backup (`BACKUP_SCHEDULE`), off-host copy. | `cattomail` |
 | `smarthost-tls-renew.timer` | Daily Let's Encrypt renewal check (DNS-01, `lego`). | `cattomail` |
 | `smarthost-reputation-evaluate.timer` | Client reputation metrics and alerts, every 15 minutes. | `cattomail` |

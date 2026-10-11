@@ -19,7 +19,9 @@ use Symfony\Component\Uid\Uuid;
  * The web application never runs host commands. An administrator's request is checked,
  * audited and recorded here; the host agent (`smarthostctl prod agent`, a user service on
  * the host) claims it through the console, performs it with the production tooling and
- * records the outcome. Parameters are validated here and again by the agent.
+ * records the outcome. Parameters are validated here and again by the agent. DKIM requests
+ * of the client dashboard name their sending domain (App\Domain\DkimSetup applies the
+ * outcome when the agent finishes them).
  */
 final class SystemRequests
 {
@@ -30,9 +32,16 @@ final class SystemRequests
     {
     }
 
-    /** @param array<string, string> $params */
-    public function request(SystemRequestAction $action, array $params, User $user, ?string $note = null): string
+    /**
+     * $user is the administrator or client admin who asked; null for a request the application
+     * makes by itself (the DKIM activation of a client domain whose record appeared in DNS),
+     * audited as $system.
+     *
+     * @param array<string, string> $params
+     */
+    public function request(SystemRequestAction $action, array $params, ?User $user, ?string $note = null, ?AuditActor $system = null): string
     {
+        $actor = null !== $user ? AuditActor::user($user) : ($system ?? throw new \LogicException('A request without a user names its system actor.'));
         $params = self::validParams($action, $params);
         $note = null === $note ? null : trim($note);
         if (\in_array($action, [SystemRequestAction::DeliveryLiveEnable, SystemRequestAction::DeliveryLiveDisable, SystemRequestAction::DeliveryResume], true)
@@ -52,18 +61,23 @@ final class SystemRequests
             if (false !== $last && $last['action'] === $action->value) {
                 return (string) $last['id'];
             }
-        } elseif (false !== $this->connection->fetchOne(
-            "SELECT 1 FROM system_requests WHERE action = ? AND status IN ('pending', 'running')", [$action->value])) {
-            throw new DomainRuleViolation('The same request is already waiting for the host agent.');
+        } elseif (self::isDkim($action) ? false !== $this->connection->fetchOne(
+            "SELECT 1 FROM system_requests WHERE action IN ('dkim.generate', 'dkim.activate') AND status IN ('pending', 'running') AND params_json->>'domain' = ?",
+            [$params['domain']])
+            : false !== $this->connection->fetchOne(
+                "SELECT 1 FROM system_requests WHERE action = ? AND status IN ('pending', 'running')", [$action->value])) {
+            // DKIM requests wait per domain: one client's key never holds up another's.
+            throw new DomainRuleViolation(self::isDkim($action) ? 'A DKIM request for '.$params['domain'].' is already waiting for the host agent.'
+                : 'The same request is already waiting for the host agent.');
         }
         $id = Uuid::v7()->toRfc4122();
-        $this->connection->transactional(function () use ($id, $action, $params, $user, $note): void {
+        $this->connection->transactional(function () use ($id, $action, $params, $user, $actor, $note): void {
             $this->connection->insert('system_requests', [
                 'id' => $id, 'action' => $action->value, 'params_json' => json_encode($params, \JSON_THROW_ON_ERROR),
-                'requested_by_user_id' => $user->getId()->toRfc4122(), 'note' => $note,
+                'requested_by_user_id' => $user?->getId()->toRfc4122(), 'note' => $note,
                 'requested_at' => Clock::now()->format('Y-m-d H:i:s.uP'),
             ]);
-            $this->audit->record(AuditActor::user($user), 'system.request.'.$action->value, 'system_request', $id,
+            $this->audit->record($actor, 'system.request.'.$action->value, 'system_request', $id,
                 ['params' => $params, 'note' => $note]);
         });
 
@@ -109,17 +123,24 @@ final class SystemRequests
         });
     }
 
-    /** @param array<string, mixed> $result */
-    public function finish(string $id, bool $succeeded, string $summary, array $result = []): void
+    /**
+     * @param array<string, mixed> $result
+     *
+     * @return array{action: string, params: array<string, string>} the finished request
+     */
+    public function finish(string $id, bool $succeeded, string $summary, array $result = []): array
     {
-        $updated = $this->connection->executeStatement(<<<'SQL'
+        $row = $this->connection->fetchAssociative(<<<'SQL'
             UPDATE system_requests SET status = ?, finished_at = now(), result_summary = ?, result_json = ?
              WHERE id = ? AND status = 'running'
+            RETURNING action, params_json
             SQL, [$succeeded ? 'succeeded' : 'failed', mb_substr(Redactor::text($summary), 0, 2000),
                 json_encode(Redactor::data($result), \JSON_THROW_ON_ERROR), $id]);
-        if (1 !== $updated) {
+        if (false === $row) {
             throw new DomainRuleViolation("Request $id is not running.");
         }
+
+        return ['action' => (string) $row['action'], 'params' => json_decode((string) $row['params_json'], true) ?: []];
     }
 
     /** Requests the agent claimed but never finished (agent crash): failed after $minutes. */
@@ -159,6 +180,11 @@ final class SystemRequests
         return (int) $this->connection->fetchOne("SELECT count(*) FROM system_requests WHERE status IN ('pending', 'running')");
     }
 
+    public static function isDkim(SystemRequestAction $action): bool
+    {
+        return \in_array($action, [SystemRequestAction::DkimGenerate, SystemRequestAction::DkimActivate], true);
+    }
+
     /**
      * @param array<string, string> $params
      *
@@ -173,8 +199,13 @@ final class SystemRequests
                 if (1 !== preg_match(self::DOMAIN, $domain) || 1 !== preg_match(self::SELECTOR, $selector)) {
                     throw new DomainRuleViolation('Give a sending domain and a DKIM selector (letters, digits and hyphens, e.g. s2026a).');
                 }
+                // A request of the client dashboard names the sending domain whose state the result sets.
+                $sendingDomain = strtolower(trim((string) ($params['sending_domain_id'] ?? '')));
+                if ('' !== $sendingDomain && 1 !== preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $sendingDomain)) {
+                    throw new DomainRuleViolation('Unknown sending domain.');
+                }
 
-                return ['domain' => $domain, 'selector' => $selector];
+                return ['domain' => $domain, 'selector' => $selector] + ('' === $sendingDomain ? [] : ['sending_domain_id' => $sendingDomain]);
             })(),
             SystemRequestAction::DiagnosticsRun => isset($params['section']) && '' !== $params['section']
                 ? (1 === preg_match('/^[a-z]{2,20}$/', $params['section']) ? ['section' => $params['section']]

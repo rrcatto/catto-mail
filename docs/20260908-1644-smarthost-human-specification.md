@@ -671,6 +671,32 @@ A client may own several sending domains. To verify a domain:
 
 The token is published in DNS, so it is not an authentication secret and is not hashed.
 
+**Set up in the client dashboard** (owner decision, 11 October 2026). A client admin sets a sending
+domain up without operator console work, under Settings › Sending domains:
+
+- **Added.** The client admin adds the domain. The client's limit applies (`max_sending_domains`,
+  never above the installation ceiling); suspended and closed clients cannot add domains. The page
+  shows the TXT challenge.
+- **TXT verified.** *Check DNS now*, available to members and admins, runs the verification above.
+  When the dashboard verifies a domain, it requests the domain's DKIM key from the host agent at
+  once.
+- **DKIM pending in DNS.** The host agent generates the key inside OpenDKIM with a new selector and
+  returns only the public half; the private key never leaves the OpenDKIM container. The page
+  shows:
+  - the DKIM record;
+  - a DMARC record to start with (`p=none`);
+  - SPF guidance: nothing to add, because the envelope sender of every message is at the bounce
+    domain.
+- **Active.** When the published DKIM record equals the key, the host agent activates the
+  selector. It first compares DNS with the private key again. The check happens on *Check DNS
+  now*, or by itself: the agent looks every five minutes, each domain at most every ten minutes.
+  The domain is then recorded as active.
+
+Every request to the host agent names the sending domain, so its result changes only that domain.
+A domain that another client has also verified gets no key from the dashboard (one key signs a
+domain for everyone); the operator sets it up. Every action is a POST with CSRF protection,
+permission-checked and audited. The console commands keep working.
+
 Outbound mail is DKIM-signed by **OpenDKIM**, an internal container that Postfix calls through the Milter protocol on the private network:
 
 - DKIM private keys are available to OpenDKIM only. Go never holds DKIM keys or signs mail.
@@ -1647,7 +1673,9 @@ lift the client's own recipient global opt-outs (D-37 still applies). The pages 
   and the paginated message list, and the per-message event timeline;
 - suppressions: those of this client and the opt-outs it reported, plus this client's messages that a
   suppression stopped, with only the broad reason of a global suppression (never who reported it);
-- sending domains with the verification record, status, DKIM status and a DNS check;
+- sending domains with each domain's progress (added, TXT verified, DKIM pending in DNS, active),
+  the TXT, DKIM and DMARC records to publish and the SPF guidance, a DNS check, and, for client
+  admins, adding a domain and requesting its DKIM key again (section 8.9);
 - usage per month and the individual usage records.
 
 Lists use **keyset** (cursor) pagination with whitelisted sort and filter names. Browser upload of

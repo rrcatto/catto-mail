@@ -11,7 +11,8 @@ never host-published). There is no separate PHP HTTP server.
 - API-key authentication (Bearer, stored only as SHA-256), tenant isolation, idempotency and rate
   limiting; RFC 9457 problem responses;
 - Doctrine entities and the migrations, which are the only authority for schema objects;
-- sending-domain registration and DNS TXT verification, DKIM selector/status records;
+- sending-domain registration and DNS TXT verification, DKIM selector/status records (since
+  2026-10-11 also set up by client admins in the dashboard, see below);
 - the dashboard user foundation (users and client memberships);
 - the webhook endpoint/secret model and the transactional outbox (HTTP delivery since Phase 7);
 - the audit log and the administrative console commands (`smarthost:*`).
@@ -140,6 +141,17 @@ value (`SettingOverrides`, table `setting_overrides`, audited with a reason) and
 `SYSTEM.SETTINGS.MANAGE`; applying is the host request `settings.apply`. Console:
 `smarthost:settings list|set|reset`. Migration `Version20261012000100`.
 
+**Sending domains in the client dashboard (owner decision, 2026-10-11):** Settings › Sending
+domains (`ClientDomainController`) shows each domain's progress (added, TXT verified, DKIM pending
+in DNS, active) and the records to publish. A client admin adds domains within the client's limit
+(`SendingDomainService::register`, `ClientLimitPolicy`). *Check DNS now* verifies the TXT
+challenge, and a newly verified domain's DKIM key is requested from the host agent at once.
+`App\Domain\DkimSetup` makes the `dkim.generate` and `dkim.activate` host requests (they name the
+sending domain), checks the published DKIM record with the TXT resolver, and records the agent's
+results when it finishes a request. The application never sees a private key: it stores only the
+public half (`sending_domains.dkim_public_key`). The agent's periodic `smarthost:system:agent
+domains` activates keys whose record appeared in DNS. Migration `Version20261013000100`.
+
 **Later phases:** retention commands; a public registration workflow (owner decision).
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
@@ -151,5 +163,5 @@ Must not:
 - probe mailboxes;
 - send tracked or bulk mail (its only mail is the dashboard sign-in link, submitted to Postfix);
 - render templates or merge data;
-- hold or generate DKIM keys;
+- hold or generate DKIM private keys (it asks the host agent and keeps only a key's public half);
 - call Python or Go over RPC.

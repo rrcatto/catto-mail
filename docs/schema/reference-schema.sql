@@ -151,6 +151,10 @@ CREATE TABLE sending_domains (
         CHECK (dkim_status IN ('not_configured', 'pending_dns', 'active', 'disabled')),
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
+    -- The public half of the domain's DKIM key (the p= value of its DNS record), when the host
+    -- agent generated it for the client dashboard; public DNS material, never the private key.
+    dkim_public_key     text        NULL
+        CHECK (dkim_public_key IS NULL OR (dkim_public_key ~ '^[A-Za-z0-9+/]+={0,2}$' AND length(dkim_public_key) <= 2000)),
     CONSTRAINT sending_domains_verified_has_time CHECK (status <> 'verified' OR verified_at IS NOT NULL),
     CONSTRAINT sending_domains_dkim_has_selector CHECK (dkim_status = 'not_configured' OR dkim_selector IS NOT NULL)
 );

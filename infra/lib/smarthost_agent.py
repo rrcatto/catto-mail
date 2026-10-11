@@ -12,7 +12,10 @@ between the web application and the host:
   * it carries out the requests an administrator made in the dashboard (system_requests):
     run diagnostics, hold or release the Postfix queue, live enable/disable, backup, restore
     rehearsal, DKIM key generation and activation, certificate renewal — each with the
-    existing, audited production tooling (smarthostctl prod ...).
+    existing, audited production tooling (smarthostctl prod ...);
+  * every few minutes it lets the application look again at the sending domains of the client
+    dashboard that wait for their DKIM record (`smarthost:system:agent domains`); a published
+    record becomes a dkim.activate request, carried out on the next round.
 
 The web application never runs host commands; it only records requests. The agent talks
 to the application through `podman exec ... php bin/console smarthost:system:agent` (JSON
@@ -55,6 +58,7 @@ CONFIG_KEYS = ("PROXY_SERVER_NAME", "SMARTHOST_PUBLIC_BASE_URL", "APP_ADMIN_EMAI
 HOST_INTERVAL = 60          # host facts and host checks
 PREFLIGHT_INTERVAL = 3600   # the full preflight (DNS, TLS, Postfix RCPT test, ingress proof)
 APP_INTERVAL = 900          # the application's own checks
+DOMAIN_INTERVAL = 300       # sending domains waiting for their DKIM record (client dashboard)
 SECRET_KEY = re.compile(r"PASSWORD|SECRET|_KEY|KEYS|TOKEN|PASSPHRASE|DSN", re.I)
 
 
@@ -90,6 +94,12 @@ def preflight_checks(results: list[Check]) -> list[dict[str, Any]]:
     return out
 
 
+def dkim_record(text: str) -> dict[str, str] | None:
+    """The name and value lines of `smarthost-dkim-key dns` output."""
+    fields = dict(ln.split(":", 1) for ln in text.splitlines() if ln.startswith(("name:", "value:")))
+    return {"name": fields.get("name", "").strip(), "value": fields.get("value", "").strip()} if fields else None
+
+
 def check(key: str, component: str, title: str, result: str, summary: str) -> dict[str, Any]:
     return {"key": key, "component": component, "title": title, "result": result, "summary": summary}
 
@@ -103,7 +113,7 @@ class Agent:
         self.now = now or (lambda: dt.datetime.now(self.zone))
         self.i = values["SMARTHOST_INSTANCE"]
         self.resolver = resolver or Resolver()
-        self.next_host = self.next_preflight = self.next_app = 0.0
+        self.next_host = self.next_preflight = self.next_app = self.next_domains = 0.0
 
     # ------------------------------------------------------------- plumbing
     def console(self, *args: str, payload: Any = None, timeout: float = 600) -> tuple[int, str]:
@@ -247,10 +257,8 @@ class Agent:
                                  "key_present": parts[3] == "present",
                                  "bits": parts[4] if len(parts) > 4 and parts[4] != "-" else None}
             rc2, rec = self.host.exec("opendkim", "smarthost-dkim-key", "dns", parts[0], parts[1])
-            if rc2 == 0:
-                fields = dict(ln2.split(":", 1) for ln2 in rec.splitlines() if ln2.startswith(("name:", "value:")))
-                if fields:
-                    k["record"] = {"name": fields.get("name", "").strip(), "value": fields.get("value", "").strip()}
+            if rc2 == 0 and (record := dkim_record(rec)):
+                k["record"] = record
             keys.append(k)
         return keys
 
@@ -477,7 +485,15 @@ class Agent:
             if action == "dkim.generate":
                 rc, out = self.prod("dkim", "generate", domain, selector)
                 rc2, rec = self.host.exec("opendkim", "smarthost-dkim-key", "dns", domain, selector)
-                return rc == 0, (out.strip()[-600:] + ("\n" + rec.strip() if rc2 == 0 else "")).strip(), {}
+                result: dict[str, Any] = {}
+                if rc == 0:
+                    # Only public material: the client dashboard shows the record and compares DNS with it.
+                    rc3, key = self.host.exec("opendkim", "smarthost-dkim-key", "pubkey", domain, selector)
+                    if rc3 == 0 and re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", key.strip()):
+                        result["public_key"] = key.strip()
+                    if rc2 == 0 and (record := dkim_record(rec)):
+                        result["record"] = record
+                return rc == 0, (out.strip()[-600:] + ("\n" + rec.strip() if rc2 == 0 else "")).strip(), result
             rc, key = self.host.exec("opendkim", "smarthost-dkim-key", "pubkey", domain, selector)
             if rc != 0:
                 return False, key.strip()[:300], {}
@@ -490,6 +506,10 @@ class Agent:
             rc, out = self.prod("dkim", "activate", domain, selector)
             if rc != 0:
                 return False, out.strip()[-600:], {}
+            if params.get("sending_domain_id"):
+                # A request of the client dashboard: the application records the outcome for that
+                # sending domain when this request is finished (DkimSetup::requestFinished).
+                return True, f"{domain} now signs with selector {selector}; recorded for the sending domain when this request is finished", {}
             clients = self.host.sql(f"SELECT client_id FROM sending_domains WHERE domain = '{domain}' AND status = 'verified'")
             recorded = ""
             if len(clients) == 1:
@@ -536,6 +556,9 @@ class Agent:
         if now >= self.next_app:
             self.console("diagnostics")
             self.next_app = now + APP_INTERVAL
+        if now >= self.next_domains:
+            self.console("domains")
+            self.next_domains = now + DOMAIN_INTERVAL
 
     def run(self, poll: float) -> None:
         print(f"host-agent: instance {self.i}, polling every {poll} s", flush=True)
@@ -570,6 +593,7 @@ def main(argv: list[str]) -> int:
         agent.process_requests()
         n = agent.collect(requested=a.requested, preflight=not a.no_preflight, sections=(a.section,) if a.section else None)
         agent.console("diagnostics", *(["--requested"] if a.requested else []))
+        agent.console("domains")
         print(f"host-agent: {n} host checks recorded")
         return 0
     agent.run(a.poll)

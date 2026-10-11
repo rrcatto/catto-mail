@@ -7,6 +7,8 @@
 <li>Each sending domain has one active <strong>selector</strong> (a key name, such as <code>s2026a</code>). A new key does not sign until you activate it.</li>
 <li>The sign-in mail sender's domain needs a key as well.</li>
 </ul>
+<h2>Client sending domains</h2>
+<p>A client admin sets up the DKIM key of the client's own domains in the client workspace (Settings › Sending domains): once a domain is verified, the host agent generates its key, the page shows the record to publish, and the key is activated as soon as DNS shows it. See <a href="{{ path('dashboard_operator_help_topic', {topic: 'sending-domains'}) }}">Sending domains</a>. The procedure below is for the sign-in mail sender's domain and for domains the operator manages by hand.</p>
 <h2>Procedure</h2>
 <ol>
 <li>System setup › DKIM › Generate (domain and a new selector) — or <code>smarthostctl prod dkim generate news.example.org s2026a</code>.</li>

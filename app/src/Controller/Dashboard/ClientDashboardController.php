@@ -12,13 +12,10 @@ use App\Dashboard\Listing;
 use App\Dashboard\OverviewPeriod;
 use App\Dashboard\TrendCharts;
 use App\Domain\DomainRuleViolation;
-use App\Domain\SendingDomainService;
 use App\Entity\Client;
-use App\Entity\SendingDomain;
 use App\Security\ClientVoter;
 use App\Suppression\GlobalSuppressionService;
 use App\Util\Clock;
-use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -26,15 +23,14 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Uid\Uuid;
 
 /**
  * Client dashboard (Phase 6, spec user_interfaces.client_dashboard). Every route
  * names the client; ClientAccess answers 404 for a client the user may not see,
  * and every query carries that client's id, so an id of another client in any
- * URL is "not found". Reads need CLIENT_VIEW; the two actions reuse the existing
- * application services (domain verification: CLIENT_OPERATE; lifting the
- * client's own global opt-out: CLIENT_ADMIN plus the Phase 5 rules).
+ * URL is "not found". Reads need CLIENT_VIEW; lifting the client's own global
+ * opt-out reuses the existing service (CLIENT_ADMIN plus the Phase 5 rules).
+ * Sending domains: ClientDomainController.
  */
 #[Route('/dashboard/c/{clientId}', requirements: ['clientId' => '[0-9a-fA-F-]{36}'])]
 final class ClientDashboardController extends AbstractController
@@ -186,37 +182,6 @@ final class ClientDashboardController extends AbstractController
         }
 
         return $this->redirectToRoute('dashboard_client_suppressions', ['clientId' => $clientId]);
-    }
-
-    #[Route('/sending-domains', name: 'dashboard_client_domains', methods: ['GET'])]
-    public function sendingDomains(string $clientId): Response
-    {
-        $client = $this->access->client($clientId);
-
-        return $this->page('client/domains.html.twig', $client, 'domains', [
-            'domains' => $this->read->sendingDomains($clientId), 'may_operate' => $this->access->may(ClientVoter::OPERATE, $client)]);
-    }
-
-    /** Runs the existing DNS TXT verification (SendingDomainService::verify, audited). */
-    #[Route('/sending-domains/{domainId}/verify', name: 'dashboard_client_domain_verify', methods: ['POST'])]
-    public function verifyDomain(string $clientId, string $domainId, Request $request, SendingDomainService $domains, EntityManagerInterface $em): RedirectResponse
-    {
-        $client = $this->access->client($clientId, ClientVoter::OPERATE);
-        $this->assertCsrf($request);
-        $domain = ClientReadModel::isUuid($domainId)
-            ? $em->getRepository(SendingDomain::class)->findOneBy(['id' => Uuid::fromString($domainId), 'client' => $client]) : null;
-        if (null === $domain) {
-            throw new NotFoundHttpException('Not found.');
-        }
-        try {
-            $ok = $domains->verify($domain, AuditActor::user($this->access->user()));
-            $this->addFlash($ok ? 'success' : 'error', $ok ? \sprintf('%s is verified.', $domain->getDomain())
-                : \sprintf('%s could not be verified: %s', $domain->getDomain(), $domain->getLastCheckError() ?? 'the TXT record was not found.'));
-        } catch (DomainRuleViolation $e) {
-            $this->addFlash('error', $e->getMessage());
-        }
-
-        return $this->redirectToRoute('dashboard_client_domains', ['clientId' => $clientId]);
     }
 
     #[Route('/usage', name: 'dashboard_client_usage', methods: ['GET'])]

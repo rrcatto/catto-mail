@@ -29,6 +29,11 @@ class AgentHost(FakeHost):
         self.inputs: list[dict] = []
         self.claim_answer: list[dict] = []
         self.prod_rc = 0
+        self.execs: list[tuple[str, ...]] = []
+
+    def exec(self, service: str, *cmd: str, user: str | None = None) -> tuple[int, str]:
+        self.execs.append((service, *cmd))
+        return super().exec(service, *cmd, user=user)
 
     def run(self, *cmd: str, input_: bytes | None = None, timeout: float = 60) -> tuple[int, str]:
         self.calls.append(cmd)
@@ -197,6 +202,48 @@ class RequestsTest(unittest.TestCase):
         self.assertIn((ag.PROD, "dkim", "activate", "news.example.org", "s1"), host.calls)
         bad = self.agent(host).handle({"action": "dkim.generate", "params": {"domain": "x;rm", "selector": "s1"}})
         self.assertFalse(bad[0])
+
+    def test_dkim_generation_returns_only_the_public_half(self) -> None:
+        dns = "name:  s1._domainkey.news.example.org\ntype:  TXT\nvalue: v=DKIM1; k=rsa; p=MIIBkey+/=\nzone:  s1._domainkey.news.example.org. IN TXT ( ... )\n"
+        host = AgentHost(self.values, exec_={("opendkim", "smarthost-dkim-key", "pubkey"): (0, "MIIBkey+/=\n"),
+                                             ("opendkim", "smarthost-dkim-key", "dns"): (0, dns)})
+        req = {"action": "dkim.generate", "params": {"domain": "news.example.org", "selector": "s1",
+                                                     "sending_domain_id": "01920000-0000-7000-8000-000000000001"}}
+        ok, summary, result = self.agent(host).handle(req)
+        self.assertTrue(ok, summary)
+        self.assertIn((ag.PROD, "dkim", "generate", "news.example.org", "s1"), host.calls)
+        self.assertEqual({"public_key": "MIIBkey+/=", "record": {"name": "s1._domainkey.news.example.org", "value": "v=DKIM1; k=rsa; p=MIIBkey+/="}}, result)
+        self.assertNotIn("PRIVATE", json.dumps(result) + summary)
+        host.prod_rc = 1   # the key already exists, or OpenDKIM is down
+        ok, _, result = self.agent(host).handle(req)
+        self.assertFalse(ok)
+        self.assertEqual({}, result)
+
+    def test_dashboard_activation_is_recorded_by_the_application(self) -> None:
+        host = AgentHost(self.values, exec_={("opendkim", "smarthost-dkim-key", "pubkey"): (0, "MIIBkey\n")},
+                         sql={"FROM sending_domains": [["11111111-1111-1111-1111-111111111111"]]})
+        zone = {("s1._domainkey.news.example.org", "TXT"): ["v=DKIM1; k=rsa; p=MIIBkey"]}
+        req = {"action": "dkim.activate", "params": {"domain": "news.example.org", "selector": "s1",
+                                                     "sending_domain_id": "01920000-0000-7000-8000-000000000001"}}
+        ok, why, _ = self.agent(host, zone).handle(req)
+        self.assertTrue(ok, why)
+        self.assertIn((ag.PROD, "dkim", "activate", "news.example.org", "s1"), host.calls)
+        self.assertIn("recorded for the sending domain when this request is finished", why)
+        self.assertFalse([e for e in host.execs if e[0] == "symfony-app"], "the finish records it, not smarthost:domain:dkim")
+        ok, why, _ = self.agent(host).handle(req)   # DNS without the record: never activated
+        self.assertFalse(ok)
+
+    def test_tick_asks_the_application_about_waiting_domains(self) -> None:
+        host = AgentHost(self.values)
+        agent = self.agent(host)
+        agent.collect = lambda **kw: 0   # type: ignore[method-assign]
+        agent.pending = lambda: 0        # type: ignore[method-assign]
+        agent.tick()
+        domains = [c for c in host.calls if "smarthost:system:agent" in c and c[-1] == "domains"]
+        self.assertEqual(1, len(domains))
+        agent.tick()
+        self.assertEqual(1, len([c for c in host.calls if "smarthost:system:agent" in c and c[-1] == "domains"]),
+                         f"again only after {ag.DOMAIN_INTERVAL} s")
 
     def test_boot_report_once_per_boot(self) -> None:
         host = AgentHost(self.values)
