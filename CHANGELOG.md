@@ -4,7 +4,17 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.11.
 
-## [Unreleased]
+## [0.2.4] - 2026-10-11
+
+A public front page, plain HTTP that redirects to HTTPS, the Bootstrap 6 four-column dashboard, the
+version and the administrator's address on every page, and sending domains that clients set up
+themselves in the dashboard (DKIM keys through the host agent). A client's unfinished domain no
+longer holds up the installation's checks, and DKIM activation reloads OpenDKIM instead of
+restarting it. One new migration (`sending_domains.dkim_public_key`).
+
+Upgrading from 0.2.3: `git checkout v0.2.4`, `prod check`, `prod upgrade 0.2.4`; then, if you
+applied the firewall rules, generate and apply them again (port 80), and allow inbound TCP 80 at
+the provider. From 0.2.2 or earlier, first follow the 0.2.3 steps (time zone, `prod env-migrate`).
 
 ### Added
 - Sending domains are set up in the client dashboard, without operator console work (owner
