@@ -47,6 +47,27 @@ the *specification* version, which is 2.11.
   application's stylesheet, which keeps the look because Bootstrap's rules sit in cascade layers.
 
 ### Changed
+- A client's unfinished sending domain no longer holds up the installation (owner decision).
+  - The production preflight reports a client's domain without an active DKIM key, or whose DKIM
+    record or DMARC record is missing or different, as a WARN naming the client. It never blocks
+    live activation or upgrades (which run the activation preflight).
+  - The installation's own domain, that of `APP_MAIL_FROM`, still needs an active, published key.
+    Without one it is now a FAIL; before, it was a warning outside activation.
+  - OpenDKIM disagreeing with the database (selector, key file or signing selector) stays a
+    FAIL.
+  - Such a domain still cannot send in production. This is unchanged: the API refuses to submit
+    its jobs (`422 submit-rejected`, "The sending domain has no active DKIM configuration"), and
+    the delivery daemon refuses them again at claim time (now covered by a Go unit test).
+  - The integration guide now describes the client dashboard's DKIM set-up.
+- `prod dkim activate` reloads OpenDKIM instead of restarting it, so Postfix no longer refuses
+  mail during an activation. OpenDKIM 2.11 re-reads its KeyTable and SigningTable after `SIGUSR1`,
+  when the next milter session starts.
+  - After the signal, the activation makes that session itself
+    (`smarthost_preflight.py --dkim-probe`, request by request like Postfix). It applies the
+    reload and proves that the new key signs.
+  - OpenDKIM is restarted only when the probe cannot confirm the new key, for example when it
+    rejects the reloaded configuration.
+  - `prod dkim retire` still restarts.
 - Production answers plain HTTP (owner decision): the ingress socket also binds port 80
   (`PROXY_HTTP_BIND`, built in as `0.0.0.0:80`, so an existing `infra/.env` needs no change), and
   nginx redirects every request there to the same path on `https://PROXY_SERVER_NAME`; nothing is

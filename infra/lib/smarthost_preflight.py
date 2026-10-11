@@ -34,6 +34,7 @@ import json
 import os
 import random
 import re
+import select
 import shutil
 import smtplib
 import socket
@@ -321,6 +322,87 @@ def dkim_public_key(txts: list[str]) -> str | None:
         if "p" in tg and tg.get("v", "DKIM1").upper() == "DKIM1":
             return tg["p"]
     return None
+
+
+def milter_sign_probe(instance: str, milter_address: str, domain: str, timeout: float = 15,
+                      run: Callable[..., subprocess.Popen] = subprocess.Popen) -> dict[str, str] | None:
+    """Asks the running OpenDKIM (`<instance>-opendkim`) to sign a probe message From:
+    probe@<domain>, over its own milter socket (through `nc` in the container: the socket is on
+    the internal network only). It speaks like Postfix - one command, then its reply - and
+    returns the tags of the DKIM-Signature OpenDKIM adds (d=, s=, ...), or None when it does not
+    sign. Nothing is sent anywhere.
+
+    The session also applies a reload asked for with SIGUSR1: OpenDKIM 2.11 re-reads its
+    configuration, KeyTable and SigningTable when the next milter session starts. (Sending a
+    whole session without waiting for the replies, right after a reload request, crashes
+    OpenDKIM 2.11; Postfix never does that, and neither does this probe.)"""
+    port = milter_address.rpartition(":")[2]
+    proc = run(["podman", "exec", "-i", f"{instance}-opendkim", "nc", "127.0.0.1", port],
+               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    assert proc.stdin is not None and proc.stdout is not None
+    out, end = proc.stdout.fileno(), time.monotonic() + timeout
+    z = b"\0"
+
+    def send(cmd: bytes, data: bytes = b"") -> None:
+        proc.stdin.write(struct.pack("!I", len(data) + 1) + cmd + data)
+        proc.stdin.flush()
+
+    def read(n: int) -> bytes:
+        buf = b""
+        while len(buf) < n:
+            if not select.select([out], [], [], max(0.0, end - time.monotonic()))[0]:
+                raise TimeoutError("OpenDKIM did not answer")
+            chunk = os.read(out, n - len(buf))
+            if not chunk:
+                raise EOFError("OpenDKIM closed the session")
+            buf += chunk
+        return buf
+
+    def reply() -> tuple[bytes, bytes]:
+        body = read(struct.unpack("!I", read(4))[0])
+        return body[:1], body[1:]
+
+    tags: dict[str, str] | None = None
+    try:
+        send(b"O", struct.pack("!III", 6, 0x1FF, 0))   # protocol 6, every action, a reply to every command
+        if reply()[0] != b"O":
+            return None
+        send(b"D", b"C{daemon_name}" + z + b"ORIGINATING" + z + b"j" + z + b"dkim-probe.invalid" + z)
+        steps = [(b"C", b"localhost" + z + b"4" + struct.pack("!H", 0) + b"127.0.0.1" + z), (b"H", b"dkim-probe.invalid" + z),
+                 (b"M", f"<dkim-probe@{domain}>".encode() + z), (b"R", b"<dkim-probe@dkim-probe.invalid>" + z)]
+        steps += [(b"L", name.encode() + z + value.encode() + z) for name, value in (
+            ("From", f"dkim-probe@{domain}"), ("To", "dkim-probe@dkim-probe.invalid"), ("Subject", "catto-mail DKIM probe"),
+            ("Date", dt.datetime.now().astimezone().strftime("%a, %d %b %Y %H:%M:%S %z")), ("Message-ID", f"<dkim-probe@{domain}>"))]
+        steps += [(b"N", b""), (b"B", b"catto-mail DKIM probe\r\n")]
+        for cmd, data in steps:
+            if cmd == b"M":
+                send(b"D", b"Mi" + z + b"DKIMPROBE" + z)
+            send(cmd, data)
+            if reply()[0] != b"c":   # accepted or refused early: OpenDKIM will not sign it
+                return None
+        send(b"E")
+        while True:
+            cmd, data = reply()
+            if cmd in (b"h", b"i"):
+                name, _, value = (data[4:] if cmd == b"i" else data).partition(z)
+                if name.decode(errors="replace").lower() == "dkim-signature":
+                    value = value.rstrip(z).replace(b"\r", b"").replace(b"\n", b"").replace(b"\t", b"")
+                    tags = {k.strip(): v.strip() for k, _, v in (t.partition("=") for t in value.decode(errors="replace").split(";")) if k.strip()}
+            elif cmd in (b"a", b"c", b"t", b"r", b"d", b"y"):
+                break
+        send(b"Q")
+    except (OSError, EOFError, TimeoutError, struct.error, ValueError):
+        tags = None
+    finally:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    return tags
 
 
 def dmarc_policy(txts: list[str]) -> dict[str, str] | None:
@@ -1024,9 +1106,9 @@ class Preflight:
             self.add("dns", f"SPF {domain} ({label})", level,
                      f"{res.result}" + (f" by {res.mechanism}" if res.mechanism else "") + (f": {res.detail}" if res.detail else ""), act)
         rows = self.sending_domains()
-        for row in rows:
-            self.check_dmarc(row["domain"])
         mail_from_domain = v["APP_MAIL_FROM"].rpartition("@")[2].lower()
+        for row in rows:
+            self.check_dmarc(row["domain"], None if row["domain"] == mail_from_domain else row["client"])
         if mail_from_domain not in {row["domain"] for row in rows}:
             self.check_dmarc(mail_from_domain)
         admin = f"mailbox {v.get('APP_ADMIN_EMAIL', '')} (administrator)"
@@ -1048,7 +1130,10 @@ class Preflight:
                 self.add("dns", "inbound SMTP reaches this Postfix", "WARN",
                          f"{exc} (hairpin NAT may prevent this test from the host itself; test from outside)")
 
-    def check_dmarc(self, domain: str) -> None:
+    def check_dmarc(self, domain: str, client: str | None = None) -> None:
+        """client: the domain belongs to that client (its DNS is the client's), so a gap is a
+        warning that never blocks activation; None: the installation's own domain."""
+        act, who = client is None, "" if client is None else f"client {client}: "
         try:
             pol = dmarc_policy(self.resolver.query(f"_dmarc.{domain}", "TXT"))
             where = f"_dmarc.{domain}"
@@ -1056,15 +1141,15 @@ class Preflight:
                 pol = dmarc_policy(self.resolver.query(f"_dmarc.{org_domain(domain)}", "TXT"))
                 where = f"_dmarc.{org_domain(domain)} (organisational domain)"
         except DnsError as exc:
-            self.add("dns", f"DMARC {domain}", "WARN", str(exc), True)
+            self.add("dns", f"DMARC {domain}", "WARN", who + str(exc), act)
             return
         if pol is None:
-            self.add("dns", f"DMARC {domain}", "WARN", "no DMARC record (create one; p=none with rua= is a safe start)", True)
+            self.add("dns", f"DMARC {domain}", "WARN", who + "no DMARC record (create one; p=none with rua= is a safe start)", act)
             return
         p = pol.get("p", "?")
         self.add("dns", f"DMARC {domain}", "PASS" if p in ("none", "quarantine", "reject") else "WARN",
-                 f"{where}: p={p}" + (f" sp={pol['sp']}" if "sp" in pol else "") + (f" pct={pol['pct']}" if "pct" in pol else "")
-                 + (f" rua={pol['rua']}" if "rua" in pol else " (no rua: no aggregate reports)"), True)
+                 who + f"{where}: p={p}" + (f" sp={pol['sp']}" if "sp" in pol else "") + (f" pct={pol['pct']}" if "pct" in pol else "")
+                 + (f" rua={pol['rua']}" if "rua" in pol else " (no rua: no aggregate reports)"), act)
 
     # ------------------------------------------------------------------ dkim
     def sending_domains(self) -> list[dict[str, str]]:
@@ -1078,6 +1163,12 @@ class Preflight:
         return [{"domain": d, "dkim_status": s, "selector": sel, "client": c} for d, s, sel, c in rows]
 
     def check_dkim(self) -> None:
+        """The installation's own domain (APP_MAIL_FROM: the sign-in mail) must have an active,
+        published key: a FAIL that blocks activation. A client's domain without an active key, or
+        whose published record is missing or different, is the client's unfinished work: a WARN
+        naming the client that never blocks activation or upgrades (its send jobs are refused
+        until the key is active). OpenDKIM disagreeing with the database is the installation's
+        fault and stays a FAIL."""
         rc, out = self.host.exec("opendkim", "smarthost-dkim-key", "list")
         if rc != 0:
             self.add("dkim", "OpenDKIM tables", "FAIL", out.strip()[:200], True)
@@ -1088,52 +1179,61 @@ class Preflight:
             if len(parts) >= 4:
                 table.setdefault(parts[0], {})[parts[1]] = (parts[2] == "yes", parts[3] == "present")
         rows = self.sending_domains()
+        mail_from = self.v["APP_MAIL_FROM"].rpartition("@")[2].lower()
         if not rows:
             self.add("dkim", "sending domains", "WARN", "no verified sending domain of an active client yet", True)
         signed = set()
         for row in rows:
             d, sel = row["domain"], row["selector"]
+            own = d == mail_from   # the installation's own domain, also registered for a client
+            who = f"client {row['client']}: "
             if row["dkim_status"] != "active" or not sel:
-                self.add("dkim", f"{d}", "FAIL", f"verified but DKIM is {row['dkim_status']} (selector '{sel or '-'}'): "
-                         "the delivery daemon refuses its jobs in production", True)
+                if not own:   # the installation's domain is judged below, by OpenDKIM's tables
+                    self.add("dkim", f"{d}", "WARN", who + f"verified but DKIM is {row['dkim_status']} (selector '{sel or '-'}'): "
+                             "its send jobs are refused in production until the key is active (the client finishes it under "
+                             "Settings › Sending domains); this does not block the installation", False)
                 continue
             active = [s for s, (act, _k) in table.get(d, {}).items() if act]
             if sel not in table.get(d, {}):
-                self.add("dkim", f"{d} selector {sel}", "FAIL", "not in the OpenDKIM KeyTable (smarthostctl prod dkim generate)", True)
+                self.add("dkim", f"{d} selector {sel}", "FAIL", who + "not in the OpenDKIM KeyTable (smarthostctl prod dkim generate)", True)
                 continue
             if not table[d][sel][1]:
-                self.add("dkim", f"{d} selector {sel}", "FAIL", "KeyTable entry without a private key", True)
+                self.add("dkim", f"{d} selector {sel}", "FAIL", who + "KeyTable entry without a private key", True)
                 continue
             if active != [sel]:
-                self.add("dkim", f"{d} selector {sel}", "FAIL", f"OpenDKIM signs with {active or 'nothing'}; the database says {sel}", True)
+                self.add("dkim", f"{d} selector {sel}", "FAIL", who + f"OpenDKIM signs with {active or 'nothing'}; the database says {sel}", True)
                 continue
             signed.add(d)
-            self.check_dkim_dns(d, sel)
-        mail_from = self.v["APP_MAIL_FROM"].rpartition("@")[2].lower()
+            self.check_dkim_dns(d, sel, None if own else row["client"])
         mf_active = [s for s, (act, _k) in table.get(mail_from, {}).items() if act]
         if mf_active:
             if mail_from not in signed:
                 self.check_dkim_dns(mail_from, mf_active[0])
         else:
-            self.add("dkim", f"{mail_from} (APP_MAIL_FROM)", "WARN", "the sign-in mail domain is not DKIM-signed by OpenDKIM", True)
+            self.add("dkim", f"{mail_from} (APP_MAIL_FROM)", "FAIL", "the installation's sign-in mail domain has no active DKIM key in "
+                     "OpenDKIM (System setup › DKIM, or smarthostctl prod dkim generate and activate)", True)
 
-    def check_dkim_dns(self, domain: str, selector: str) -> None:
+    def check_dkim_dns(self, domain: str, selector: str, client: str | None = None) -> None:
+        """client: the published record is the client's to fix (a WARN that never blocks);
+        None: the installation's own domain (a FAIL)."""
         rc, key = self.host.exec("opendkim", "smarthost-dkim-key", "pubkey", domain, selector)
         if rc != 0:
             self.add("dkim", f"{domain} selector {selector}", "FAIL", key.strip()[:200], True)
             return
+        act, who = client is None, "" if client is None else f"client {client}: "
+        gap = "FAIL" if act else "WARN"
+        fix = f"smarthostctl prod dkim dns {domain}" if act else "the client publishes it from Settings › Sending domains; this does not block the installation"
         try:
             published = dkim_public_key(self.resolver.query(f"{selector}._domainkey.{domain}", "TXT"))
         except DnsError as exc:
-            self.add("dkim", f"{domain} selector {selector}", "WARN", str(exc), True)
+            self.add("dkim", f"{domain} selector {selector}", "WARN", who + str(exc), act)
             return
         if published is None:
-            self.add("dkim", f"{domain} selector {selector}", "FAIL",
-                     f"no DKIM TXT at {selector}._domainkey.{domain} (smarthostctl prod dkim dns {domain})", True)
+            self.add("dkim", f"{domain} selector {selector}", gap, who + f"no DKIM TXT at {selector}._domainkey.{domain} ({fix})", act)
         elif published != key.strip():
-            self.add("dkim", f"{domain} selector {selector}", "FAIL", "the published public key does not match the installed private key", True)
+            self.add("dkim", f"{domain} selector {selector}", gap, who + f"the published public key does not match the installed private key ({fix})", act)
         else:
-            self.add("dkim", f"{domain} selector {selector}", "PASS", "key installed, active, and published in DNS", True)
+            self.add("dkim", f"{domain} selector {selector}", "PASS", who + "key installed, active, and published in DNS", act)
 
     # --------------------------------------------------------------- postfix
     def check_postfix(self) -> None:
@@ -1340,11 +1440,21 @@ def main(argv: list[str]) -> int:
     p.add_argument("--firewall", action="store_true")
     p.add_argument("--admin-mailbox", action="store_true",
                    help="print a warning if the administrator's address cannot receive the sign-in mail (the installer)")
+    p.add_argument("--dkim-probe", nargs=2, metavar=("DOMAIN", "SELECTOR"),
+                   help="does the running OpenDKIM sign DOMAIN with SELECTOR? (a milter session; applies a pending reload)")
     a = p.parse_args(argv)
     env = Path(os.environ.get("SMARTHOST_DOTENV") or ROOT / "infra/.env")
     raw = render.parse_dotenv(env)
     values = render.resolve(raw)   # the .env's values completed with the built-in ones
     host = Host(values)
+    if a.dkim_probe:
+        domain, selector = a.dkim_probe
+        tags = milter_sign_probe(values["SMARTHOST_INSTANCE"], values["SMARTHOST_OPENDKIM_MILTER_ADDRESS"], domain.lower())
+        if tags is None:
+            print(f"OpenDKIM does not sign {domain}")
+            return 1
+        print(f"OpenDKIM signs {domain}: d={tags.get('d', '?')} s={tags.get('s', '?')}")
+        return 0 if (tags.get("d", "").lower(), tags.get("s", "")) == (domain.lower(), selector) else 1
     if a.checklist:
         records = []
         rc, out = host.exec("opendkim", "smarthost-dkim-key", "list")

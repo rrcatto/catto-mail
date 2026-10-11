@@ -18,13 +18,17 @@
 #      server on POSTFIX_SMTP_BIND with the PROXY protocol, HTTP redirect on
 #      PROXY_HTTP_BIND); development unchanged
 #   K  production DKIM key tool: generate, activate, rotate, retire, dns, pubkey
+#   R  `prod dkim activate` against a running OpenDKIM: a reload (SIGUSR1), never a restart,
+#      proven by the milter probe signing the new domain; the restart only as the fallback
+#      when OpenDKIM rejects the reload
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAG=phase8-test
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "  PASS  $*"; }
 fail() { FAIL=$((FAIL+1)); echo "  FAIL  $*"; }
-mkdir -p "$REPO/infra/.generated"; TMP="$(mktemp -d "$REPO/infra/.generated/phase8-test.XXXXXX")"; trap 'rm -rf "$TMP"; podman rm -f smarthost-phase8-postfix >/dev/null 2>&1 || true' EXIT
+mkdir -p "$REPO/infra/.generated"; TMP="$(mktemp -d "$REPO/infra/.generated/phase8-test.XXXXXX")"; K=smarthost-phase8k   # the instance whose OpenDKIM section R runs
+trap 'rm -rf "$TMP"; podman rm -f smarthost-phase8-postfix "$K-opendkim" >/dev/null 2>&1 || true' EXIT
 
 echo "== U unit tests"
 if out="$(podman run --rm --name smarthost-phase8-unit --network none --label project=smarthost -v "$REPO:/repo:ro,Z" -w /repo/infra/tests/phase8 \
@@ -189,6 +193,33 @@ test "$(stat -c %a /k/send.example.org/s2.private)" = 600
 echo ok' 2>&1)"
 [[ "$out" == ok ]] && pass "generate/activate/rotate/retire/dns/pubkey; never overwrites; keys 0600; active selector protected" \
   || fail "DKIM key tool: $out"
+
+echo "== R DKIM activation reloads OpenDKIM"
+printf 'SMARTHOST_ENV=production\nSMARTHOST_INSTANCE=%s\n' "$K" > "$TMP/dkim.env"
+prodk() { SMARTHOST_DOTENV="$TMP/dkim.env" SMARTHOST_GENERATED="$TMP/dkim-generated" "$REPO/infra/bin/smarthostctl-prod" "$@" 2>&1; }
+probe() { SMARTHOST_DOTENV="$TMP/dkim.env" python3 "$REPO/infra/lib/smarthost_preflight.py" --dkim-probe "$@" >/dev/null 2>&1; }
+started() { podman inspect "$K-opendkim" --format '{{.State.StartedAt}}'; }
+podman run -d --name "$K-opendkim" --label project=smarthost --network none -e SMARTHOST_OPENDKIM_MILTER_ADDRESS=inet:opendkim:8891 \
+  -e OPENDKIM_KEY_DIR=/k -e OPENDKIM_TABLES_DIR=/t "localhost/smarthost-opendkim:$TAG" >/dev/null
+for _ in $(seq 20); do podman exec "$K-opendkim" nc -z 127.0.0.1 8891 2>/dev/null && break; sleep 0.5; done
+first="$(started)"
+prodk dkim generate send.example.org s1 >/dev/null
+if probe send.example.org s1; then fail "a generated key signs before activation"; else pass "a generated key does not sign before activation"; fi
+out="$(prodk dkim activate send.example.org s1)"
+[[ "$out" == *"signs send.example.org with selector s1 (no restart)"* && "$(started)" == "$first" ]] && probe send.example.org s1 \
+  && pass "activation reloads OpenDKIM (SIGUSR1) without a restart, and the new key signs" || fail "activation: $out"
+prodk dkim generate other.example.net k1 >/dev/null
+out="$(prodk dkim activate other.example.net k1)"
+[[ "$out" == *"(no restart)"* && "$(started)" == "$first" ]] && probe other.example.net k1 && probe send.example.org s1 \
+  && pass "a second domain activated later signs at once; the first keeps signing" || fail "second activation: $out"
+# A configuration OpenDKIM rejects on reload (it keeps its old tables): the fallback restart,
+# whose entrypoint writes a fresh configuration, brings the new key into force.
+podman exec "$K-opendkim" sh -c 'echo "NoSuchOption yes" >> /etc/opendkim.conf'
+prodk dkim generate third.example.com t1 >/dev/null
+out="$(prodk dkim activate third.example.com t1)"
+[[ "$out" == *"did not confirm the reload"* && "$out" == *"restarted and signs third.example.com with selector t1"* && "$(started)" != "$first" ]] \
+  && probe third.example.com t1 && probe send.example.org s1 && pass "a rejected reload falls back to a restart" || fail "fallback: $out"
+podman rm -f "$K-opendkim" >/dev/null 2>&1
 podman rmi -f "localhost/smarthost-postfix:$TAG" "localhost/smarthost-opendkim:$TAG" "localhost/smarthost-nginx:$TAG" >/dev/null 2>&1 || true
 
 echo "phase8-test: $PASS passed, $FAIL failed"

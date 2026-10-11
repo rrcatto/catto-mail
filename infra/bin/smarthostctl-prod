@@ -353,14 +353,46 @@ cmd_acme() {
 }
 
 # ------------------------------------------------------------------------- DKIM
+# OpenDKIM 2.11 re-reads its configuration, KeyTable and SigningTable after SIGUSR1, when the
+# next milter session starts. Activation therefore reloads instead of restarting: Postfix keeps
+# its milter, and no mail is refused while OpenDKIM restarts. The probe (smarthost_preflight.py
+# --dkim-probe, a milter session made the way Postfix makes it) applies the reload and proves
+# that OpenDKIM now signs the domain with the new selector. Only when it cannot confirm that is
+# OpenDKIM restarted (the entrypoint also writes a fresh configuration).
+dkim_apply() {
+  local i="$1" domain="$2" selector="$3" n
+  if podman kill --signal USR1 "$i-opendkim" >/dev/null 2>&1; then
+    for n in 1 2 3; do   # the signal is handled by a thread of its own: give it a moment
+      if "${PREFLIGHT[@]}" --dkim-probe "$domain" "$selector" >/dev/null 2>&1; then
+        say "OpenDKIM reloaded its tables and signs $domain with selector $selector (no restart)"
+        return 0
+      fi
+      sleep "$n"
+    done
+  fi
+  say "OpenDKIM did not confirm the reload; restarting it with the new tables"
+  podman restart --time 10 "$i-opendkim" >/dev/null || die "OpenDKIM did not restart: smarthostctl prod logs opendkim"
+  for n in $(seq 30); do
+    if "${PREFLIGHT[@]}" --dkim-probe "$domain" "$selector" >/dev/null 2>&1; then
+      say "OpenDKIM restarted and signs $domain with selector $selector"
+      return 0
+    fi
+    sleep 1
+  done
+  die "OpenDKIM does not sign $domain with selector $selector after a restart: smarthostctl prod logs opendkim"
+}
+
 cmd_dkim() {
   local i; i="$(I)"
   (($#)) || die "usage: dkim generate|activate|retire|dns|pubkey|list ..."
   podman exec "$i-opendkim" smarthost-dkim-key "$@"
   case "$1" in
-    activate|retire)
+    activate)
+      dkim_apply "$i" "$2" "$3"
+      say "record it for the sending domain: smarthostctl prod console smarthost:domain:dkim <client-id> $2 active --selector $3"
+      ;;
+    retire)
       podman restart --time 10 "$i-opendkim" >/dev/null && say "OpenDKIM restarted with the new tables"
-      [[ "$1" == activate ]] && say "record it for the sending domain: smarthostctl prod console smarthost:domain:dkim <client-id> $2 active --selector $3"
       ;;
   esac
 }

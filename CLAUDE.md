@@ -167,7 +167,9 @@ points span components and need several files to see:
   port 80 redirects to HTTPS (`PROXY_HTTP_BIND`, `infra/nginx/production/http-redirect.conf.template`);
   client admins set up sending domains in the client dashboard, the DKIM key through the host agent
   (`ClientDomainController`, `App\Domain\DkimSetup`, `smarthost:system:agent domains`,
-  `ClientDomainSetupTest`).
+  `ClientDomainSetupTest`); a client's unfinished domain is a preflight WARN, never blocking (only
+  the `APP_MAIL_FROM` domain must have its key); `prod dkim activate` reloads OpenDKIM (SIGUSR1,
+  confirmed by `smarthost_preflight.py --dkim-probe`) and restarts it only as the fallback.
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## Public repository
@@ -316,6 +318,13 @@ This is a public repository. Documentation, comments, examples, tests, configura
     public half, and `DkimSetup::requestFinished` records the outcome for exactly that domain
     when the request is finished. Never generate, hold or move a private key in the web
     application, and never set up self-service DKIM for a domain another client has verified.
+  - A client's domain must never make the production preflight FAIL for the client's own gaps (no
+    active key, its DNS records): those are WARNs naming the client, never escalated by
+    `--activation`. Only the installation's own domain (`APP_MAIL_FROM`) and OpenDKIM/database
+    disagreement FAIL.
+  - Apply DKIM table changes with the reload (`dkim_apply` in `smarthostctl-prod`), not a
+    restart. A milter client talking to OpenDKIM must wait for each reply: OpenDKIM 2.11 crashes
+    when a pipelined session meets a pending reload.
 - **SaaS operations (Phase 9, spec 2.10).**
   - Public onboarding stays disabled (`APP_PUBLIC_ONBOARDING_ENABLED=false`) and has no route.
     Never add a public registration route without an explicit owner decision.

@@ -32,7 +32,7 @@ use Symfony\Component\Uid\Uuid;
  *   checkDns    pending_dns -> looks up <selector>._domainkey.<domain>; when the published key
  *               equals the recorded one, dkim.activate. The agent compares DNS with the private
  *               key again and activates the selector (`prod dkim activate`: SigningTable, OpenDKIM
- *               restarted); requestFinished() records dkim_status active, as
+ *               reloaded without a restart); requestFinished() records dkim_status active, as
  *               `smarthost:domain:dkim <client> <domain> active --selector <s>` does;
  *   advance     the host agent's periodic call (`smarthost:system:agent domains`): checkDns for
  *               every domain waiting for its record, so activation follows publication.

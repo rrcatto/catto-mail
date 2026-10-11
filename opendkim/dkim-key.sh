@@ -8,7 +8,8 @@
 #                                         volume and a KeyTable entry; NOT yet
 #                                         used for signing (publish DNS first)
 #   activate <domain> <selector>          sign <domain> with this selector (the
-#                                         SigningTable entry); restart OpenDKIM after
+#                                         SigningTable entry); in force once OpenDKIM
+#                                         reloads (SIGUSR1: smarthostctl prod dkim activate)
 #   retire <domain> <selector>            remove an inactive selector's key and
 #                                         KeyTable entry (after its DNS record is gone)
 #   dns <domain> [selector]               the TXT record to publish (default: the
@@ -62,7 +63,7 @@ case "$cmd" in
         grep -q "^$(entry "$domain" "$selector") " "$kt" || die "selector $selector of $domain is not in the KeyTable"
         drop_lines "^\*@$(re "$domain") " "$st"
         echo "*@$domain $(entry "$domain" "$selector")" >> "$st"
-        echo "SigningTable: $domain is signed with selector $selector (restart OpenDKIM to apply)"
+        echo "SigningTable: $domain is signed with selector $selector (in force once OpenDKIM reloads its tables)"
         ;;
     retire)
         domain="${1:?usage: retire <domain> <selector>}"; selector="${2:?selector}"

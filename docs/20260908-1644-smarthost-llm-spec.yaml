@@ -2727,15 +2727,16 @@ production_operations:
       exposure: "no published container port, network membership per the matrix (ingress network: nginx and Postfix only), private keys only in their owner, network flags, host listeners"
       ingress: "the ingress socket and service active with exactly the configured binds, nginx holding the inherited sockets, Postfix port 25 as the PROXY-protocol listener on the ingress network only, TRUSTED_PROXIES empty, and the two-source proof at nginx and Postfix (smarthostctl prod ingress-check)"
       tls: "the certificates served on 443 and 25 (STARTTLS): validity, expiry within 14 days, names, trust"
-      dns: "A records, PTR, forward-confirmed reverse DNS, bounce-domain MX to this host, SPF of the bounce domain and the EHLO name, DMARC of every sending domain, inbound SMTP reachability"
-      dkim: "per verified sending domain of an active client and the APP_MAIL_FROM domain - active selector, key present, OpenDKIM table equal to the database, DNS key equal to the private key"
+      dns: "A records, PTR, forward-confirmed reverse DNS, bounce-domain MX to this host, SPF of the bounce domain and the EHLO name, DMARC of every sending domain (a client's gap is a WARN naming the client that never blocks activation), inbound SMTP reachability"
+      dkim: "the APP_MAIL_FROM domain (the installation's own) - an active, published key, or FAIL; per verified sending domain of an active client - no active key, or a missing or different published record, is a WARN naming the client that never blocks activation or upgrades (owner decision 2026-10-11; its jobs are refused at submit), while OpenDKIM disagreeing with the database (selector, key file, signing selector) stays a FAIL"
       postfix: "hostname, no relayhost, mynetworks, relay refusal (live RCPT test, no DATA), bounce domain, VERP delimiter, TLS, sender ownership, milter, held/live mode, pause, optional outbound port-25 probe (EHLO/QUIT)"
       delivery: "heartbeat, state against the configuration, queue snapshot freshness"
     outputs: [text, json, dns checklist, nftables ruleset]
   dkim_key_management: >-
     smarthost-dkim-key inside OpenDKIM (`prod dkim`; the host agent runs the same for the client
     dashboard's sending domains): generate (never overwrites; not yet
-    signing), activate (SigningTable; OpenDKIM restarted), retire (never the active selector), dns
+    signing), activate (SigningTable; OpenDKIM reloads it on SIGUSR1 without a restart, confirmed by
+    a milter probe that the new key signs; a restart only as the fallback), retire (never the active selector), dns
     (record from the private key), pubkey, list; multiple domains and selectors; planned rotation
     generate -> publish -> activate -> wait -> retire. Private keys never leave the OpenDKIM volume
     except in the backup.

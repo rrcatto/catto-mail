@@ -215,21 +215,58 @@ class DnsAndDkimChecksTest(unittest.TestCase):
         self.assertEqual("FAIL", lv["forward-confirmed reverse DNS"])
         self.assertEqual("FAIL", lv["SPF bounce.cattomail-ops.net (bounce domain (envelope sender))"])
         self.assertEqual("FAIL", lv["MX bounce.cattomail-ops.net (bounce domain)"])
-        self.assertEqual("FAIL", lv["client-a.net selector s1"], "published key differs from the installed one")
+        self.assertEqual("WARN", lv["client-a.net selector s1"], "a client's published key differs: the client's to fix")
         self.assertEqual("WARN", lv["DMARC client-a.net"], "missing DMARC is a warning outside activation")
 
     def test_activation_escalates_required_warnings(self) -> None:
         values = production_values()
         zone = good_zone(values, KEY)
-        del zone[("_dmarc.client-a.net", "TXT")]
+        del zone[("_dmarc.cattomail-ops.net", "TXT")]
         lv = levels(self.run_pf(zone, activation=True))
-        self.assertEqual("FAIL", lv["DMARC client-a.net"])
+        self.assertEqual("FAIL", lv["DMARC cattomail-ops.net"], "the installation's own domain")
+
+    def test_a_clients_unfinished_domain_never_blocks_the_installation(self) -> None:
+        """Owner decision (2026-10-11): a client's domain without an active key, a missing or
+        different DKIM record, or no DMARC is a WARN naming the client, even at activation (and
+        so for upgrades, which run the activation preflight)."""
+        values = production_values()
+        zone = good_zone(values, KEY)
+        del zone[("_dmarc.client-a.net", "TXT")]
+        del zone[("s1._domainkey.client-a.net", "TXT")]
+        rows = [["client-a.net", "active", "s1", "Client A"], ["client-b.org", "pending_dns", "cm202610abcd", "Client B"],
+                ["client-c.org", "not_configured", "", "Client C"]]
+        for activation in (False, True):
+            with self.subTest(activation=activation):
+                res = self.run_pf(zone, activation=activation, host=host_for(values, sql={"FROM sending_domains": rows}))
+                by = {r.name: r for r in res}
+                for name, client in (("client-a.net selector s1", "Client A"), ("DMARC client-a.net", "Client A"),
+                                     ("client-b.org", "Client B"), ("client-c.org", "Client C")):
+                    self.assertEqual("WARN", by[name].level, (name, by[name].detail))
+                    self.assertFalse(by[name].activation, name)
+                    self.assertIn(f"client {client}:", by[name].detail)
+                self.assertIn("does not block the installation", by["client-b.org"].detail)
+                self.assertEqual([], [(r.name, r.detail) for r in res if r.level == "FAIL"], "nothing blocks")
+
+    def test_the_installations_own_domain_still_fails_without_a_key(self) -> None:
+        values = production_values()
+        zone = good_zone(values, KEY)
+        listing = "domain\tselector\tactive\tkey\tbits\nclient-a.net\ts1\tyes\tpresent\t2048\n"   # nothing for cattomail-ops.net
+        res = self.run_pf(zone, host=host_for(values, exec_={("opendkim", "smarthost-dkim-key", "list"): (0, listing)}), sections=("dkim",))
+        own = {r.name: r for r in res}["cattomail-ops.net (APP_MAIL_FROM)"]
+        self.assertEqual(("FAIL", True), (own.level, own.activation), own.detail)
+        del zone[("ops1._domainkey.cattomail-ops.net", "TXT")]
+        lv = levels(self.run_pf(zone, sections=("dkim",)))
+        self.assertEqual("FAIL", lv["cattomail-ops.net selector ops1"], "its record missing from DNS")
+        # Registered for a client as well, it is still judged as the installation's domain.
+        rows = [["client-a.net", "active", "s1", "Client A"], ["cattomail-ops.net", "pending_dns", "x1", "Operator's own client"]]
+        res = self.run_pf(zone, host=host_for(values, sql={"FROM sending_domains": rows}), sections=("dkim",))
+        self.assertEqual("FAIL", levels(res)["cattomail-ops.net selector ops1"])
+        self.assertNotIn("cattomail-ops.net", levels(res), "no client warning for the installation's domain")
 
     def test_dkim_configuration_gaps(self) -> None:
         values = production_values()
         zone = good_zone(values, KEY)
-        cases = {
-            "DKIM not active": ([["client-a.net", "pending_dns", "s1", "A"]], None, "client-a.net"),
+        cases = {   # the database says active but OpenDKIM disagrees: the installation's fault
             "selector not in OpenDKIM": ([["client-a.net", "active", "s9", "A"]], None, "client-a.net selector s9"),
             "OpenDKIM signs with another selector": ([["client-a.net", "active", "s1", "A"]],
                                                      "domain\tselector\tactive\tkey\tbits\nclient-a.net\ts1\tno\tpresent\t2048\nclient-a.net\ts2\tyes\tpresent\t2048\n",

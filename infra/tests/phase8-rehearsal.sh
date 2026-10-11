@@ -287,7 +287,9 @@ tls="$(prod preflight --section tls 2>&1)"
 grep -q "^FAIL  tls: nginx certificate trust" <<<"$tls" && grep -q "^PASS  tls: nginx certificate name" <<<"$tls" \
   && pass "TLS: the self-signed rehearsal certificate is reported untrusted (name and validity checked)" || fail "tls: $tls"
 dns="$(prod preflight --section dns --section dkim 2>&1)"; rc=$?
-[[ $rc -ne 0 && "$dns" == *"dkim: send.$NAME selector r1"* ]] && pass "DNS/DKIM: unresolvable rehearsal names are reported, not passed" || fail "dns: ${dns: -400}"
+# The client's domain is a warning (its DNS is the client's); the sign-in domain, which has no key here, a failure.
+[[ $rc -ne 0 && "$dns" == *"WARN  dkim: send.$NAME selector r1"* && "$dns" == *"FAIL  dkim: $NAME (APP_MAIL_FROM)"* ]] \
+  && pass "DNS/DKIM: unresolvable rehearsal names are reported, not passed; a client domain warns, the sign-in domain fails" || fail "dns: ${dns: -400}"
 prod dns-checklist | grep -q "bounce.$NAME.  MX  10 mta.$NAME." && pass "DNS checklist generated" || fail "checklist"
 prod firewall | grep -q "tcp dport { 22, 25, 80, 443 }" && pass "firewall ruleset generated" || fail "firewall"
 

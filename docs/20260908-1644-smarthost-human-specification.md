@@ -690,7 +690,13 @@ domain up without operator console work, under Settings › Sending domains:
 - **Active.** When the published DKIM record equals the key, the host agent activates the
   selector. It first compares DNS with the private key again. The check happens on *Check DNS
   now*, or by itself: the agent looks every five minutes, each domain at most every ten minutes.
-  The domain is then recorded as active.
+  The domain is then recorded as active. OpenDKIM reloads its tables for this without a restart,
+  so no mail is refused.
+
+Until its key is active, a client's domain cannot send in production: the API refuses to submit
+its jobs, and the delivery daemon refuses them again. The production checks report such a domain
+as a warning naming the client. It never blocks live activation or an upgrade; only the
+installation's own domain (that of the sign-in mail) must have an active key.
 
 Every request to the host agent names the sending domain, so its result changes only that domain.
 A domain that another client has also verified gets no key from the dashboard (one key signs a

@@ -174,10 +174,13 @@ with every resource so you can map Smarthost ids to your records.
 
 ## 10. Sending domains and DKIM
 
-Your sender domains are registered by your account's operator or client admin. Each domain
-is verified by a DNS TXT record (`_smarthost-verification.<domain>`, value shown in the
-dashboard under **Sending domains**). In production a domain also needs active DKIM before
-a job using it can be submitted. Your operator gives you the DKIM DNS record to publish.
+Your client admin adds your sender domains in the dashboard (**Settings › Sending domains**).
+Each domain is verified by a DNS TXT record (`_smarthost-verification.<domain>`; the page shows
+the value). Once it is verified, the page shows the domain's DKIM record to publish (and a DMARC
+record to start with), and the key becomes active as soon as the record is in DNS. In production
+a job can be submitted only from a domain whose DKIM key is active. Until then, submitting
+answers `422 submit-rejected` with the error "The sending domain has no active DKIM
+configuration."; nothing is sent unsigned.
 
 ## 11. Webhooks
 
@@ -244,7 +247,8 @@ events. Opens are unreliable signals (section 1).
 ## 15. Integration checklist
 
 1. Receive your API key from your client admin; store it in your secret store.
-2. Verify your sending domain (TXT record) and publish its DKIM record.
+2. Add and verify your sending domain (TXT record) and publish its DKIM record; wait until the
+   dashboard shows it as active.
 3. Configure a webhook endpoint, store its secret, and implement signature verification
    and de-duplication. Send a test event and check that your receiver accepts it.
 4. Run a small validation job and read its results.

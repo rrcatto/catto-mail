@@ -24,5 +24,9 @@ Files:
   - Several domains and selectors at once.
   - A new key signs only after `activate`. Generation never overwrites a key, and the active
     selector cannot be retired.
+  - OpenDKIM applies a changed KeyTable or SigningTable after `SIGUSR1`, at the start of the
+    next milter session, without a restart. `smarthostctl prod dkim activate` sends the signal
+    and proves the new key signs with a milter probe; it restarts the container only when that
+    fails.
   - Planned rotation: generate, publish, activate, wait, retire (runbook §6).
 Contract: `docs/architecture/postfix-integration.md` §2.

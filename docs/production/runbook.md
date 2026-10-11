@@ -167,7 +167,7 @@ never leave its volume. Only the backup exports the volume.
 ```sh
 prod dkim generate send.example.com s2026a     # new 2048-bit key; NOT yet signing; prints the TXT record
 # publish the TXT record, wait for DNS, then:
-prod dkim activate send.example.com s2026a     # SigningTable; OpenDKIM restarted
+prod dkim activate send.example.com s2026a     # SigningTable; OpenDKIM reloads (no restart)
 prod console smarthost:domain:dkim <client-id> send.example.com active --selector s2026a
 prod dkim list                                  # domain, selector, active, key present, bits
 prod dkim dns send.example.com                  # the active selector's record (zone-file form too)
@@ -202,7 +202,7 @@ domains in the client workspace:
 5. **Active.** When the published record matches the key, the application queues `dkim.activate`.
    This happens on *Check DNS now*, or when the agent calls `smarthost:system:agent domains`,
    every five minutes and at most every ten minutes per domain. The agent compares DNS with the
-   private key again and runs `prod dkim activate` (OpenDKIM restarts). When it finishes the
+   private key again and runs `prod dkim activate` (OpenDKIM reloads its tables). When it finishes the
    request, the application records `dkim_status = active`, as `smarthost:domain:dkim … active`
    records it.
 
@@ -212,8 +212,15 @@ refuses to set up a key for a domain another client has also verified, because o
 domain for everyone; set that one up by hand (section 6). Rotation and retirement stay operator
 tasks (section 6).
 
-Each activation restarts OpenDKIM. Mail submitted during the restart is refused with a temporary
-error and retried by the delivery daemon.
+**Activation reloads OpenDKIM; it does not restart it.** OpenDKIM 2.11 re-reads its
+configuration, KeyTable and SigningTable after `SIGUSR1`, when the next milter session starts.
+`prod dkim activate` sends the signal, then makes one milter session itself, the way Postfix makes
+them (`smarthost_preflight.py --dkim-probe <domain> <selector>`). That session applies the reload
+and proves that OpenDKIM signs the domain with the new selector. Postfix keeps its milter, so no
+mail is refused. Only when the probe cannot confirm the new key (for example when OpenDKIM rejects
+the reloaded configuration and keeps its old tables) is OpenDKIM restarted. The entrypoint writes
+a fresh configuration, and mail submitted during that restart is refused with a temporary error
+and retried by the delivery daemon. `prod dkim retire` still restarts OpenDKIM.
 
 ## 7. Production preflight
 
@@ -248,11 +255,22 @@ Each check reports PASS, WARN, FAIL, INFO or SKIP. The checks cover:
   - A records, PTR and FCrDNS;
   - MX of the bounce domain;
   - SPF of the bounce domain and of the EHLO name;
-  - DMARC of every sending domain;
+  - DMARC of every sending domain (a client's missing DMARC is a WARN naming the client, never
+    blocking; the `APP_MAIL_FROM` domain's is required for activation);
   - inbound SMTP reaching this host.
-- **DKIM:** for every verified domain of an active client, plus the sign-in domain: an active
-  selector, a present key, the OpenDKIM table matching the database, and the DNS key matching the
-  private key.
+- **DKIM:**
+  - **The installation's own domain** (that of `APP_MAIL_FROM`, the sign-in mail): an active
+    key in OpenDKIM, published in DNS. A gap is a FAIL and blocks live activation, and so
+    upgrades of a live installation, which run the activation preflight.
+  - **Every verified domain of an active or throttled client:** a domain without an active key,
+    or whose published record is missing or differs, is the client's unfinished work. It is a
+    WARN naming the client and never blocks activation or upgrades. The domain cannot send
+    meanwhile: the API refuses to submit its jobs in production (`422 submit-rejected`, "The
+    sending domain has no active DKIM configuration"), and the delivery daemon refuses them again
+    when it claims a job.
+  - **The database and OpenDKIM disagree** (the database says active, but the selector is not
+    in the KeyTable, its key file is missing, or OpenDKIM signs with another selector): an
+    installation fault, a FAIL.
 - **Postfix:**
   - hostname, no relayhost, loopback-only `mynetworks`, relay refusal;
   - bounce domain, VERP delimiter, TLS, sender ownership, the milter;
