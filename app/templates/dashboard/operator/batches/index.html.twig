@@ -11,8 +11,8 @@
 </div>
 <p class="muted">This is an operational tool (validation, re-permission of an old list) — the client application remains where subscribers are managed.</p>
 
-<div class="with-aside">
-    <section class="card card-flush" aria-labelledby="list-h">
+<div class="grid">
+    <section class="card card-flush g-col-4 2xl:g-col-3" aria-labelledby="list-h">
         <div class="card-head"><h2 id="list-h">Batches</h2><span class="count count-dark">{{ batches|length }}</span></div>
         <div class="scroll"><table>
         <thead><tr><th scope="col">Batch</th><th scope="col">Client</th><th scope="col">Purpose</th><th scope="col" class="num">Rows</th><th scope="col" class="num">Unique</th><th scope="col" class="num">Duplicates</th><th scope="col" class="num">Malformed</th><th scope="col">Uploaded</th><th scope="col">Approval</th><th scope="col" class="num">Sends</th></tr></thead>
@@ -23,7 +23,7 @@
         {% else %}<tr><td colspan="10"><span class="muted">No batch yet.</span></td></tr>{% endfor %}</tbody></table></div>
     </section>
 
-    <aside>
+    <aside class="g-col-4 2xl:g-col-1 sticky-side">
         <section class="card" aria-labelledby="up-h">
             <h2 id="up-h">Upload a list</h2>
             <form method="post" action="{{ path('dashboard_operator_batch_preview') }}" enctype="multipart/form-data" class="stack">

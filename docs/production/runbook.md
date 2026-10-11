@@ -39,8 +39,8 @@ Placeholders below: `mail.example.com` (public hostname), `mta.example.com` (mai
    ```
    Ubuntu 26.04 ships Podman 5.7 (the preflight accepts 4.9 and later).
 
-   **Why the sysctl.** The public listeners are TCP 443 (HTTPS) and TCP 25 (SMTP). The service
-   user's own systemd binds them on the host: the socket unit `smarthost-ingress.socket` hands them
+   **Why the sysctl.** The public listeners are TCP 443 (HTTPS), TCP 25 (SMTP) and TCP 80 (plain
+   HTTP, which only redirects to HTTPS). The service user's own systemd binds them on the host: the socket unit `smarthost-ingress.socket` hands them
    to nginx, so nginx sees each client's real address (README §2.1). Linux reserves ports below
    `net.ipv4.ip_unprivileged_port_start` (default 1024) for privileged processes. Setting it to 25
    lets unprivileged processes bind 25–1023 and keeps 1–24, including SSH on 22, privileged.
@@ -49,7 +49,7 @@ Placeholders below: `mail.example.com` (public hostname), `mta.example.com` (mai
    **Scope and security.**
    - The setting is **system-wide** for the host's network namespace: every local user, not only
      `cattomail`, may bind ports 25–1023. Container network namespaces are not affected.
-   - The risk is a local account squatting 25 or 443 while the ingress socket is stopped, and so
+   - The risk is a local account squatting 25, 80 or 443 while the ingress socket is stopped, and so
      impersonating the service. On a dedicated host that runs only catto-mail, with no other
      interactive users, this is acceptable.
    - Once started, the ingress socket holds both ports even while nginx restarts. `prod stop`
@@ -103,7 +103,8 @@ delivery controls need.
 - reserved or placeholder names, or a non-public `SMARTHOST_PUBLIC_IPV4`;
 - a bounce domain equal to the public hostname;
 - a non-empty `TRUSTED_PROXIES` (no proxy stands in front of nginx);
-- `PROXY_HTTPS_BIND`/`POSTFIX_SMTP_BIND` that are not two different IPv4 `address:port` values;
+- `PROXY_HTTPS_BIND`/`POSTFIX_SMTP_BIND`/`PROXY_HTTP_BIND` that are not three different IPv4
+  `address:port` values;
 - overlapping or non-/24 internal, egress and ingress subnets;
 - wrong service aliases.
 
@@ -120,9 +121,8 @@ delivery controls need.
 
 ## 4. TLS
 
-- **HTTPS (nginx):** a certificate for `PROXY_SERVER_NAME` from any CA or ACME client. Port 80 is
-  not published, so use the DNS-01 challenge, or a standalone HTTP-01 run while you open port 80
-  briefly.
+- **HTTPS (nginx):** a certificate for `PROXY_SERVER_NAME` from any CA or ACME client. Port 80
+  belongs to the ingress socket and only redirects to HTTPS, so use the DNS-01 challenge.
 - **SMTP (Postfix):** a certificate for `POSTFIX_MYHOSTNAME`, used for STARTTLS on port 25 and
   submission. A publicly trusted certificate is recommended; MTAs accept self-signed ones
   opportunistically.
@@ -199,8 +199,9 @@ Each check reports PASS, WARN, FAIL, INFO or SKIP. The checks cover:
   and host listeners.
 - **Ingress (client addresses):**
   - `smarthost-ingress.socket` and `.service` are active, and the socket listens on exactly
-    `PROXY_HTTPS_BIND` and `POSTFIX_SMTP_BIND`;
-  - nginx reports, since its last start, that it inherited both sockets;
+    `PROXY_HTTPS_BIND`, `POSTFIX_SMTP_BIND` and `PROXY_HTTP_BIND`;
+  - nginx reports, since its last start, that it inherited the three sockets;
+  - plain HTTP answers with a 301 redirect to the same path on `https://PROXY_SERVER_NAME`;
   - Postfix's port 25 is the PROXY-protocol listener on the ingress network only;
   - `TRUSTED_PROXIES` is empty;
   - **the proof:** two connections from two random loopback source addresses (`127.x.y.2` and

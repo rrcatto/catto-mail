@@ -489,7 +489,7 @@ podman_environment:
           and postfix. It carries inbound SMTP from nginx to Postfix's PROXY-protocol listener
           postfix-ingress:25, so no other container can assert a client address to Postfix
       network_matrix:
-        nginx: {networks: [internal, ingress], inbound: "HTTPS 443 and SMTP 25 on the sockets of <instance>-ingress.socket (PROXY_HTTPS_BIND, POSTFIX_SMTP_BIND)", outbound: "FastCGI symfony-app; SMTP to postfix-ingress:25 with the PROXY protocol"}
+        nginx: {networks: [internal, ingress], inbound: "HTTPS 443, SMTP 25 and HTTP 80 (redirect to HTTPS only) on the sockets of <instance>-ingress.socket (PROXY_HTTPS_BIND, POSTFIX_SMTP_BIND, PROXY_HTTP_BIND)", outbound: "FastCGI symfony-app; SMTP to postfix-ingress:25 with the PROXY protocol"}
         postfix: {networks: [internal, ingress, egress], inbound: "SMTP 25 for the bounce domain from nginx only (postfix-ingress:25, PROXY protocol); submission 587 internal", outbound: "SMTP 25 to MX hosts; milter opendkim"}
         webhook-worker: {networks: [internal, egress], inbound: none, outbound: "HTTPS to public webhook endpoints; PostgreSQL"}
         validator: {networks: [internal, egress], inbound: none, outbound: "DNS; SMTP 25 probes when enabled; PostgreSQL"}
@@ -508,12 +508,16 @@ podman_environment:
           production publishes no port.
         mechanism: >-
           systemd socket activation: <instance>-ingress.socket (the service user's systemd) binds
-          PROXY_HTTPS_BIND and POSTFIX_SMTP_BIND in the host network namespace;
-          <instance>-ingress.service starts the persistent nginx container with both sockets
-          (`podman start --attach`, local Podman, LISTEN_FDS=2, NGINX="3;4;"); nginx's production
+          PROXY_HTTPS_BIND, POSTFIX_SMTP_BIND and PROXY_HTTP_BIND in the host network namespace;
+          <instance>-ingress.service starts the persistent nginx container with those sockets
+          (`podman start --attach`, local Podman, LISTEN_FDS=3, NGINX="3;4;5;"); nginx's production
           templates (infra/nginx/production/, the HTTPS server derived from the development one)
           listen on exactly those addresses
         https: nginx terminates TLS; FastCGI REMOTE_ADDR = the client; Symfony's client address is REMOTE_ADDR
+        http: >-
+          owner decision (2026-10-10): plain HTTP on PROXY_HTTP_BIND (0.0.0.0:80) answers every
+          request with a 301 redirect to the same path on https://PROXY_SERVER_NAME and serves
+          nothing else; it is not logged. The ACME DNS-01 challenge needs no inbound port
         smtp: >-
           an nginx stream server passes each connection to Postfix postfix-ingress:25 on the
           ingress network with the PROXY protocol; Postfix (smtpd_upstream_proxy_protocol=haproxy)
@@ -526,14 +530,14 @@ podman_environment:
           header because only nginx reaches its ingress listener
         lifecycle: >-
           the topology script starts/stops the socket and its service with the other containers
-          (stop releases 25/443); nginx has no Podman restart policy (a restart by Podman alone
+          (stop releases 25/80/443); nginx has no Podman restart policy (a restart by Podman alone
           would lack the sockets); systemd restarts it on failure with the same sockets; it is
           never started with plain `podman start`
         proof: >-
           `smarthostctl prod ingress-check` (= preflight --section ingress, part of --activation):
           two connections from two random loopback source addresses through each bind must appear
           with exactly those addresses in the nginx access log and the Postfix log; one shared
-          address is a FAIL
+          address is a FAIL; plain HTTP must answer with the redirect
       host_prerequisites:
         low_ports: >-
           net.ipv4.ip_unprivileged_port_start=25, persisted in /etc/sysctl.d/60-catto-mail-ports.conf:
@@ -543,11 +547,11 @@ podman_environment:
           install/create/start/recreate/replace/upgrade refuse to proceed and print the remediation
         other: [Ubuntu Server 26.04 LTS, Podman >= 4.9 (26.04 ships 5.7), lingering service user, podman.socket]
       host_firewall: >-
-        `smarthostctl prod firewall` generates an nftables ruleset: inbound SSH, 25 and 443; the
+        `smarthostctl prod firewall` generates an nftables ruleset: inbound SSH, 25, 80 and 443; the
         service user's outbound traffic (the rootless containers' egress) limited to DNS, 25, 80
         and 443
       rootless_notes:
-        - net.ipv4.ip_unprivileged_port_start=25 so the service user's systemd can bind 25 and 443 (host_prerequisites)
+        - net.ipv4.ip_unprivileged_port_start=25 so the service user's systemd can bind 25, 80 and 443 (host_prerequisites)
         - client source addresses are preserved by the socket-activated ingress, not by port publishing (ingress)
         - lingering user, podman.socket, smarthost.service driving the production script
       launch_decisions:
@@ -2868,10 +2872,10 @@ user_interfaces:
     - outcome_unknown is never presented as delivered
   dashboard_layout: >-
     Owner decision (2026-10-10). One shell for both workspaces, using the full page width: round
-    area buttons on the left (operator console: Overview, Mail flow, Clients, System, Access;
-    client workspace: Overview, Sending, Validation, Settings, Usage; Help and the workspace switch
-    below), the current area's pages as pills at the top (on the operator Overview the pills choose
-    the period: 24 hours, 7 days, 30 days, 90 days), and at the top right the delivery mode, the
+    area buttons in the top bar next to the logo (operator console: Overview, Mail flow, Clients,
+    System, Access; client workspace: Overview, Sending, Validation, Settings, Usage; then Help and
+    the workspace switch), the current area's pages as pills after them (below 2200px on a second
+    row; on the operator Overview the pills choose the period: 24 hours, 7 days, 30 days, 90 days), and at the top right the delivery mode, the
     STOP SENDING EMAIL NOW control (a reason is required), what needs attention and the account
     menu. Areas, pills and badges appear only where the user's permission keys allow. The operator
     Overview shows KPI cards against the previous period, send jobs by hard-bounce rate, mail flow
@@ -2889,7 +2893,13 @@ user_interfaces:
     (/dashboard/c/{client}/search, through ClientAccess). Charts are drawn with Chart.js 4, vendored through the AssetMapper import map
     and loaded only on pages with a chart; the Outfit font is served by the application (SIL Open
     Font License); every style lives in the stylesheet (the Content-Security-Policy allows no inline
-    styles). SMARTHOST_TIMEZONE (default Africa/Johannesburg, SAST) is the installation's time zone:
+    styles). Bootstrap 6.0.0-alpha.1 is the base (owner decision, 2026-10-10): its compiled CSS only
+    (no Bootstrap JavaScript), vendored through the import map and linked before the application's
+    stylesheet, which is unlayered and therefore takes precedence over Bootstrap's cascade layers.
+    The page content is laid out with Bootstrap's CSS Grid: .grid with four equal columns and 20px
+    gaps, 20px page margins, the full width (designed for 2560 x 1440: four columns of about 615px);
+    every card names its span (g-col-*, mobile first, md:/lg:/xl: container-query variants), wide
+    tables take the full width, and narrower grids fall back to two columns and then one. SMARTHOST_TIMEZONE (default Africa/Johannesburg, SAST) is the installation's time zone:
     every time catto-mail shows, writes or computes is in it, the Overview's hours and days and the
     quota, usage and billing calendar days and months included (owner decision, 2026-10-10; see
     schema.timestamp_strategy). System > Settings (owner decision, 2026-10-10) lists the operational
@@ -2902,7 +2912,18 @@ user_interfaces:
     settings changed restart. Secrets, the database, networks and ports, certificates, host names,
     domains, addresses and the safety switches stay in infra/.env only. The .env holds only the
     settings an operator sets, grouped under headings; every other contract variable is built in
-    (docs/contracts/environment.md, "The .env file").
+    (docs/contracts/environment.md, "The .env file"). The public front page at / (owner decision,
+    2026-10-10) shows someone who types the installation's address what the service is instead of a
+    404: a sign-in link, the API documentation (/docs/api), and for recipients of its mail that it
+    was sent for the client named as the sender, how to stop it (the message's unsubscribe link or
+    the sender), the re-permission pages, how to report unwanted mail (the administrator's
+    address) and what tracked links and images record; it states that there is no public sign-up
+    and offers none. It is static and public: no session, cookie, script or form, laid out in the
+    same four-column grid. Every HTML page (owner decision, 2026-10-10: the front page, the
+    dashboard signed in and out, the error page, the API documentation and the re-permission
+    page) carries <meta name="application-name" content="catto-mail v<version>"> in its head and
+    the same footer: the software name and version, what the application is, the administrator's
+    address (APP_ADMIN_EMAIL) as the contact, and the time zone the times are in.
   phase_6_implementation:
     # Specification 2.6: what the Phase 6 dashboards provide and how.
     authentication: >-

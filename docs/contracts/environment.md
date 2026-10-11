@@ -128,9 +128,10 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `SMARTHOST_EGRESS_ENABLED` | deployment | no | 8 | `false` | `true` in production. `false` creates the egress network as internal too (no Internet route at all): a rehearsal of the production topology. Live delivery requires `true`. |
 | `SMARTHOST_PUBLIC_IPV4` | deployment | no | 8 | | The production host's public IPv4 address: the sending IP (PTR, SPF) and the address the public hostname and the bounce domain's MX must resolve to. Required in production. Outbound mail is IPv4 only (`inet_protocols = ipv4`). |
 | `POSTFIX_SMTP_BIND` | deployment, proxy | no | 8 | | Inbound SMTP listener on the host for the bounce domain (DSNs, ARF reports). In production `0.0.0.0:25`: the systemd socket `<instance>-ingress.socket` binds it and hands it to nginx, which listens on exactly this address and passes each connection to Postfix with the PROXY protocol, so Postfix sees the real client address. Empty: none (the development pod). |
+| `PROXY_HTTP_BIND` | deployment, proxy | no | 8 | | Plain HTTP listener on the host (owner decision, 2026-10-10). In production `0.0.0.0:80`: the systemd socket `<instance>-ingress.socket` binds it and hands it to nginx, which answers every request with a redirect (301) to the same path on `https://PROXY_SERVER_NAME` and serves nothing over HTTP. Required in production; empty in development (the pod has no HTTP listener). |
 | `SMARTHOST_SSH_PORT` | deployment | no | 8 | `22` | The host's SSH port, kept open by the generated host firewall rules (`smarthostctl prod firewall`). |
 | `ACME_EMAIL` | deployment | no | 10 | | Let's Encrypt account e-mail for the certificate tooling (`smarthostctl prod tls acme`, specification 2.11). Empty: automatic certificates are not configured. |
-| `ACME_DNS_PROVIDER` | deployment | no | 10 | | The DNS-01 provider of the ACME client `lego` (installed on the host by the installer), e.g. `cloudflare`, `route53`, `hetzner`, `ovh`; see `lego dnshelp`. `manual` prints the TXT record for you to create by hand (no automatic renewal). Port 80 is never opened. |
+| `ACME_DNS_PROVIDER` | deployment | no | 10 | | The DNS-01 provider of the ACME client `lego` (installed on the host by the installer), e.g. `cloudflare`, `route53`, `hetzner`, `ovh`; see `lego dnshelp`. `manual` prints the TXT record for you to create by hand (no automatic renewal). DNS-01 needs no inbound port (80 only redirects to HTTPS). |
 | `ACME_CREDENTIALS_FILE` | deployment | no | 10 | | Path on the host of a file (mode 0600, outside the repository) with the DNS provider's credentials as `NAME=value` lines, exactly the variables `lego dnshelp -c <provider>` lists. Never in `infra/.env`; included in backups only if under the backup's configuration paths (it is not by default). |
 | `ACME_SERVER` | deployment | no | 10 | `https://acme-v02.api.letsencrypt.org/directory` | The ACME directory. Use `https://acme-staging-v02.api.letsencrypt.org/directory` to try the setup without the production rate limits. |
 | `ACME_RENEW_DAYS` | deployment | no | 10 | `30` | Renew when the certificate expires within this many days (the daily `<instance>-tls-renew.timer`). |
@@ -194,7 +195,7 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `APP_RETENTION_AUDIT_LOG_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
 | `APP_RETENTION_USAGE_RECORDS_DAYS` | app | no | 2 | | Empty means no automatic deletion. |
 | `APP_RETENTION_WEBHOOK_DELIVERIES_DAYS` | app | no | 7 | | Webhook delivery history (`webhook_deliveries` and their delivered outbox events). Empty means no automatic deletion: rows stay durable until a production retention policy sets a period. Policy only; nothing deletes them yet. |
-| `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. Empty disables this. |
+| `APP_ADMIN_EMAIL` | app | no | 6 | `admin@smarthost-dev.test` | The administrator's email address. It can always request a dashboard sign-in link (its account is created on first sign-in) and receives the ADMIN role, which holds every permission, at every sign-in. It is also the contact address in the footer of every page. Empty disables this (the footer then names no address). |
 | `APP_MAIL_FROM` | app, postfix | no | 6 | `no-reply@smarthost-dev.test` | Sender address of the dashboard sign-in emails (display name "Catto Mail"). Its domain should be DKIM-signed by OpenDKIM. Postfix lets only the web application's submission account use it as envelope sender, and in production held mode it is the only sender Postfix delivers. |
 | `APP_LOGIN_LINK_TTL_SECONDS` | app | no | 6 | `900` | Lifetime of an emailed sign-in link. Each link works once. |
 | `APP_REPERMISSION_RESPONSE_DAYS` | app | no | 10 | `60` | How long the answer links of a re-permission message (`/p/<token>`: confirm, unsubscribe from this list, global opt-out) stay valid (specification 2.11). |
@@ -306,7 +307,8 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 
 The nginx configuration lives under `infra/nginx/`. Production uses the same HTTPS server, derived at
 image build time with its `listen` set to `PROXY_HTTPS_BIND`, plus the SMTP stream server for
-`POSTFIX_SMTP_BIND` (`infra/nginx/production/`).
+`POSTFIX_SMTP_BIND` and the HTTP server for `PROXY_HTTP_BIND` that only redirects to HTTPS
+(`infra/nginx/production/`).
 
 ## Production profile
 
@@ -326,6 +328,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `PROXY_SERVER_NAME` | `smarthost.example.com` | The public hostname (TLS certificate, A record). |
 | `PROXY_HTTPS_BIND` | `0.0.0.0:443` | Public HTTPS (IPv4), bound by the systemd ingress socket and inherited by nginx. |
 | `POSTFIX_SMTP_BIND` | `0.0.0.0:25` | Public inbound SMTP for the bounce domain (IPv4), bound by the systemd ingress socket; nginx passes it to Postfix with the PROXY protocol. |
+| `PROXY_HTTP_BIND` | `0.0.0.0:80` | Public plain HTTP (IPv4), bound by the systemd ingress socket; nginx redirects every request to `https://PROXY_SERVER_NAME`. |
 | `TRUSTED_PROXIES` | | No proxy in front of nginx: Symfony uses `REMOTE_ADDR`, the client address nginx accepted, and ignores forwarded headers. |
 | `APP_PUBLIC_ONBOARDING_ENABLED` | `false` | Clients are created and approved by operators only (Phase 9). Enabling public onboarding is a later operator decision. |
 | `POSTFIX_MYHOSTNAME` | `smarthost.example.com` | EHLO name; the sending IP's PTR must name it. |
@@ -337,7 +340,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `ACME_SERVER` | `https://acme-v02.api.letsencrypt.org/directory` | Let's Encrypt production; the installer fills in `ACME_EMAIL` and the provider when you choose automatic certificates. |
 | `BACKUP_SCHEDULE` | `*-*-* 03:15:00` | A daily backup. Set `BACKUP_OFFHOST_TARGET` before relying on it. |
 | `SMARTHOST_LOG_LEVEL` | `info` | |
-| `APP_ADMIN_EMAIL` | `admin@example.com` | The operator's mailbox (receives the ADMIN sign-in links). |
+| `APP_ADMIN_EMAIL` | `admin@example.com` | The operator's mailbox (receives the ADMIN sign-in links; shown as the contact in every page's footer). |
 | `APP_MAIL_FROM` | `no-reply@example.com` | A verified, DKIM-signed sending domain. |
 | `APP_WEBHOOK_MAX_ATTEMPTS` | `12` | About a day of retries with the backoff below (60 s doubling to 6 h). |
 | `APP_WEBHOOK_TIMEOUT_SECONDS` | `10` | |

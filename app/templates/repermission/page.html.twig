@@ -1,12 +1,13 @@
-<!DOCTYPE html>
+{% import '_site.html.twig' as site %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {{ site.application_meta() }}
     <meta name="referrer" content="no-referrer">
     <meta name="robots" content="noindex, nofollow">
     <title>Your e-mail preferences</title>
-    <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
+    {{ site.stylesheets() }}
 </head>
 <body class="bare">
 <main id="main" class="content content-bare">
@@ -42,5 +43,6 @@
 {% endif %}
 </section>
 </main>
+{{ site.footer() }}
 </body>
 </html>

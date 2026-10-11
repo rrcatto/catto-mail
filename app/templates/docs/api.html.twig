@@ -1,12 +1,14 @@
 {# The public API documentation index (/docs/api): no session, no script; the stylesheet and font come from the application. #}
 {% import 'dashboard/_icons.html.twig' as icon %}
+{% import '_site.html.twig' as site %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {{ site.application_meta() }}
     <title>Catto Mail API</title>
-    <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
+    {{ site.stylesheets() }}
 </head>
 <body class="bare">
 <header class="topbar topbar-bare"><span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span></header>
@@ -23,5 +25,6 @@
         suppression.</p>
     </section>
 </main>
+{{ site.footer() }}
 </body>
 </html>

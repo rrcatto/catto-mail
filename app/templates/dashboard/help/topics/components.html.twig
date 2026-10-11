@@ -14,7 +14,7 @@ The complete reference (container names, systemd units, data, networks) is <code
 </tbody></table>
 <h2>On the server, outside the containers</h2>
 <ul>
-<li><strong>systemd (as the catto-mail user)</strong> starts everything at boot (<code>smarthost.service</code>), holds ports 443 and 25 (<code>smarthost-ingress.socket</code>), and runs timers (queue snapshots, log rotation, reputation, backups, certificate renewal).</li>
+<li><strong>systemd (as the catto-mail user)</strong> starts everything at boot (<code>smarthost.service</code>), holds ports 443, 25 and 80 (<code>smarthost-ingress.socket</code>; 80 only redirects to HTTPS), and runs timers (queue snapshots, log rotation, reputation, backups, certificate renewal).</li>
 <li><strong>The host agent</strong> (<code>smarthost-host-agent.service</code>) runs the host-side checks (systemd, DNS, TLS, Postfix, backups) and carries out what you request in the dashboard (backups, DKIM keys, live activation, holding the queue). The web application never runs host commands itself.</li>
 <li><strong>Not needed:</strong> no DNS server (BIND), no host Postfix, PHP, PostgreSQL, Go or Python packages. Your DNS stays with your DNS provider.</li>
 </ul>

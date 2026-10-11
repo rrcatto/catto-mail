@@ -1,11 +1,19 @@
 # Screenshots
 
-Every page of the dashboard as of version 0.2.3, taken on the development pod (`smarthostctl`) at 1,440 pixels wide unless
-noted, signed in as the administrator. The figures come from the end-to-end test suites, so the clients, addresses and
+Every page of the dashboard as of version 0.2.3 with the Bootstrap 6 four-column grid (not yet released), taken on the
+development pod (`smarthostctl`) at 1,440 pixels wide unless noted, signed in as the administrator. The grid was designed
+for 2,560 pixels; at 1,440 a half holding a wide table takes the full width. The figures come from the end-to-end test suites, so the clients, addresses and
 domains are test data. Every time is in the installation time zone (`SMARTHOST_TIMEZONE`, here SAST). The development pod is
 always in HELD mode: live delivery is off and mail goes to Mailpit.
 
 ## Operator console
+
+### Overview at 2,560 pixels
+
+`/dashboard/operator` · The four-column grid at the width it was designed for: the area buttons and period pills in one top
+bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three columns next to needs attention.
+
+![Overview at 2,560 pixels](wide-operator-overview.png)
 
 ### Overview
 
@@ -221,6 +229,13 @@ always in HELD mode: live delivery is off and mail goes to Mailpit.
 
 ## Public pages
 
+### Front page
+
+`/` · What someone who types the installation's address sees: sign-in, the API documentation and a word for recipients of
+its mail. A full-width banner over four quarter cards.
+
+![Front page](public-front-page.png)
+
 ### Sign in
 
 `/dashboard/login` · Passwordless: the link arrives by email.
@@ -235,15 +250,23 @@ always in HELD mode: live delivery is off and mail goes to Mailpit.
 
 ### Error page (404)
 
-`any unknown path`
+`any unknown path` · Taken from Symfony's error preview (`/_error/404`), because the development pod shows its debug page
+instead.
 
 ![Error page (404)](public-error-404.png)
 
 ## Phone width (390 pixels)
 
+### Front page
+
+`/` · The four cards stack in one column.
+
+![Front page](phone-front-page.png)
+
 ### Operator overview
 
-`/dashboard/operator` · The area buttons become a row; wide tables scroll inside their cards.
+`/dashboard/operator` · The area buttons get a row of their own, the page pills another; the grid falls to one column and
+wide tables scroll inside their cards.
 
 ![Operator overview](phone-operator-overview.png)
 

@@ -17,8 +17,8 @@
     </div>
 </div>
 
-<div class="row-2">
-    <section class="card" aria-labelledby="job-h">
+<div class="grid">
+    <section class="card g-col-4 2xl:g-col-2" aria-labelledby="job-h">
         <h2 id="job-h">Job</h2>
         <dl class="rows">
             <dt>Job id</dt><dd><code>{{ job.id }}</code></dd>
@@ -29,7 +29,7 @@
             <dt>Addresses</dt><dd>{{ job.total_addresses|number_format }} ({{ job.processed_count|number_format }} checked)</dd>
         </dl>
     </section>
-    <section class="card" aria-labelledby="class-h">
+    <section class="card g-col-4 2xl:g-col-2" aria-labelledby="class-h">
         <h2 id="class-h">Classification summary</h2>
         <dl class="facts">
             <div><dt>Deliverable or probably deliverable</dt><dd class="lg">{{ ok|number_format }}</dd></div>

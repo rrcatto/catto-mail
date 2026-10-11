@@ -35,7 +35,7 @@ aardvark-dns version, even for containers on two networks.
 
 | Component | Networks | Inbound | Outbound (production) |
 |---|---|---|---|
-| nginx | internal + ingress | **HTTPS 443 and SMTP 25 from the Internet** on the sockets of `<instance>-ingress.socket` (`PROXY_HTTPS_BIND`, `POSTFIX_SMTP_BIND`) | FastCGI to `symfony-app:9000`; SMTP to `postfix-ingress:25` with the PROXY protocol |
+| nginx | internal + ingress | **HTTPS 443 and SMTP 25 from the Internet**, and HTTP 80, which only redirects to HTTPS, on the sockets of `<instance>-ingress.socket` (`PROXY_HTTPS_BIND`, `POSTFIX_SMTP_BIND`, `PROXY_HTTP_BIND`) | FastCGI to `symfony-app:9000`; SMTP to `postfix-ingress:25` with the PROXY protocol |
 | Postfix | internal + ingress + **egress** | **SMTP 25 from nginx only** (`postfix-ingress:25`, PROXY protocol: the real client address), bounce domain only; submission 587 from the delivery daemon and the application (SASL + TLS) | **SMTP 25 to destination MX hosts** (DNS through the egress network); milter to `opendkim:8891` |
 | webhook worker | internal + **egress** | – | **HTTPS to client webhook endpoints** (public addresses only: SSRF guard, address pinning, no redirects); PostgreSQL |
 | validator | internal + **egress** | – | **DNS**; **SMTP 25 to MX hosts** only when `VALIDATOR_SMTP_PROBE_ENABLED=true`; PostgreSQL |
@@ -69,7 +69,7 @@ Outbound
 ### Host firewall
 
 `smarthostctl prod firewall` prints an nftables ruleset for review:
-- **Inbound:** SSH (`SMARTHOST_SSH_PORT`), 25 and 443 only.
+- **Inbound:** SSH (`SMARTHOST_SSH_PORT`), 25, 80 and 443 only.
 - **Outbound for the service user:** DNS, 25, 80 and 443. Rootless containers reach the Internet
   through processes of this user, so the limit applies to all containers together.
 
@@ -109,7 +109,7 @@ process stands in between. Nothing is published, and nginx keeps no Internet egr
 
 ```text
 Internet client 198.51.100.7
-  -> host kernel, socket of <instance>-ingress.socket (0.0.0.0:443 / 0.0.0.0:25)
+  -> host kernel, socket of <instance>-ingress.socket (0.0.0.0:443 / 0.0.0.0:25; 0.0.0.0:80 only redirects)
   -> nginx accept(): peer 198.51.100.7            <- the trusted remote address is established here
        HTTPS: FastCGI REMOTE_ADDR=198.51.100.7 -> Symfony Request::getClientIp() = REMOTE_ADDR
               (TRUSTED_PROXIES is empty: X-Forwarded-For/-Proto from clients are ignored)
@@ -137,17 +137,17 @@ addresses: `smarthostctl prod ingress-check`, part of `preflight --activation`.
 
 **Operating it.**
 - `smarthost.service` (the topology script) starts and stops the socket and nginx with the other
-  containers. `stop` releases 25/443.
+  containers. `stop` releases 25/80/443.
 - nginx has no Podman restart policy. If it crashes, systemd restarts it with the same sockets.
 - Use `prod replace nginx` or `prod restart`, never `podman restart` or `podman start` on nginx:
   started without the sockets, it serves nothing, and the preflight reports it.
 
 ### 2.2 Ports below 1024 for a rootless service
 
-The socket unit runs as the unprivileged service user, so binding 443 and 25 needs
+The socket unit runs as the unprivileged service user, so binding 443, 25 and 80 needs
 `net.ipv4.ip_unprivileged_port_start=25` on the host (runbook §1). The setting is system-wide: any
 local user may then bind 25–1023, while 1–24 (SSH on 22) stay privileged. On a dedicated host
-with no other interactive users this is accepted. While the socket unit is active it holds both
+with no other interactive users this is accepted. While the socket unit is active it holds the
 ports, so no one else can take them.
 
 `smarthostctl prod preflight --section host` checks the running value against the configured

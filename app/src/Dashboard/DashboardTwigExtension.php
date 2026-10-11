@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Dashboard;
 
 use App\Util\InstallationTime;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Twig\Attribute\AsTwigFilter;
 use Twig\Attribute\AsTwigFunction;
 
@@ -22,6 +23,7 @@ final class DashboardTwigExtension
         private readonly \App\System\DeliveryControl $delivery,
         private readonly Navigation $nav,
         private readonly InstallationTime $time,
+        #[Autowire('%app.admin_email%')] private readonly string $adminEmail = '',
     ) {
     }
 
@@ -64,6 +66,15 @@ final class DashboardTwigExtension
     public static function appVersion(): string
     {
         return \App\Version::VERSION;
+    }
+
+    /** The administrator's address (APP_ADMIN_EMAIL), the contact in every page's footer; '' when none is set. */
+    #[AsTwigFunction('admin_email')]
+    public function adminEmail(): string
+    {
+        $email = trim($this->adminEmail);
+
+        return str_contains($email, '@') ? $email : '';
     }
 
     /** "12 s ago" style ages of a timestamp; "never" for none. */

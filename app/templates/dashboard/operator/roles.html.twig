@@ -9,7 +9,8 @@
     </div>
     {% if is_granted('SYSTEM.ROLE.MANAGE') %}<div class="actions"><a class="btn" href="#create-role">Create a role</a></div>{% endif %}
 </div>
-<section class="card card-flush" aria-labelledby="roles-h">
+<div class="grid">
+<section class="card card-flush {{ is_granted('SYSTEM.ROLE.MANAGE') ? 'g-col-4 xl:g-col-3' : 'g-col-4' }}" aria-labelledby="roles-h">
     <div class="card-head"><h2 id="roles-h">Roles</h2><span class="count count-dark">{{ roles|length }}</span></div>
     <div class="scroll"><table>
         <thead><tr><th scope="col">Role</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col" class="num">Permissions</th><th scope="col" class="num">Users</th></tr></thead>
@@ -20,7 +21,7 @@
     </table></div>
 </section>
 {% if is_granted('SYSTEM.ROLE.MANAGE') %}
-<section class="card" id="create-role" aria-labelledby="create-role-h">
+<section class="card g-col-4 xl:g-col-1" id="create-role" aria-labelledby="create-role-h">
     <h2 id="create-role-h">Create a role</h2>
     <form method="post" action="{{ path('dashboard_operator_role_create') }}" class="form-grid">
         {{ ui.csrf() }}
@@ -31,4 +32,5 @@
     </form>
 </section>
 {% endif %}
+</div>
 {% endblock %}

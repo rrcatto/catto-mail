@@ -4,7 +4,7 @@
 <h2 id="tls-h">Certificates</h2>
 <p>Two certificates: one for HTTPS (this dashboard, the API, tracking links) on the web host name, one for SMTP (STARTTLS on port 25) on the mail host name.
 catto-mail obtains them from <strong>Let's Encrypt</strong> with the <strong>DNS-01</strong> method: it proves control of the names by creating a temporary TXT record in your DNS,
-so port 80 never has to be opened. {{ ui.help('tls') }}</p>
+so no inbound port is needed (port 80 only redirects visitors to HTTPS). {{ ui.help('tls') }}</p>
 <dl class="rows">
 <dt>Automatic certificates</dt><dd>{% if acme.configured ?? false %}configured: DNS provider <code>{{ acme.provider }}</code>{% if acme.provider == 'manual' %} (manual: renewals need you){% endif %}{% else %}<strong>not configured</strong> — set <code>ACME_EMAIL</code>, <code>ACME_DNS_PROVIDER</code> and <code>ACME_CREDENTIALS_FILE</code> in <code>infra/.env</code> (or re-run the installer){% endif %}</dd>
 <dt>Last renewal attempt</dt><dd>{{ acme.last_attempt_at ?? 'never' }} {{ acme.last_result ?? '' }}</dd>

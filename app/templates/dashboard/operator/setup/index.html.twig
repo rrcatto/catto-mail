@@ -16,8 +16,8 @@
 {% if complete %}<p class="flash flash-success">Setup is complete. Live delivery is a separate decision: see <a href="{{ path('dashboard_operator_system') }}">Mail flow › Delivery</a>.</p>{% endif %}
 {% if agent_age is null %}<p class="warn">The host agent has not reported yet, so the host, DNS, TLS, Postfix and backup checks are missing. It is installed by <code>smarthostctl prod install</code> and reports within a minute of starting.</p>{% endif %}
 
-<div class="with-aside">
-    <section class="card" aria-labelledby="steps-h">
+<div class="grid">
+    <section class="card g-col-4 xl:g-col-3" aria-labelledby="steps-h">
         <div class="card-head"><h2 id="steps-h">Steps</h2><span class="muted small">{{ done }} of {{ total }} done</span></div>
         <ol class="stepper">
         {% for s in steps %}
@@ -29,7 +29,7 @@
         {% endfor %}
         </ol>
     </section>
-    <aside class="card" aria-labelledby="progress-h">
+    <aside class="card g-col-4 xl:g-col-1 sticky-side" aria-labelledby="progress-h">
         <h2 id="progress-h">Progress</h2>
         <p class="big">{{ done }} of {{ total }} <span>steps done</span></p>
         <progress max="{{ total }}" value="{{ done }}" aria-label="{{ done }} of {{ total }} steps done">{{ done }} of {{ total }}</progress>

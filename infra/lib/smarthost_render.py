@@ -65,8 +65,8 @@ DOTENV = Path(os.environ.get("SMARTHOST_DOTENV") or ROOT / "infra/.env")
 GENERATED = Path(os.environ.get("SMARTHOST_GENERATED") or ROOT / "infra/.generated")
 TEMPLATE_DIRS = {"podman": ROOT / "infra/podman", "systemd": ROOT / "infra/systemd"}
 # Production only, rendered as <instance>-<name>: the systemd socket that binds
-# PROXY_HTTPS_BIND/POSTFIX_SMTP_BIND on the host and the service that starts nginx with
-# those sockets (client addresses preserved); the Phase 9 reputation-evaluation timer.
+# PROXY_HTTPS_BIND/POSTFIX_SMTP_BIND/PROXY_HTTP_BIND on the host and the service that starts
+# nginx with those sockets (client addresses preserved); the Phase 9 reputation-evaluation timer.
 PRODUCTION_TEMPLATE_DIR = ROOT / "infra/systemd/production"
 
 ROW = re.compile(r"^\| `([A-Z][A-Z0-9_]*)` \| ([^|]+)\| (\*\*yes\*\*|no) \| ([^|]+)\| ([^|]*)\|", re.M)
@@ -410,7 +410,7 @@ def production_errors(v: dict[str, str]) -> list[str]:
     if v.get("SMARTHOST_LIVE_DELIVERY_ENABLED") == "true":
         need(egress == "true", "live delivery requires SMARTHOST_EGRESS_ENABLED=true")
     binds = []
-    for var in ("PROXY_HTTPS_BIND", "POSTFIX_SMTP_BIND"):
+    for var in ("PROXY_HTTPS_BIND", "POSTFIX_SMTP_BIND", "PROXY_HTTP_BIND"):
         m = re.match(r"^([0-9.]+):([0-9]+)$", v.get(var, ""))
         try:
             ipaddress.IPv4Address(m.group(1) if m else "")
@@ -419,7 +419,7 @@ def production_errors(v: dict[str, str]) -> list[str]:
             ok = False
         need(ok, f"{var} must be IPv4-address:port (the ingress socket binds it on the host)")
         binds.append(v.get(var, ""))
-    need(binds[0] != binds[1], "PROXY_HTTPS_BIND and POSTFIX_SMTP_BIND must differ")
+    need(len(set(binds)) == len(binds), "PROXY_HTTPS_BIND, POSTFIX_SMTP_BIND and PROXY_HTTP_BIND must differ")
     subnets = []
     for var in ("SMARTHOST_INTERNAL_SUBNET", "SMARTHOST_EGRESS_SUBNET", "SMARTHOST_INGRESS_SUBNET"):
         try:

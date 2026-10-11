@@ -34,16 +34,16 @@
     {% if may_admin %}
     <form method="post" action="{{ path('dashboard_client_policy_accept', {clientId: cid}) }}" class="stack">
         {{ ui.csrf() }}<input type="hidden" name="policy_version" value="{{ policy.version_in_force }}">
-        <label class="check"><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
+        <label class="checkline"><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
         <button type="submit">Accept policy {{ policy.version_in_force }}</button>
     </form>
     {% else %}<p class="muted">Ask a client admin to accept it.</p>{% endif %}
 </section>
 {% endif %}
 
-<div class="row-2 row-wide-left">
-    {% include 'dashboard/_flow_card.html.twig' with {flow_title: 'Messages per ' ~ period.unit} %}
-    <section class="card" aria-labelledby="quota-h">
+<div class="grid">
+    {% include 'dashboard/_flow_card.html.twig' with {flow_title: 'Messages per ' ~ period.unit, span: 'g-col-4 xl:g-col-3'} %}
+    <section class="card g-col-4 xl:g-col-1" aria-labelledby="quota-h">
         <div class="card-head"><h2 id="quota-h">Quotas</h2><a class="more" href="{{ path('dashboard_client_usage', {clientId: cid}) }}">All limits and usage</a></div>
         {% set shown = limits.quotas|filter(q => q.limit is not null or q.used > 0) %}
         {% if shown is empty %}
@@ -71,9 +71,9 @@
 
 {% include 'dashboard/_kpis.html.twig' %}
 
-<div class="grid grid-4">
+<div class="grid">
     {% include 'dashboard/_validation_card.html.twig' with {validation_link: path('dashboard_client_validation_jobs', {clientId: cid})} %}
-    <section class="card" aria-labelledby="dom-h">
+    <section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="dom-h">
         <div class="card-head"><h2 id="dom-h">Sending domains</h2><a class="more" href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Details</a></div>
         {% if o.domains is empty %}<p class="empty">No sending domains yet. An operator registers them.</p>{% else %}
         <ul class="domains">{% for d in o.domains %}
@@ -83,7 +83,7 @@
         {% endif %}
         <p class="muted small">A domain sends only when it is verified and its DKIM key is active.</p>
     </section>
-    <section class="card" aria-labelledby="eng-h">
+    <section class="card g-col-4 lg:g-col-2" aria-labelledby="eng-h">
         <h2 id="eng-h">Engagement</h2>
         <p class="muted small">Send jobs of the last {{ period.label }}.</p>
         <dl class="facts facts-2">

@@ -15,8 +15,8 @@
 </div>
 {% if is_configured_admin %}<p class="caveat">This is the configured administrator address (<code>APP_ADMIN_EMAIL</code>): it receives the ADMIN role every time it signs in.</p>{% endif %}
 
-<div class="row-2">
-    <section class="card" aria-labelledby="account-h">
+<div class="grid">
+    <section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="account-h">
         <h2 id="account-h">Account</h2>
         <dl class="rows">
             <dt>Email</dt><dd>{{ u.email }}</dd>
@@ -41,7 +41,7 @@
         </form>
         {% endif %}
     </section>
-    <section class="card" aria-labelledby="roles-h">
+    <section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="roles-h">
         <h2 id="roles-h">Roles</h2>
         <table class="kv"><tbody>
         {% for r in roles %}
@@ -60,9 +60,7 @@
         </tbody></table>
         <p class="muted small">ADMIN holds every permission. Only an administrator can grant or revoke ADMIN.</p>
     </section>
-</div>
-
-<section class="card card-flush" aria-labelledby="memberships-h">
+<section class="card card-flush g-col-4 2xl:g-col-2" aria-labelledby="memberships-h">
     <div class="card-head"><h2 id="memberships-h">Client memberships</h2><span class="count count-dark">{{ memberships|length }}</span></div>
     {% if memberships is empty %}<p class="empty">No client memberships.</p>{% else %}
     <div class="scroll"><table>
@@ -77,7 +75,7 @@
     {% endif %}
 </section>
 {% if manage %}
-<section class="card" aria-labelledby="membership-add-h">
+<section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="membership-add-h">
     <h2 id="membership-add-h">Add or change a membership</h2>
     <form method="post" action="{{ path('dashboard_operator_user_membership', {id: u.id.toRfc4122}) }}" class="form-grid">
         {{ ui.csrf() }}
@@ -88,4 +86,5 @@
     <p class="muted small">Viewer: read the client's pages. Member: also run sending-domain checks. Admin: also lift the client's own global opt-outs.</p>
 </section>
 {% endif %}
+</div>
 {% endblock %}

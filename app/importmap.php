@@ -28,4 +28,7 @@ return [
     '@symfony/stimulus-bundle' => ['path' => './vendor/symfony/stimulus-bundle/assets/dist/loader.js'],
     'chart.js' => ['version' => '4.5.0'],
     '@kurkle/color' => ['version' => '0.3.4'],
+    // Bootstrap 6 (owner decision 2026-10-10): the compiled CSS only, linked by templates/_site.html.twig
+    // under styles/app.css; no Bootstrap JavaScript.
+    'bootstrap/dist/css/bootstrap.min.css' => ['version' => '6.0.0-alpha.1', 'type' => 'css'],
 ];

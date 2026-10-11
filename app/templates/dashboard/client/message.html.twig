@@ -11,7 +11,8 @@
     </div>
 </div>
 
-<dl class="facts">
+<div class="grid">
+<dl class="facts g-col-4 xl:g-col-1 sticky-side">
     <div><dt>Message id</dt><dd><code>{{ message.id }}</code></dd></div>
     <div><dt>Recipient reference</dt><dd>{{ message.external_recipient_reference }}</dd></div>
     <div><dt>Current status</dt><dd>{{ ui.status(message.current_status, 'message_status') }}</dd></div>
@@ -22,7 +23,7 @@
     <div><dt>Recorded clicks</dt><dd>{{ message.clicks }} <small>(first {{ message.first_click|ts }}, last {{ message.last_click|ts }})</small></dd></div>
 </dl>
 
-<section class="card" aria-labelledby="tl-h">
+<section class="card g-col-4 xl:g-col-3" aria-labelledby="tl-h">
     <h2 id="tl-h">Event timeline</h2>
     <p class="muted small">Events are append-only and listed in the order they happened. Transport events come from Postfix and inbound DSNs; recorded opens and clicks come from the tracking endpoints.</p>
     {% if page.rows is empty %}<p class="empty">No events yet.</p>{% else %}
@@ -46,5 +47,6 @@
     </ol>
     {% endif %}
 </section>
+</div>
 {{ ui.pager(page, 'events') }}
 {% endblock %}

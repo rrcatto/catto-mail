@@ -1,11 +1,12 @@
-{% import 'dashboard/_macros.html.twig' as ui %}{% import 'dashboard/_icons.html.twig' as icon %}<!DOCTYPE html>
+{% import 'dashboard/_macros.html.twig' as ui %}{% import 'dashboard/_icons.html.twig' as icon %}{% import '_site.html.twig' as site %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {{ site.application_meta() }}
     <meta name="referrer" content="same-origin">
     <title>{% block title %}Dashboard{% endblock %} · Catto Mail</title>
-    <link rel="stylesheet" href="{{ asset('styles/app.css') }}">
+    {{ site.stylesheets() }}
     {{ importmap('app', {nonce: csp_nonce()}) }}
 </head>
 <body{% if not app.user %} class="bare"{% endif %}>
@@ -18,6 +19,22 @@
 {% set ds = platform and is_granted('PLATFORM.SYSTEM.VIEW') ? delivery_status() : null %}
 <header class="topbar">
     <a class="brand" href="{{ path('dashboard_home') }}">{{ icon.logo() }}<span>Catto Mail</span></a>
+    {# The area buttons sit in the top bar, so the page grid spans the full width (owner decision, 2026-10-10). #}
+    {% if nav.areas is not empty or nav.help or nav.switch %}
+    <nav class="orbs" aria-label="Main">
+        <ul>
+            {% for a in nav.areas %}
+            <li><a class="orb" href="{{ a.href }}"{% if a.current %} aria-current="page"{% endif %}>{{ icon.i(a.icon, 22) }}<span class="orb-label">{{ a.label }}</span>{% if a.badge %}<span class="orb-badge count-{{ a.badge[1] }}" aria-hidden="true">{{ a.badge[0] }}</span><span class="sr">, {{ a.badge[0] }} to look at</span>{% endif %}</a></li>
+            {% endfor %}
+        </ul>
+        {% if nav.help or nav.switch %}
+        <ul class="orbs-end">
+            {% if nav.help %}<li><a class="orb" href="{{ nav.help }}"{% if (section ?? '') == 'help' %} aria-current="page"{% endif %}>{{ icon.i('help', 22) }}<span class="orb-label">Help</span></a></li>{% endif %}
+            {% if nav.switch %}<li><a class="orb" href="{{ nav.switch.href }}">{{ icon.i('switch', 22) }}<span class="orb-label">{{ nav.switch.label }}</span></a></li>{% endif %}
+        </ul>
+        {% endif %}
+    </nav>
+    {% endif %}
     {% block pills %}
         {% if nav.pills|length > 0 %}
         <nav class="pills" aria-label="Pages in this area">
@@ -70,33 +87,18 @@
         </details>
     </div>
 </header>
-<div class="shell">
-    {% if nav.areas is not empty or nav.help or nav.switch %}
-    <nav class="orbs" aria-label="Main">
-        <ul>
-            {% for a in nav.areas %}
-            <li><a class="orb" href="{{ a.href }}"{% if a.current %} aria-current="page"{% endif %}>{{ icon.i(a.icon, 24) }}<span class="orb-label">{{ a.label }}</span>{% if a.badge %}<span class="orb-badge count-{{ a.badge[1] }}" aria-hidden="true">{{ a.badge[0] }}</span><span class="sr">, {{ a.badge[0] }} to look at</span>{% endif %}</a></li>
-            {% endfor %}
-        </ul>
-        <ul class="orbs-end">
-            {% if nav.help %}<li><a class="orb" href="{{ nav.help }}"{% if (section ?? '') == 'help' %} aria-current="page"{% endif %}>{{ icon.i('help', 24) }}<span class="orb-label">Help</span></a></li>{% endif %}
-            {% if nav.switch %}<li><a class="orb" href="{{ nav.switch.href }}">{{ icon.i('switch', 24) }}<span class="orb-label">{{ nav.switch.label }}</span></a></li>{% endif %}
-        </ul>
-    </nav>
+<main id="main" class="content">
+    {% if nav.context == 'client' and platform %}
+        <p class="viewing">You are viewing the workspace of <strong>{{ nav_client.companyName }}</strong> as an operator. <a href="{{ nav.switch.href }}">Back to the operator console</a></p>
     {% endif %}
-    <main id="main" class="content">
-        {% if nav.context == 'client' and platform %}
-            <p class="viewing">You are viewing the workspace of <strong>{{ nav_client.companyName }}</strong> as an operator. <a href="{{ nav.switch.href }}">Back to the operator console</a></p>
-        {% endif %}
-        {% for type, messages in app.flashes %}
-            {% for message in messages %}
-                <p class="flash flash-{{ type }}" role="{{ type == 'error' ? 'alert' : 'status' }}"><strong>{{ type == 'error' ? 'Error' : (type == 'success' ? 'Done' : 'Note') }}:</strong> {{ message }}</p>
-            {% endfor %}
+    {% for type, messages in app.flashes %}
+        {% for message in messages %}
+            <p class="flash flash-{{ type }}" role="{{ type == 'error' ? 'alert' : 'status' }}"><strong>{{ type == 'error' ? 'Error' : (type == 'success' ? 'Done' : 'Note') }}:</strong> {{ message }}</p>
         {% endfor %}
-        {% block body %}{% endblock %}
-        <footer class="foot">catto-mail v{{ app_version() }} · Times are shown in {{ time_zone_label() }}</footer>
-    </main>
-</div>
+    {% endfor %}
+    {% block body %}{% endblock %}
+</main>
+{{ site.footer() }}
 {% else %}
 <header class="topbar topbar-bare">
     <span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span>
@@ -109,6 +111,7 @@
     {% endfor %}
     {% block body_bare %}{{ block('body') }}{% endblock %}
 </main>
+{{ site.footer() }}
 {% endif %}
 </body>
 </html>

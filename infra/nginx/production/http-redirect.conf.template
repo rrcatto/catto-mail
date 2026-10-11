@@ -1,0 +1,15 @@
+# catto-mail production plain HTTP (owner decision, 2026-10-10). Production only
+# (NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-production).
+#
+# nginx inherits the socket that <instance>-ingress.socket binds for PROXY_HTTP_BIND
+# (0.0.0.0:80) and listens on exactly that address. Every request is redirected to the
+# same path on https://PROXY_SERVER_NAME, the address the certificate names; nothing
+# is served over plain HTTP. Not logged: the answer is the same for every request, and
+# a token in a mistyped http:// link never reaches a log.
+server {
+    listen ${PROXY_HTTP_BIND};
+    access_log off;
+    location / {
+        return 301 https://${PROXY_SERVER_NAME}$request_uri;
+    }
+}

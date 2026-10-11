@@ -18,6 +18,8 @@
     <button type="submit">Apply</button>
     <a href="{{ path('dashboard_operator_users') }}">Reset</a>
 </form>
+<div class="grid">
+<div class="{{ manage ? 'g-col-4 2xl:g-col-3' : 'g-col-4' }}">
 <section class="card card-flush" aria-labelledby="users-h">
     <div class="card-head"><h2 id="users-h">People</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
     {% if page.rows is empty %}<p class="empty">No users match.</p>{% else %}
@@ -31,9 +33,9 @@
     {% endif %}
 </section>
 {{ ui.pager(page, 'users') }}
-
+</div>
 {% if manage %}
-<section class="card" id="add-user" aria-labelledby="add-user-h">
+<section class="card g-col-4 2xl:g-col-1" id="add-user" aria-labelledby="add-user-h">
     <h2 id="add-user-h">Add a user</h2>
     <form method="post" action="{{ path('dashboard_operator_user_create') }}" class="form-grid">
         {{ ui.csrf() }}
@@ -49,10 +51,11 @@
             <select name="membership_role">{% for m in membership_roles %}<option value="{{ m.value }}">{{ m.value|capitalize }}</option>{% endfor %}</select>
         </label>
         <div class="form-actions span-all">
-            <label class="check"><input type="checkbox" name="send_link" value="1" checked> Email them a sign-in link now</label>
+            <label class="checkline"><input type="checkbox" name="send_link" value="1" checked> Email them a sign-in link now</label>
             <button type="submit">Add user</button>
         </div>
     </form>
 </section>
 {% endif %}
+</div>
 {% endblock %}

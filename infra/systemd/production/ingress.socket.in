@@ -2,8 +2,8 @@
 # Rendered by `smarthostctl prod render` as <instance>-ingress.socket; do not edit
 # the rendered copy. Production only: the development pod publishes its ports.
 #
-# The service user's systemd binds the public HTTPS and SMTP listeners in the host's
-# network namespace and hands both sockets to nginx (<instance>-ingress.service).
+# The service user's systemd binds the public HTTPS, SMTP and plain HTTP listeners in the
+# host's network namespace and hands the sockets to nginx (<instance>-ingress.service).
 # nginx accepts every connection on them itself, so it sees the client's real
 # address. Rootless port forwarding (rootlessport, pasta) would show nginx and Postfix
 # one internal address for every client instead.
@@ -13,11 +13,13 @@
 # script starts this socket and its service with the other containers and stops both
 # on `stop`. It is not started on its own at boot.
 [Unit]
-Description=catto-mail ingress sockets ${SMARTHOST_INSTANCE}: HTTPS ${PROXY_HTTPS_BIND}, SMTP ${POSTFIX_SMTP_BIND}
+Description=catto-mail ingress sockets ${SMARTHOST_INSTANCE}: HTTPS ${PROXY_HTTPS_BIND}, SMTP ${POSTFIX_SMTP_BIND}, HTTP ${PROXY_HTTP_BIND}
 
 [Socket]
-# Inherited as fd 3 (HTTPS) and fd 4 (SMTP). nginx matches inherited sockets to its
-# listen directives by address, so it listens on exactly these two addresses.
+# Inherited as fd 3 (HTTPS), fd 4 (SMTP) and fd 5 (HTTP, which only redirects to HTTPS).
+# nginx matches inherited sockets to its listen directives by address, so it listens on
+# exactly these three addresses.
 ListenStream=${PROXY_HTTPS_BIND}
 ListenStream=${POSTFIX_SMTP_BIND}
+ListenStream=${PROXY_HTTP_BIND}
 Service=${SMARTHOST_INSTANCE}-ingress.service

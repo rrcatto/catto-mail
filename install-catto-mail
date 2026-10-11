@@ -214,7 +214,7 @@ for _ in $(seq 1 30); do [[ -S "/run/user/$(id -u "$SERVICE_USER")/bus" ]] && br
 [[ -S "/run/user/$(id -u "$SERVICE_USER")/bus" ]] || fail "the user's systemd did not start" "loginctl user-status $SERVICE_USER; reboot and re-run" yes
 pass
 
-step "Allowing the service user to listen on ports 25 and 443"
+step "Allowing the service user to listen on ports 25, 80 and 443"
 echo 'net.ipv4.ip_unprivileged_port_start=25' > /etc/sysctl.d/60-catto-mail-ports.conf
 run sysctl --system
 [[ "$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start)" -le 25 ]] \
@@ -250,7 +250,7 @@ else
   ask WEB_HOST "Public web host name (dashboard and API), e.g. mail.example.com"
   ask MTA_HOST "Mail host name (EHLO, PTR), e.g. mta.example.com" "${WEB_HOST:+mta.${WEB_HOST#*.}}"
   ask BOUNCE_DOMAIN "Bounce domain, e.g. bounce.example.com" "${WEB_HOST:+bounce.${WEB_HOST#*.}}"
-  ask ADMIN_EMAIL "Administrator e-mail address (an existing mailbox at your mail provider; catto-mail receives no mail for it)"
+  ask ADMIN_EMAIL "Administrator e-mail address (an existing mailbox at your mail provider; catto-mail receives no mail for it; shown as the contact in every page's footer)"
   ask MAIL_FROM "Sender of the sign-in mail" "${WEB_HOST:+no-reply@${WEB_HOST#*.}}"
   for pair in "WEB_HOST:$WEB_HOST" "MTA_HOST:$MTA_HOST" "BOUNCE_DOMAIN:$BOUNCE_DOMAIN"; do
     valid_host "${pair#*:}" || fail "${pair%%:*} '${pair#*:}' is not a valid host name" "give a fully qualified lower-case name, e.g. mail.example.com" yes
@@ -356,11 +356,11 @@ step "Preparing the firewall rules"
 FW="/home/$SERVICE_USER/catto-mail-firewall.nft"
 prod firewall >"$FW" 2>>"$LOG" || fail "the firewall rules could not be generated" "see the log" yes
 if [[ "$APPLY_FIREWALL" == true ]]; then
-  grep -q "tcp dport { $SSH_PORT, 25, 443 }" "$FW" || fail "the generated rules do not keep SSH port $SSH_PORT open" "pass --ssh-port" yes
+  grep -q "tcp dport { $SSH_PORT, 25, 80, 443 }" "$FW" || fail "the generated rules do not keep SSH port $SSH_PORT open" "pass --ssh-port" yes
   run nft -f "$FW" || fail "nft could not apply the rules" "see the log" yes
   grep -qF "$FW" /etc/nftables.conf 2>/dev/null || { echo "include \"$FW\"" >> /etc/nftables.conf; }
   run systemctl enable nftables
-  pass "applied; SSH port $SSH_PORT, 25 and 443 open"
+  pass "applied; SSH port $SSH_PORT, 25, 80 and 443 open"
 else
   warn "generated $FW, not applied (review it, then: nft -f $FW)"
 fi

@@ -15,7 +15,7 @@
 <dt>Server booted</dt><dd>{{ b.boot_time ?? '?' }}</dd>
 <dt>catto-mail started automatically</dt><dd>{{ b.started_automatically is defined ? (b.started_automatically ? 'yes' : 'NO') : '?' }} {% if b.unit_started_at is defined %}<small class="muted">(smarthost.service at {{ b.unit_started_at }})</small>{% endif %}</dd>
 <dt>All containers healthy</dt><dd>{{ b.containers_healthy is defined ? (b.containers_healthy ? 'yes' : 'NO: ' ~ (b.unhealthy ?? [])|join(', ')) : '?' }}</dd>
-<dt>Ingress socket (ports 443 and 25)</dt><dd>{{ b.ingress_active is defined ? (b.ingress_active ? 'active' : 'NOT active') : '?' }}</dd>
+<dt>Ingress socket (ports 443, 25 and 80)</dt><dd>{{ b.ingress_active is defined ? (b.ingress_active ? 'active' : 'NOT active') : '?' }}</dd>
 <dt>Delivery mode after boot</dt><dd>{{ b.live_delivery is defined ? (b.live_delivery ? 'LIVE' : 'HELD') : '?' }}{% if b.paused is defined and b.paused %}, PAUSED (preserved){% endif %}</dd>
 <dt>Recorded</dt><dd>{{ boot.updated_at|ts }}</dd>
 </dl>{% endif %}

@@ -30,4 +30,14 @@
     array (
     ),
   ),
+  'bootstrap/dist/css/bootstrap.min.css' => 
+  array (
+    'version' => '6.0.0-alpha.1',
+    'dependencies' => 
+    array (
+    ),
+    'extraFiles' => 
+    array (
+    ),
+  ),
 );

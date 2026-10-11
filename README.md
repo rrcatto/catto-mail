@@ -80,7 +80,7 @@ message, step by step: [docs/production/architecture.md](docs/production/archite
 
 ## Install on an Ubuntu VPS
 
-You need an Ubuntu Server 26.04 LTS VPS with a static public IPv4, ports 25 and 443 open, outbound
+You need an Ubuntu Server 26.04 LTS VPS with a static public IPv4, ports 25, 80 and 443 open, outbound
 port 25 allowed, and control of the IP's PTR. Releases (notes and zip downloads) are on the
 [releases page](https://github.com/rrcatto/catto-mail/releases); `v0.1.9` is the first with the
 installer. As root:

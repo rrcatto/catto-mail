@@ -35,7 +35,7 @@
                 <td>{{ s.created_at|ts }}</td>
                 <td>{% if s.lifted_at %}Lifted {{ s.lifted_at|ts }}{% elseif s.expires_at %}Expires {{ s.expires_at|ts }}{% else %}Never expires{% endif %}</td>
                 <td>{% if s.state == 'active' and manage %}
-                    <form method="post" action="{{ path('dashboard_operator_suppression_lift', {id: s.id}) }}" class="row" data-controller="confirm" data-confirm-message-value="Lift this suppression of {{ s.address_or_domain }}? The row is kept as history.">
+                    <form method="post" action="{{ path('dashboard_operator_suppression_lift', {id: s.id}) }}" class="formrow" data-controller="confirm" data-confirm-message-value="Lift this suppression of {{ s.address_or_domain }}? The row is kept as history.">
                         {{ ui.csrf() }}<input type="hidden" name="return_address" value="{{ filters.address }}">
                         <label class="sr" for="note-{{ s.id }}">Reason for lifting</label>
                         <input id="note-{{ s.id }}" type="text" name="note" required minlength="3" placeholder="Reason (required)">
@@ -50,19 +50,21 @@
 {{ ui.pager(page, 'suppressions') }}
 
 {% if manage %}
-<section class="card" id="create-block" aria-labelledby="block-h">
-    <h2 id="block-h">Create an operator block</h2>
-    <p class="muted small">An operator block stops all mail to an address or a whole domain, globally or for one client. The note is kept in the audit log.</p>
-    <form method="post" action="{{ path('dashboard_operator_suppression_create') }}" class="form-grid">
-        {{ ui.csrf() }}
-        <label>Address or domain <input type="text" name="value" required></label>
-        <label>Type <select name="scope_type"><option value="address">Address</option><option value="domain">Domain</option></select></label>
-        <label>Reason <select name="reason">{% for r in operator_reasons %}<option value="{{ r.value }}">{{ r.value|label('suppression_reason') }}</option>{% endfor %}</select></label>
-        <label>Client id (empty = global) <input type="text" name="client_id" pattern="[0-9a-fA-F-]{36}"></label>
-        <label>Expires in days (empty = never) <input type="number" name="expires_in_days" min="1"></label>
-        <label>Reason note (required) <input type="text" name="note" required minlength="3"></label>
-        <div class="form-actions span-all"><button type="submit">Create block</button></div>
-    </form>
-</section>
+<div class="grid">
+    <section class="card g-col-4 lg:g-col-2" id="create-block" aria-labelledby="block-h">
+        <h2 id="block-h">Create an operator block</h2>
+        <p class="muted small">An operator block stops all mail to an address or a whole domain, globally or for one client. The note is kept in the audit log.</p>
+        <form method="post" action="{{ path('dashboard_operator_suppression_create') }}" class="form-grid">
+            {{ ui.csrf() }}
+            <label>Address or domain <input type="text" name="value" required></label>
+            <label>Type <select name="scope_type"><option value="address">Address</option><option value="domain">Domain</option></select></label>
+            <label>Reason <select name="reason">{% for r in operator_reasons %}<option value="{{ r.value }}">{{ r.value|label('suppression_reason') }}</option>{% endfor %}</select></label>
+            <label>Client id (empty = global) <input type="text" name="client_id" pattern="[0-9a-fA-F-]{36}"></label>
+            <label>Expires in days (empty = never) <input type="number" name="expires_in_days" min="1"></label>
+            <label>Reason note (required) <input type="text" name="note" required minlength="3"></label>
+            <div class="form-actions span-all"><button type="submit">Create block</button></div>
+        </form>
+    </section>
+</div>
 {% endif %}
 {% endblock %}

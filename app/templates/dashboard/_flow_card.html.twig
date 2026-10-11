@@ -1,5 +1,6 @@
-{# Messages per bucket of the period (TrendCharts::flow). Variables: flow, period, flow_title. #}
-<section class="card chart-card" aria-labelledby="flow-h">
+{# Messages per bucket of the period (TrendCharts::flow). Variables: flow, period, flow_title; optional span (its
+   page-grid columns, default the full width). #}
+<section class="card chart-card {{ span ?? 'g-col-4' }}" aria-labelledby="flow-h">
     <div class="card-head">
         <h2 id="flow-h">{{ flow_title }}</h2>
         <p class="muted small">Messages per {{ period.unit }}, by the {{ period.unit }} their send job was created{% if flow.busiest %} · busiest: {{ flow.busiest.title }}, {{ flow.busiest.messages|number_format }}{% endif %}</p>

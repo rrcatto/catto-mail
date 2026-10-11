@@ -1,6 +1,6 @@
 {# The submission-rate card (Overview and Mail flow › Delivery). Variables: rate (OperatorOverview::submissionChart), period (OverviewPeriod);
    optional period_route: the card then offers its own period links (pages whose pills are not the period). #}
-<section class="card chart-card" aria-labelledby="rate-h">
+<section class="card chart-card {{ span ?? 'g-col-4 lg:g-col-2' }}" aria-labelledby="rate-h">
     <div class="card-head">
         <h2 id="rate-h">Submission rate</h2>
         <p class="muted small">Typical to peak messages submitted to Postfix per minute, each {{ period.unit }}{% if rate.ceiling %}, against the rate ceiling of {{ rate.ceiling }} per minute{% endif %}</p>

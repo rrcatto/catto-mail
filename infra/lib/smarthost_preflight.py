@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import http.client
 import ipaddress
 import json
 import os
@@ -520,6 +521,16 @@ class Host:
                         "Connection: close\r\n\r\n".encode())
             return tls.recv(200).decode(errors="replace").split("\r\n", 1)[0]
 
+    def http_probe(self, addr: str, port: int, host: str, path: str) -> tuple[str, str]:
+        """GET path over plain HTTP; returns the status line and the Location header."""
+        c = http.client.HTTPConnection(addr, port, timeout=15)
+        try:
+            c.request("GET", path, headers={"Host": host, "User-Agent": "catto-mail-preflight"})
+            r = c.getresponse()
+            return f"HTTP/1.1 {r.status} {r.reason}", r.getheader("Location") or ""
+        finally:
+            c.close()
+
     def smtp_probe(self, source: str, addr: str, port: int, helo: str) -> str:
         """Banner, EHLO and QUIT from a chosen source address; returns the banner."""
         with smtplib.SMTP(local_hostname=helo, timeout=15, source_address=(source, 0)) as s:
@@ -618,7 +629,7 @@ class Preflight:
     # ------------------------------------------------------------------ host
     def ports_needed(self) -> list[int]:
         out = []
-        for var in ("PROXY_HTTPS_BIND", "POSTFIX_SMTP_BIND"):
+        for var in ("PROXY_HTTPS_BIND", "POSTFIX_SMTP_BIND", "PROXY_HTTP_BIND"):
             port = self.v.get(var, "").rpartition(":")[2]
             if port.isdigit():
                 out.append(int(port))
@@ -665,7 +676,7 @@ class Preflight:
                      else f"the server uses {have or 'an unknown zone'}, the installation {want}: as root, timedatectl set-timezone {want}")
 
     def check_low_ports(self, remote: bool) -> None:
-        """The rootless service user's systemd binds the ingress ports (25, 443) on the host."""
+        """The rootless service user's systemd binds the ingress ports (25, 80, 443) on the host."""
         needed = self.ports_needed()
         low = min(needed) if needed else 0
         name = "rootless binding of the ingress ports"
@@ -794,7 +805,7 @@ class Preflight:
             public = sorted({ln.split()[3] for ln in out.splitlines() if len(ln.split()) > 3
                              and not re.match(r"^(127\.|\[::1\]|::1)", ln.split()[3])})
             ssh = self.v.get("SMARTHOST_SSH_PORT", "22")
-            other = [a for a in public if a.rsplit(":", 1)[-1] not in ("25", "443", ssh)]
+            other = [a for a in public if a.rsplit(":", 1)[-1] not in ("25", "80", "443", ssh)]
             self.add("exposure", "host listeners", "WARN" if other else "PASS",
                      f"public listeners: {public}" + (f"; not catto-mail: {other} (close or firewall them)" if other else ""))
 
@@ -821,15 +832,15 @@ class Preflight:
                      f"{sock} {active[0] if active else '?'}, {svc} {active[1] if len(active) > 1 else '?'}", True)
             listen = h.systemctl("show", "-p", "Listen", "--value", sock)
             got = sorted(ln.split()[0] for ln in (listen[1] if listen else "").splitlines() if ln.strip())
-            want = sorted([self.v.get("PROXY_HTTPS_BIND", ""), self.v.get("POSTFIX_SMTP_BIND", "")])
+            want = sorted([self.v.get("PROXY_HTTPS_BIND", ""), self.v.get("POSTFIX_SMTP_BIND", ""), self.v.get("PROXY_HTTP_BIND", "")])
             self.add("ingress", "socket binds", "PASS" if got == want else "FAIL", f"{got} (expected {want})", True)
         # nginx announces inherited sockets at every start (its process title overwrites
         # /proc/1/environ, so the environment cannot be read back).
         started = h.started_at("nginx")
         log = h.logs("nginx", started) if started else ""
-        ok = 'using inherited sockets from "3;4;"' in log and "invalid socket number" not in log
+        ok = 'using inherited sockets from "3;4;5;"' in log and "invalid socket number" not in log
         self.add("ingress", "nginx holds the inherited sockets", "PASS" if ok else "FAIL",
-                 f'since its start at {started}: "using inherited sockets from 3;4;"' if ok else
+                 f'since its start at {started}: "using inherited sockets from 3;4;5;"' if ok else
                  "nginx was not started by its socket unit (start and stop it only with smarthostctl prod)", True)
         rc, master = h.exec("postfix", "postconf", "-M")
         lines = master.splitlines() if rc == 0 else []
@@ -843,6 +854,23 @@ class Preflight:
                  "REMOTE_ADDR from nginx; no forwarded header trusted" if trusted == ""
                  else f"TRUSTED_PROXIES={trusted}: forwarded headers from those addresses would replace the client address", True)
         self.probe_sources()
+        self.probe_http_redirect()
+
+    def probe_http_redirect(self) -> None:
+        """Plain HTTP (PROXY_HTTP_BIND) answers every request with a redirect to the same path on
+        https://PROXY_SERVER_NAME and serves nothing itself (owner decision, 2026-10-10)."""
+        host, _, port = self.v.get("PROXY_HTTP_BIND", "").rpartition(":")
+        path = f"/.well-known/catto-mail-http-probe/{random.getrandbits(48):012x}?q=1"
+        want = f"https://{self.v['PROXY_SERVER_NAME']}{path}"
+        try:
+            status, location = self.host.http_probe("127.0.0.1" if host in ("", "0.0.0.0") else host, int(port or 0),
+                                                     self.v["PROXY_SERVER_NAME"], path)
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            self.add("ingress", "HTTP redirects to HTTPS", "FAIL", f"HTTP to {self.v.get('PROXY_HTTP_BIND', '')}: {exc}")
+            return
+        ok = status.split()[1:2] == ["301"] and location == want
+        self.add("ingress", "HTTP redirects to HTTPS", "PASS" if ok else "FAIL",
+                 f"{status} -> {location}" + ("" if ok else f" (expected 301 -> {want})"))
 
     def probe_sources(self) -> None:
         h = self.host
@@ -1251,7 +1279,7 @@ def firewall_ruleset(values: dict[str, str], uid: int) -> str:
     return f"""#!/usr/sbin/nft -f
 # catto-mail production host firewall (generated by `smarthostctl prod firewall`).
 # REVIEW before applying:  sudo nft -f <this file>   (persist via /etc/nftables.conf).
-# Inbound: SSH ({ssh}), SMTP 25 (bounce domain), HTTPS 443 only.
+# Inbound: SSH ({ssh}), SMTP 25 (bounce domain), HTTP 80 (redirects to HTTPS), HTTPS 443 only.
 # Outbound of the service user (uid {uid}): the rootless containers' traffic leaves
 # through processes of this user (rootlessport, slirp4netns/pasta), so it is limited
 # here to DNS, SMTP 25 (MX delivery, validation probes), HTTPS 443 (webhooks, image
@@ -1268,7 +1296,7 @@ table inet catto_mail {{
         ct state invalid drop
         iif "lo" accept
         meta l4proto {{ icmp, ipv6-icmp }} accept
-        tcp dport {{ {ssh}, 25, 443 }} ct state new accept
+        tcp dport {{ {ssh}, 25, 80, 443 }} ct state new accept
     }}
     chain output {{
         type filter hook output priority filter; policy accept;

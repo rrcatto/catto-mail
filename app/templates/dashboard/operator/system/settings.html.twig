@@ -34,8 +34,9 @@
     {% endif %}
 </section>
 
+<div class="grid">
 {% for g in groups %}
-<section class="card card-flush" id="{{ g.slug }}" aria-labelledby="{{ g.slug }}-h">
+<section class="card card-flush g-col-4 2xl:g-col-2" id="{{ g.slug }}" aria-labelledby="{{ g.slug }}-h">
     <div class="card-head"><h2 id="{{ g.slug }}-h">{{ g.title }}</h2></div>
     <div class="scroll"><table class="dense table-settings">
         <thead><tr><th scope="col">Setting</th><th scope="col">In <code>infra/.env</code></th><th scope="col">Set in the dashboard</th><th scope="col">In force</th></tr></thead>
@@ -65,4 +66,5 @@
     </form>{% endif %}
 </section>
 {% endfor %}
+</div>
 {% endblock %}

@@ -51,6 +51,9 @@ class ProductionRulesTest(unittest.TestCase):
             "no SMTP listener": ({"POSTFIX_SMTP_BIND": ""}, "POSTFIX_SMTP_BIND must be IPv4-address:port"),
             "IPv6 HTTPS listener": ({"PROXY_HTTPS_BIND": "[::]:443"}, "PROXY_HTTPS_BIND must be IPv4-address:port"),
             "one listener for both": ({"POSTFIX_SMTP_BIND": "0.0.0.0:443"}, "must differ"),
+            "no HTTP listener": ({"PROXY_HTTP_BIND": ""}, "PROXY_HTTP_BIND must be IPv4-address:port"),
+            "IPv6 HTTP listener": ({"PROXY_HTTP_BIND": "[::]:80"}, "PROXY_HTTP_BIND must be IPv4-address:port"),
+            "HTTP on the HTTPS listener": ({"PROXY_HTTP_BIND": "0.0.0.0:443"}, "must differ"),
             "service alias": ({"SMARTHOST_DB_HOST": "db.internal"}, "SMARTHOST_DB_HOST must be 'postgres'"),
             "connect timeout": ({"APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS": "30"}, "APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS"),
             "placeholder sign-in sender": ({"APP_MAIL_FROM": "no-reply@example.com"}, "APP_MAIL_FROM"),
@@ -144,7 +147,7 @@ class ProductionRenderingTest(unittest.TestCase):
         # Rootless port forwarding would hide client addresses: no container publishes a port.
         self.assertNotIn("--publish", self.script)
         socket_unit = (self.out / "systemd/smarthost-ingress.socket").read_text()
-        self.assertEqual(["0.0.0.0:443", "0.0.0.0:25"], re.findall(r"(?m)^ListenStream=(.*)$", socket_unit))
+        self.assertEqual(["0.0.0.0:443", "0.0.0.0:25", "0.0.0.0:80"], re.findall(r"(?m)^ListenStream=(.*)$", socket_unit))
         self.assertIn("Service=smarthost-ingress.service", socket_unit)
         service = (self.out / "systemd/smarthost-ingress.service").read_text()
         self.assertRegex(service, r"(?m)^ExecStart=/usr/bin/podman start --attach smarthost-nginx$")
@@ -178,7 +181,7 @@ class ProductionRenderingTest(unittest.TestCase):
     def test_nginx_inherits_the_sockets_and_restarts_only_through_systemd(self) -> None:
         nginx = self.create_block("nginx")
         self.assertIn("restart=no service nginx", nginx)
-        self.assertIn('-e "NGINX=3;4;"', nginx)
+        self.assertIn('-e "NGINX=3;4;5;"', nginx)
         self.assertIn("NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-production", nginx)
         start = self.script.split("cmd_start() {", 1)[1].split("\n}", 1)[0]
         self.assertIn('if [[ "$s" == nginx ]]; then ingress_start; else podman start', start)

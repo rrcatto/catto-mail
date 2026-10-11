@@ -10,8 +10,8 @@
         <p class="sub">Row {{ e.row_number }} of {{ batch.name }} · {{ e.outcome }}</p>
     </div>
 </div>
-<div class="row-2">
-<section class="card" aria-labelledby="states-h"><h2 id="states-h">Its states</h2>
+<div class="grid">
+<section class="card g-col-4 2xl:g-col-2" aria-labelledby="states-h"><h2 id="states-h">Its states</h2>
 <dl class="rows">
 <dt>Uploaded as</dt><dd>{{ e.original_value }} (row {{ e.row_number }}, {{ e.outcome }})</dd>
 <dt>Validation result</dt><dd>{{ e.outcome == 'imported' ? labels.validation[e.validation_result] : '—' }}{% for f in e.flags %} <span class="tag">{{ f|replace({'_': ' '}) }}</span>{% endfor %}<br><small>{{ e.explanation }}</small></dd>
@@ -22,7 +22,7 @@
 <dt>Engagement</dt><dd>{{ labels.engagement[e.engagement] }}</dd>
 </dl>
 </section>
-<section class="card" aria-labelledby="tl-h"><h2 id="tl-h">Timeline</h2>
+<section class="card g-col-4 2xl:g-col-2" aria-labelledby="tl-h"><h2 id="tl-h">Timeline</h2>
 <p class="muted small">Only recorded events are shown. DKIM signing happens inside Postfix and is not recorded per message; check it in a received copy.</p>
 <ol class="timeline">{% for t in timeline %}<li class="ev"><strong>{{ t.what }}</strong> <small>{{ t.at|ts }}</small>{% if t.detail %}<br><small>{{ t.detail }}</small>{% endif %}</li>{% endfor %}</ol>
 </section>

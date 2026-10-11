@@ -35,33 +35,35 @@
     {% endif %}
 </section>
 
-<section class="card card-flush" aria-labelledby="stm-h">
-    <div class="card-head"><h2 id="stm-h">Billing statements of this period</h2></div>
-    {% if statements is empty %}<p class="empty">No statements for exactly this period.</p>{% else %}
-    <div class="scroll"><table>
-        <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col">Reconciliation</th><th scope="col">Totals</th><th scope="col">External reference</th>{% if is_granted('PLATFORM.USAGE.EXPORT') %}<th scope="col">Actions</th>{% endif %}</tr></thead>
-        <tbody>{% for s in statements %}<tr>
-            <td>{{ s.company_name }}</td><td>{{ s.status|label('statement_status') }}</td>
-            <td><span class="st st-{{ s.reconciliation_status == 'consistent' ? 'completed' : 'failed' }}">{{ s.reconciliation_status|label('reconciliation_status') }}</span></td>
-            <td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ s.external_reference ?? '—' }}</td>
-            {% if is_granted('PLATFORM.USAGE.EXPORT') %}<td>
-                {% if s.status == 'draft' %}<form method="post" action="{{ path('dashboard_operator_statement_action', {id: s.id, action: 'finalize'}) }}" class="inline">{{ ui.csrf() }}<button type="submit">Finalize</button></form>{% endif %}
-                {% if s.status == 'finalized' %}<form method="post" action="{{ path('dashboard_operator_statement_action', {id: s.id, action: 'export'}) }}" class="row">{{ ui.csrf() }}<label>External reference <input type="text" name="external_reference" required maxlength="255"></label><button type="submit">Mark exported</button></form>{% endif %}
-                {% if s.status in ['draft', 'finalized'] %}<form method="post" action="{{ path('dashboard_operator_statement_action', {id: s.id, action: 'void'}) }}" class="row">{{ ui.csrf() }}<label>Reason <input type="text" name="note" required minlength="3"></label><button type="submit" class="danger">Void</button></form>{% endif %}
-            </td>{% endif %}
-        </tr>{% endfor %}</tbody>
-    </table></div>
-    {% endif %}
-</section>
+<div class="grid">
+    <section class="card card-flush {{ is_granted('PLATFORM.USAGE.EXPORT') ? 'g-col-4 2xl:g-col-3' : 'g-col-4' }}" aria-labelledby="stm-h">
+        <div class="card-head"><h2 id="stm-h">Billing statements of this period</h2></div>
+        {% if statements is empty %}<p class="empty">No statements for exactly this period.</p>{% else %}
+        <div class="scroll"><table>
+            <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col">Reconciliation</th><th scope="col">Totals</th><th scope="col">External reference</th>{% if is_granted('PLATFORM.USAGE.EXPORT') %}<th scope="col">Actions</th>{% endif %}</tr></thead>
+            <tbody>{% for s in statements %}<tr>
+                <td>{{ s.company_name }}</td><td>{{ s.status|label('statement_status') }}</td>
+                <td><span class="st st-{{ s.reconciliation_status == 'consistent' ? 'completed' : 'failed' }}">{{ s.reconciliation_status|label('reconciliation_status') }}</span></td>
+                <td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ s.external_reference ?? '—' }}</td>
+                {% if is_granted('PLATFORM.USAGE.EXPORT') %}<td>
+                    {% if s.status == 'draft' %}<form method="post" action="{{ path('dashboard_operator_statement_action', {id: s.id, action: 'finalize'}) }}" class="inline">{{ ui.csrf() }}<button type="submit">Finalize</button></form>{% endif %}
+                    {% if s.status == 'finalized' %}<form method="post" action="{{ path('dashboard_operator_statement_action', {id: s.id, action: 'export'}) }}" class="formrow">{{ ui.csrf() }}<label>External reference <input type="text" name="external_reference" required maxlength="255"></label><button type="submit">Mark exported</button></form>{% endif %}
+                    {% if s.status in ['draft', 'finalized'] %}<form method="post" action="{{ path('dashboard_operator_statement_action', {id: s.id, action: 'void'}) }}" class="formrow">{{ ui.csrf() }}<label>Reason <input type="text" name="note" required minlength="3"></label><button type="submit" class="danger">Void</button></form>{% endif %}
+                </td>{% endif %}
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        {% endif %}
+    </section>
 
-{% if is_granted('PLATFORM.USAGE.EXPORT') %}
-<section class="card" aria-labelledby="prep-h">
-    <h2 id="prep-h">Prepare statements</h2>
-    <form method="post" action="{{ path('dashboard_operator_statements_prepare') }}" class="stack">{{ ui.csrf() }}
-        <label>Prepare draft statements for every client with usage in month <input type="month" name="month" required></label>
-        <button type="submit">Prepare statements</button>
-    </form>
-    <p class="muted small">A draft is finalized only when its reconciliation is consistent and its totals still equal the usage records. “Mark exported” records the external billing system's reference.</p>
-</section>
-{% endif %}
+    {% if is_granted('PLATFORM.USAGE.EXPORT') %}
+    <section class="card g-col-4 2xl:g-col-1" aria-labelledby="prep-h">
+        <h2 id="prep-h">Prepare statements</h2>
+        <form method="post" action="{{ path('dashboard_operator_statements_prepare') }}" class="stack">{{ ui.csrf() }}
+            <label>Prepare draft statements for every client with usage in month <input type="month" name="month" required></label>
+            <button type="submit">Prepare statements</button>
+        </form>
+        <p class="muted small">A draft is finalized only when its reconciliation is consistent and its totals still equal the usage records. “Mark exported” records the external billing system's reference.</p>
+    </section>
+    {% endif %}
+</div>
 {% endblock %}

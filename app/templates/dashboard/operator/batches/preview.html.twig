@@ -27,18 +27,20 @@
         <button type="submit" formaction="{{ path('dashboard_operator_batch_preview') }}" class="secondary">Preview with this column</button>
     </div>
     {% endif %}
-    <section class="card card-flush" aria-labelledby="rows-h">
-        <div class="card-head"><h2 id="rows-h">First rows</h2></div>
-        <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Will be imported as</th><th scope="col">Outcome</th><th scope="col">Note</th></tr></thead>
-        <tbody>{% for r in sample %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.normalized ?? '—' }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
-    </section>
-    {% if problems is not empty %}
-    <section class="card card-flush" aria-labelledby="prob-h">
-        <div class="card-head"><h2 id="prob-h">Duplicates and malformed rows (first {{ problems|length }})</h2></div>
-        <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
-        <tbody>{% for r in problems %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
-    </section>
-    {% endif %}
+    <div class="grid">
+        <section class="card card-flush {{ problems is not empty ? 'g-col-4 2xl:g-col-2' : 'g-col-4' }}" aria-labelledby="rows-h">
+            <div class="card-head"><h2 id="rows-h">First rows</h2></div>
+            <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Will be imported as</th><th scope="col">Outcome</th><th scope="col">Note</th></tr></thead>
+            <tbody>{% for r in sample %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.normalized ?? '—' }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
+        </section>
+        {% if problems is not empty %}
+        <section class="card card-flush g-col-4 2xl:g-col-2" aria-labelledby="prob-h">
+            <div class="card-head"><h2 id="prob-h">Duplicates and malformed rows (first {{ problems|length }})</h2></div>
+            <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
+            <tbody>{% for r in problems %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
+        </section>
+        {% endif %}
+    </div>
     <p class="muted">Cleanup applied: surrounding spaces removed, <code>mailto:</code> and <code>Name &lt;address&gt;</code> forms reduced to the address, the domain lower-cased (the part before @ is kept exactly). Nothing else is changed; the validator judges the rest.</p>
     <div class="form-actions">
         <button type="submit">Import {{ parsed.counts.data_rows|number_format }} rows</button>

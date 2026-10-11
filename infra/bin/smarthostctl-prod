@@ -154,18 +154,28 @@ activation_gate() {
   fi
 }
 
+# The rendered systemd units into the user's systemd (copied, then daemon-reload). install,
+# recreate (and so upgrade) and rollback run it, so a release that changes a unit (the ingress
+# socket's listeners, a timer) is in force after its restart.
+install_units() {
+  if default_instance; then
+    local_engine || die "production units are installed on the Linux production host (this Podman engine is remote)"
+    "$HELPER" install
+  else
+    machine instance-install "$GEN" "$(I)"
+  fi
+}
+
 cmd_install() {
   require_production
   "${RENDER[@]}" check --env "$DOTENV"
   render
   host_gate
+  install_units
   if default_instance; then
-    local_engine || die "production units are installed on the Linux production host (this Podman engine is remote)"
-    "$HELPER" install
     loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes' \
       || echo "smarthostctl prod: WARNING: lingering is off; run 'sudo loginctl enable-linger $(id -un)' so the services start at boot"
   else
-    machine instance-install "$GEN" "$(I)"
     say "instance $(I): only its own units (ingress, reputation timer) are installed (smarthost.service and the Postfix timers belong to the default instance 'smarthost')"
   fi
   if topo exists; then say "production containers exist (kept; use 'recreate' to replace them)"; else activation_gate; topo create; fi
@@ -206,6 +216,7 @@ cmd_recreate() {
   render
   host_gate
   activation_gate
+  install_units   # in force from the stop and start below
   cmd_stop
   topo remove
   topo create
@@ -257,9 +268,9 @@ cmd_tls() {
 # lego (installed on the host by the installer) obtains one certificate for the web and
 # the mail host names with the DNS-01 challenge through ACME_DNS_PROVIDER, using the
 # credentials in ACME_CREDENTIALS_FILE (NAME=value lines, mode 0600, outside the
-# repository). Port 80 is never opened. The certificate is installed into nginx and
-# Postfix with `tls set`. The state is in $GEN/acme (0700); the outcome is recorded for
-# the host agent in $GEN/acme/status.json.
+# repository). DNS-01 needs no inbound port (80 only redirects to HTTPS). The
+# certificate is installed into nginx and Postfix with `tls set`. The state is in
+# $GEN/acme (0700); the outcome is recorded for the host agent in $GEN/acme/status.json.
 acme_status_set() {
   python3 - "$GEN/acme/status.json" "$@" <<'PY'
 import json, sys
@@ -680,6 +691,7 @@ cmd_rollback() {
   fi
   set_env SMARTHOST_IMAGE_TAG "$tag"
   render
+  install_units   # that release's units (for example its ingress listeners)
   cmd_stop
   topo remove
   topo create

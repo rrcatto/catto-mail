@@ -36,7 +36,7 @@ Contents (see `docs/PROJECT.md` for every file):
 - `podman/smarthost-production.sh.in` defines the production topology: standalone persistent
   containers on internal, ingress and egress networks, with no published ports
   (`docs/production/README.md`).
-- `systemd/production/`: the production ingress socket (443 and 25 bound by the service user's
+- `systemd/production/`: the production ingress socket (443, 25 and 80 bound by the service user's
   systemd) and the service that starts nginx with it, so client addresses are preserved; the
   reputation, backup and certificate-renewal timers; the host agent (specification 2.11).
 - `bin/smarthostctl-prod` (`smarthostctl prod <command>`) operates it.

@@ -8,7 +8,7 @@ The receiving server refuses it, the refusal (a DSN) comes back to the bounce do
     <label>Send as client <select name="client">{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.domains }})</option>{% endfor %}</select></label>
     <label>From address <input name="sender_email" type="email" required></label>
     <label>Non-existent address at your own domain <input name="addresses" required></label>
-    <label class="check"><input type="checkbox" name="i_own_these" value="1" required> The domain is mine and the mailbox does not exist.</label>
+    <label class="checkline"><input type="checkbox" name="i_own_these" value="1" required> The domain is mine and the mailbox does not exist.</label>
     <button type="submit">Send the bounce test</button>
 </form>{% endif %}
 <p class="muted">Afterwards lift the test suppression under Mail flow › Suppressions (it is global: catto-mail would never mail that address again).</p>

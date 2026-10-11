@@ -1,7 +1,8 @@
-{# Delivery mode and its controls (specification 2.11). Variables: delivery (DeliveryControl::status). #}
+{# Delivery mode and its controls (specification 2.11). Variables: delivery (DeliveryControl::status); optional span
+   (its page-grid columns, default the full width). #}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% set d = delivery %}
-<section class="card mode-card" aria-labelledby="delivery-h">
+<section class="card mode-card {{ span ?? 'g-col-4' }}" aria-labelledby="delivery-h">
     <div class="mode-hero">
         <span class="mode-orb mode-orb-{{ d.mode }}" aria-hidden="true"><span class="dot mode-{{ d.mode }}"></span></span>
         <div>

@@ -219,14 +219,14 @@ production host (Ubuntu Server 26.04 LTS, rootless Podman, lingering service use
 │   webhook-worker → HTTPS to public client endpoints
 │   symfony-app    → DNS (sending-domain verification)
 │
-└── no published ports: <instance>-ingress.socket (systemd) binds 0.0.0.0:443 and 0.0.0.0:25
+└── no published ports: <instance>-ingress.socket (systemd) binds 0.0.0.0:443, 0.0.0.0:25 and 0.0.0.0:80
     and hands both sockets to nginx (socket activation, client addresses preserved)
 ```
 
 Every service also gets `/etc/hosts` entries for the others, so name resolution does not depend
 on the aardvark-dns version.
 
-**Host firewall.** The generated nftables ruleset admits SSH, 25 and 443. It limits the service
+**Host firewall.** The generated nftables ruleset admits SSH, 25, 80 and 443. It limits the service
 user's outbound traffic, which carries all rootless egress, to DNS, 25, 80 and 443.
 
 **Lifecycle.** The same persistent-object rules as D-35 apply, and named volumes are never
@@ -239,16 +239,18 @@ deleted:
 **Ingress: client addresses are preserved.** Rate limiting, diagnostics and logs need each
 client's real address. Rootless port forwarding replaces it with one internal address (measured),
 so production publishes no port:
-- The service user's systemd binds 443 and 25 on the host (`<instance>-ingress.socket`).
-- `<instance>-ingress.service` starts the persistent nginx container with both sockets.
+- The service user's systemd binds 443, 25 and 80 on the host (`<instance>-ingress.socket`).
+- `<instance>-ingress.service` starts the persistent nginx container with those sockets.
 - nginx accepts every connection itself. HTTPS reaches Symfony with the client as `REMOTE_ADDR`
   (`TRUSTED_PROXIES` is empty in production, so forwarded headers are ignored).
 - SMTP is passed to Postfix over the `<instance>-ingress` network with the PROXY protocol. Only
   nginx can reach that listener, and Postfix logs and checks the client address.
+- Plain HTTP on port 80 only redirects to the same path on `https://<public hostname>` (owner
+  decision, 2026-10-10); nothing is served over HTTP.
 - `smarthostctl prod ingress-check` proves it on the host with two loopback source addresses. It
   is part of the activation preflight.
 
-**Host prerequisite.** The unprivileged service user binds 25 and 443 because the host sets
+**Host prerequisite.** The unprivileged service user binds 25, 80 and 443 because the host sets
 `net.ipv4.ip_unprivileged_port_start=25` (persisted in `/etc/sysctl.d`). The setting is
 system-wide (any local user may bind 25–1023; ports below 25 stay privileged), which is accepted
 for a dedicated host. The preflight's `host` section checks it, and every `prod` command that
@@ -1688,11 +1690,12 @@ refuse framing and are never cached; error pages are generic.
 
 One shell serves the operator console and the client workspaces and uses the full page width:
 
-- round area buttons on the left: Overview, Mail flow, Clients, System and Access in the operator
-  console; Overview, Sending, Validation, Settings and Usage in a client workspace; Help and the
-  workspace switch below them;
-- the current area's pages as pills at the top; on both overviews the pills choose the period
-  (24 hours, 7, 30 or 90 days);
+- round area buttons in the top bar, next to the logo (owner decision, 2026-10-10; until then a
+  rail on the left): Overview, Mail flow, Clients, System and Access in the operator console;
+  Overview, Sending, Validation, Settings and Usage in a client workspace; then Help and the
+  workspace switch;
+- the current area's pages as pills after them (below 2200px wide, on a second row); on both
+  overviews the pills choose the period (24 hours, 7, 30 or 90 days);
 - at the top right: the search button, the delivery mode, *Stop sending* (a reason is required),
   what needs attention and the account menu.
 
@@ -1706,9 +1709,26 @@ address, a domain, an external reference or a name; in a client workspace it cov
 client.
 
 Charts use Chart.js, vendored in the application; the Outfit font is served by the application;
-the Content Security Policy allows no inline styles. Every time is in the installation's time zone
+the Content Security Policy allows no inline styles.
+
+Bootstrap 6 (6.0.0-alpha.1, its compiled CSS only, vendored in the application) is the base of the
+design (owner decision, 2026-10-10): its reboot and its CSS Grid lay out every page, and the
+application's own stylesheet, which takes precedence over Bootstrap's cascade layers, gives the
+look. The content sits in a grid of four equal columns with 20px gaps and 20px page margins that
+spans the full width; it was laid out for a 2560 x 1440 screen (four columns of about 615px). Each
+card takes a quarter, a half, three quarters or the full width; wide tables keep the full width,
+and on narrower screens the columns collapse to two and then one. Every time is in the installation's time zone
 (`SMARTHOST_TIMEZONE`, default `Africa/Johannesburg`, SAST), the overview buckets and the quota,
 usage and billing days and months included. Screenshots of every page are in `docs/screenshots/`.
+
+**The front page and the page frame (owner decisions, 2026-10-10).** Someone who types the
+installation's address sees a public front page at `/` instead of a 404: what the service is, a
+sign-in link and the API documentation, and for recipients of its mail whom it was sent for, how to
+stop it, how to report unwanted mail to the administrator and what tracked links and images record.
+It says there is no public sign-up and offers none; it has no session, cookie, script or form.
+Every HTML page names the software version in its head
+(`<meta name="application-name" content="catto-mail v<version>">`) and ends with the same footer:
+what catto-mail is, the version, the administrator's address (`APP_ADMIN_EMAIL`) and the time zone.
 
 ## Settings in the dashboard and the .env file (owner decision, 2026-10-10)
 
@@ -1936,7 +1956,7 @@ secret.
 - Resuming, and enabling live delivery, need typed confirmations.
 
 **Certificates.** Let's Encrypt with DNS-01 through the host's `lego` and the operator's DNS
-provider; port 80 is never opened. A daily timer renews and installs. A manual fallback exists.
+provider; no inbound port is needed (port 80 only redirects to HTTPS). A daily timer renews and installs. A manual fallback exists.
 
 **Backups.**
 - Daily, encrypted when configured, pruned, and copied with rsync to an operator-chosen target;

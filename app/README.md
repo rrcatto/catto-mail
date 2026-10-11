@@ -107,13 +107,23 @@ Migration `Version20261007000100`.
 
 **Dashboard redesign (v0.2.2):**
 - One shell for the operator console and the client workspaces (`templates/dashboard/layout.html.twig`):
-  round area buttons, the area's pages as pills, and at the top right the search, the delivery
-  mode, *Stop sending*, the attention bell and the account menu. `App\Dashboard\Navigation`
+  the top bar holds the round area buttons, the area's pages as pills, and at the right the search,
+  the delivery mode, *Stop sending*, the attention bell and the account menu. `App\Dashboard\Navigation`
   builds the areas, pills and badges from the permission keys.
 - Both overviews have a period choice (`OverviewPeriod`); `OperatorOverview` and `TrendCharts`
   assemble their figures. Charts are Chart.js (`assets/controllers/chart_controller.js`, loaded
   only on pages with a chart). The Content-Security-Policy allows no inline styles: data-driven
   widths are SVG attributes.
+- Bootstrap 6 base and the four-column grid (owner decision, 2026-10-10): Bootstrap 6.0.0-alpha.1's
+  compiled CSS is vendored through the import map (`assets/vendor/bootstrap/`, no Bootstrap
+  JavaScript) and linked before `styles/app.css` by `templates/_site.html.twig`. Bootstrap keeps its
+  rules in cascade layers, so the application's unlayered stylesheet always wins. Page content uses
+  Bootstrap's CSS Grid: `.grid` (four columns, 20px gaps, set in `app.css`) and a span on every
+  child (`g-col-4 md:g-col-2 xl:g-col-1` a quarter, `g-col-4 lg:g-col-2` a half,
+  `g-col-4 xl:g-col-3` + `g-col-4 xl:g-col-1` a main and a side column, `g-col-4` full width).
+- The public front page `/` (`FrontPageController`, `templates/front.html.twig`, owner decision,
+  2026-10-10): what the service is, sign-in, the API documentation and a word for recipients of
+  its mail, in the same grid. No session, cookie, script or form; there is no public sign-up.
 - `App\Dashboard\Search`: the global search, tenant-scoped in a client workspace.
 - `App\Util\InstallationTime`: the installation time zone (`SMARTHOST_TIMEZONE`, SAST by
   default). The kernel makes it PHP's default zone on boot and `SessionTimeZoneMiddleware` sets it

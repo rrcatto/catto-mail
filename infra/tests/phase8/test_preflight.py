@@ -416,7 +416,8 @@ class HostPrerequisitesTest(unittest.TestCase):
         self.assertEqual("WARN", stale[1].level, "the persisted value would undo it at the next boot")
 
     def test_unprivileged_rehearsal_ports_and_remote_engines(self) -> None:
-        rehearsal = production_values(PROXY_HTTPS_BIND="127.0.0.1:18443", POSTFIX_SMTP_BIND="127.0.0.1:12525")
+        rehearsal = production_values(PROXY_HTTPS_BIND="127.0.0.1:18443", POSTFIX_SMTP_BIND="127.0.0.1:12525",
+                                      PROXY_HTTP_BIND="127.0.0.1:18080")
         self.assertEqual("PASS", self.low_ports(rehearsal, "1024")[0].level)
         self.assertEqual("SKIP", self.low_ports(production_values(), None, remote=True)[0].level)
 
@@ -425,13 +426,14 @@ class IngressHost(FakeHost):
     """The ingress as seen from the host: `mode` is how client addresses arrive."""
 
     def __init__(self, values: dict[str, str], mode: str = "preserve", inherited: bool = True,
-                 units: tuple[str, str] | None = ("active", "active"), proxy_listener: bool = True) -> None:
+                 units: tuple[str, str] | None = ("active", "active"), proxy_listener: bool = True,
+                 redirect: str | None = None) -> None:
         i = values["SMARTHOST_INSTANCE"]
         master = ("127.0.0.1:smtp inet n - n - - smtpd\n" + ("postfix-ingress:smtp inet n - n - - smtpd -o smtpd_upstream_proxy_protocol=haproxy\n"
                   if proxy_listener else "smtp inet n - n - - smtpd\n") + "submission inet n - n - - smtpd\n")
         super().__init__(values, remote=True, exec_={("postfix", "postconf", "-M"): (0, master)})
-        self.mode, self.units, self.i = mode, units, i
-        self.http_log: list[str] = ['2026/10/06 17:00:00 [notice] 1#1: using inherited sockets from "3;4;"' if inherited else
+        self.mode, self.units, self.i, self.redirect = mode, units, i, redirect
+        self.http_log: list[str] = ['2026/10/06 17:00:00 [notice] 1#1: using inherited sockets from "3;4;5;"' if inherited else
                                     '2026/10/06 17:00:00 [emerg] 1#1: invalid socket number "3" in NGINX environment variable']
         self.smtp_log: list[str] = []
 
@@ -443,11 +445,17 @@ class IngressHost(FakeHost):
             return None
         if args[0] == "is-active":
             return 0, "\n".join(self.units)
-        return 0, f"{self.v['PROXY_HTTPS_BIND']} (Stream)\n{self.v['POSTFIX_SMTP_BIND']} (Stream)\n"
+        return 0, f"{self.v['PROXY_HTTPS_BIND']} (Stream)\n{self.v['POSTFIX_SMTP_BIND']} (Stream)\n{self.v['PROXY_HTTP_BIND']} (Stream)\n"
 
     def https_probe(self, source: str, addr: str, port: int, sni: str, path: str) -> str:
         self.http_log.append(f'{self.seen(source)} - - [06/Oct/2026:17:00:00 +0000] "GET {path} HTTP/1.1" 404 0 "-" "catto-mail-preflight"')
         return "HTTP/1.1 404 Not Found"
+
+    def http_probe(self, addr: str, port: int, host: str, path: str) -> tuple[str, str]:
+        self.http_probed = (addr, port, host)
+        if self.redirect is not None:
+            return "HTTP/1.1 200 OK", self.redirect
+        return "HTTP/1.1 301 Moved Permanently", f"https://{host}{path}"
 
     def smtp_probe(self, source: str, addr: str, port: int, helo: str) -> str:
         self.smtp_log.append(f"Oct  6 17:00:00 mta postfix/smtpd[7]: connect from unknown[{self.seen(source)}]")
@@ -481,6 +489,14 @@ class IngressSourceAddressTest(unittest.TestCase):
         self.assertEqual(2, len(set(sources)), "two distinct test sources")
         self.assertTrue(all(src.split(".")[:3] == sources[0].split(".")[:3] for src in sources))
         self.assertEqual(sorted(set(sources)), sorted(ln.split()[0] for ln in host.http_log if "GET" in ln))
+        self.assertEqual(("127.0.0.1", 80, "mail.cattomail-ops.net"), host.http_probed, "plain HTTP on PROXY_HTTP_BIND")
+        self.assertRegex(r["HTTP redirects to HTTPS"].detail, r"^HTTP/1.1 301 .* -> https://mail\.cattomail-ops\.net/\.well-known/")
+
+    def test_http_that_serves_instead_of_redirecting_fails(self) -> None:
+        values = production_values()
+        r = self.run_ingress(IngressHost(values, redirect=""), values)
+        self.assertEqual("FAIL", r["HTTP redirects to HTTPS"].level)
+        self.assertIn("expected 301 -> https://mail.cattomail-ops.net/", r["HTTP redirects to HTTPS"].detail)
 
     def test_collapsed_client_addresses_fail_the_activation(self) -> None:
         values = production_values()
@@ -512,7 +528,7 @@ class GeneratedTextTest(unittest.TestCase):
                        f"v=spf1 ip4:{PUBLIC_IP} -all", "s1._domainkey.client-a.net", "_dmarc.<sending-domain>"):
             self.assertIn(needle, text)
         rules = pf.firewall_ruleset(values, 1001)
-        self.assertIn("tcp dport { 22, 25, 443 } ct state new accept", rules)
+        self.assertIn("tcp dport { 22, 25, 80, 443 } ct state new accept", rules)
         self.assertIn("meta skuid 1001 tcp dport { 22, 25, 53, 80, 443 } accept", rules)
         self.assertIn("policy drop", rules)
 

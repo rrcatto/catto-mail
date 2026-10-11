@@ -39,6 +39,7 @@ Contents: [1 What you need](#1-what-you-need-from-the-vps-provider) ·
 | **Outbound TCP 25 allowed** | Postfix delivers to recipients' mail servers on port 25. Many providers block it on new accounts. | Ask support to unblock it. The setup wizard tests it. |
 | **Inbound TCP 25 allowed** | Bounces and complaints arrive on port 25. | Usually open; check the provider's firewall panel. |
 | **Inbound TCP 443 allowed** | The dashboard, the API, tracking and re-permission links. | Usually open. |
+| **Inbound TCP 80 allowed** | Someone who types `http://` is redirected to HTTPS; nothing is served on 80. | Usually open. |
 | **Control of the PTR (reverse DNS) of the IP** | Receivers reject mail from IPs without a matching PTR. | The provider's panel ("reverse DNS", "rDNS") or support. |
 | **SSH access as root** | To run the installer. | Standard. |
 | **Enough resources** | See below. | |
@@ -63,7 +64,8 @@ address, or for a new domain the registrar's e-mail forwarding to a mailbox you 
 catto-mail sends mail; it receives mail **only for the bounce domain** (bounces and complaints)
 and refuses every other address. It has no mailboxes and no webmail. Keep your main domain's MX
 records with your mail provider, never pointing at this server (§4). The installer warns if mail
-for the administrator's address would come to this server.
+for the administrator's address would come to this server. The address is public: every page,
+the sign-in page included, shows it in the footer as the contact for the service.
 
 ## 2. Install
 
@@ -114,7 +116,7 @@ configuration and data are kept.
 [04/21] Installing Podman, Git, Python, OpenSSL, nftables, lego PASS
 [05/21] Creating the service user cattomail ................ PASS
 [06/21] Enabling lingering (start at boot without a login) . PASS
-[07/21] Allowing the service user to listen on ports 25 and 443 PASS
+[07/21] Allowing the service user to listen on ports 25, 80 and 443 PASS
 [08/21] Starting the user's Podman socket .................. PASS
 [09/21] Fetching the release ............................... PASS
 [10/21] Writing the configuration (infra/.env) ............. PASS
@@ -147,7 +149,7 @@ In detail:
    boot.
 7. Writes `/etc/sysctl.d/60-catto-mail-ports.conf` with `net.ipv4.ip_unprivileged_port_start=25`
    and applies it. Linux reserves ports below 1024 for root; this lets the unprivileged service
-   hold 25 and 443. Ports 1–24, including SSH (22), stay privileged. It is system-wide, which is
+   hold 25, 80 and 443. Ports 1–24, including SSH (22), stay privileged. It is system-wide, which is
    acceptable on a server dedicated to catto-mail.
 8. Starts the user's Podman socket and confirms Podman runs rootless.
 9. Clones the release into `/home/cattomail/catto-mail` (refuses to replace a different release:
@@ -278,7 +280,7 @@ DNS changes take minutes to hours to be visible. Test: System setup › DNS › 
 
 catto-mail needs a certificate for `mail.example.com` (HTTPS) and `mta.example.com` (SMTP
 STARTTLS); one certificate covers both names. It uses **Let's Encrypt** with the **DNS-01**
-challenge, so port 80 is never opened.
+challenge, which needs no inbound port (port 80 only redirects to HTTPS).
 
 **How DNS-01 works:** the ACME client `lego` (installed on the server by the installer) asks Let's
 Encrypt for a certificate; Let's Encrypt asks it to prove control of each name by creating a
@@ -404,7 +406,7 @@ commands on the server itself. Results and their history: System › Diagnostics
 
 ## 8. Firewall
 
-Only SSH, 25 and 443 need to be reachable. The installer writes reviewed rules to
+Only SSH, 25, 80 and 443 need to be reachable (80 only redirects to HTTPS). The installer writes reviewed rules to
 `/home/cattomail/catto-mail-firewall.nft` but does not apply them, so a mistake cannot lock you
 out. Check that your SSH port is in the `tcp dport { … }` line, then as root:
 
@@ -601,7 +603,7 @@ the Git tag, which names exactly the same code. An unpacked archive's installer 
 | Step 8 FAILs with `cannot chdir to /root/…: Permission denied` in the log | The installers of v0.1.9 and v0.2.0 only: run it from a directory every user can enter, `cd / && /root/catto-mail-installer/install-catto-mail` (re-running is safe), or clone v0.2.1 or later, whose installer handles this itself. |
 | The sign-in link expired | `sudo -iu cattomail ~cattomail/catto-mail/infra/bin/smarthostctl prod admin-link` |
 | Sign-in mail never arrives | Sign in with `prod admin-link` meanwhile. Check System setup › DNS (`mailbox … (administrator)`): the administrator's domain MX must point at a mail provider, not at this server (§4). Sign-in mail also needs the PTR, SPF and DKIM of the sender's domain, and outbound 25. |
-| The browser cannot reach the site | The A record (§4); inbound 443 at the provider; `prod status` shows the ingress socket. |
+| The browser cannot reach the site | The A record (§4); inbound 443 (and 80 for `http://`) at the provider and in the host firewall (§8); `prod status` shows the ingress socket. |
 | "host agent never reported" | `systemctl --user status smarthost-host-agent.service` as cattomail; `prod install` installs it. |
 | Port 25 refused | `prod preflight --section host` (the low-port setting); the provider's firewall. |
 | Images fail to build | Disk space (`df -h`), network to the image registries; re-run. |

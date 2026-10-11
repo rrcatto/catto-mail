@@ -10,8 +10,8 @@
     </div>
 </div>
 
-<div class="row-2 row-wide-left">
-    <section aria-labelledby="ep-h">
+<div class="grid">
+    <section class="{{ may_manage ? 'g-col-4 xl:g-col-3' : 'g-col-4' }}" aria-labelledby="ep-h">
         <h2 id="ep-h">Endpoints</h2>
         {% if endpoints is empty %}<p class="empty">No webhook endpoints yet.</p>{% endif %}
         {% for e in endpoints %}
@@ -31,7 +31,7 @@
                     {{ ui.csrf() }}
                     <label>URL <input type="url" name="url" value="{{ e.url }}" required maxlength="2000"></label>
                     <fieldset class="perms"><legend>Events</legend>
-                        {% for t in event_types %}<label class="check"><input type="checkbox" name="event_types[]" value="{{ t }}"{% if t in e.subscribed_event_types|json_counts %} checked{% endif %}> <code>{{ t }}</code></label>{% endfor %}
+                        {% for t in event_types %}<label class="checkline"><input type="checkbox" name="event_types[]" value="{{ t }}"{% if t in e.subscribed_event_types|json_counts %} checked{% endif %}> <code>{{ t }}</code></label>{% endfor %}
                     </fieldset>
                     <label>Status <select name="status"><option value="enabled"{% if e.status == 'enabled' %} selected{% endif %}>Enabled</option><option value="disabled"{% if e.status == 'disabled' %} selected{% endif %}>Disabled</option></select></label>
                     <button type="submit">Save</button>
@@ -47,13 +47,13 @@
     </section>
 
     {% if may_manage %}
-    <section class="card card-accent" aria-labelledby="add-h">
+    <section class="card card-accent g-col-4 xl:g-col-1" aria-labelledby="add-h">
         <h2 id="add-h">Add an endpoint</h2>
         <form method="post" action="{{ path('dashboard_client_webhook_create', {clientId: cid}) }}" class="stack">
             {{ ui.csrf() }}
             <label>HTTPS URL <input type="url" name="url" required maxlength="2000" placeholder="https://app.example/webhooks/smarthost"></label>
             <fieldset class="perms"><legend>Events</legend>
-                {% for t in event_types %}<label class="check"><input type="checkbox" name="event_types[]" value="{{ t }}" checked> <code>{{ t }}</code></label>{% endfor %}
+                {% for t in event_types %}<label class="checkline"><input type="checkbox" name="event_types[]" value="{{ t }}" checked> <code>{{ t }}</code></label>{% endfor %}
             </fieldset>
             <button type="submit">Add endpoint</button>
         </form>

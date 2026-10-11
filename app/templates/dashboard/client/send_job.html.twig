@@ -18,8 +18,8 @@
     </div>
 </div>
 
-<div class="row-2">
-    <section class="card" aria-labelledby="job-h">
+<div class="grid">
+    <section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="job-h">
         <h2 id="job-h">Job</h2>
         <dl class="rows">
             <dt>Job id</dt><dd><code>{{ job.id }}</code></dd>
@@ -35,7 +35,7 @@
             <dt>Completed</dt><dd>{{ job.completed_at|ts }}</dd>
         </dl>
     </section>
-    <section class="card" aria-labelledby="out-h">
+    <section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="out-h">
         <h2 id="out-h">Transport outcomes</h2>
         {% if tot > 0 %}
         <svg class="stackbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/><rect class="seg-ok" width="{{ (100 * acc / tot)|round(2) }}" height="8"/><rect class="seg-hatch" x="{{ (100 * acc / tot)|round(2) }}" width="{{ (100 * fly / tot)|round(2) }}" height="8"/><rect class="seg-bad" x="{{ (100 * (acc + fly) / tot)|round(2) }}" width="{{ (100 * bad / tot)|round(2) }}" height="8"/><rect class="wf-mid" x="{{ (100 * (acc + fly + bad) / tot)|round(2) }}" width="{{ (100 * sup / tot)|round(2) }}" height="8"/></svg>
@@ -52,10 +52,7 @@
         </table>
         <p class="muted small">“Submitted to Postfix” messages are waiting for their first outcome. “Remote accepted” means the receiving server accepted responsibility; it is not proof of inbox delivery. “Outcome unknown” is not a success.</p>
     </section>
-</div>
-
-<div class="row-2">
-    <section class="card" aria-labelledby="eng-h">
+    <section class="card {{ e.links is empty ? 'g-col-4 lg:g-col-2' : 'g-col-4 md:g-col-2 xl:g-col-1' }}" aria-labelledby="eng-h">
         <h2 id="eng-h">Recorded engagement</h2>
         {% if not job.track_opens and not job.track_clicks %}<p class="empty">Tracking was not enabled for this job.</p>{% endif %}
         <dl class="facts facts-2">
@@ -71,7 +68,7 @@
         {% include 'dashboard/_engagement_caveat.html.twig' %}
     </section>
     {% if e.links is not empty %}
-    <section class="card card-flush" aria-labelledby="links-h">
+    <section class="card card-flush g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="links-h">
         <div class="card-head"><h2 id="links-h">Recorded clicks by link</h2></div>
         <div class="scroll"><table>
             <thead><tr><th scope="col" class="num">Link</th><th scope="col">Target</th><th scope="col" class="num">Click events</th><th scope="col" class="num">Messages</th></tr></thead>

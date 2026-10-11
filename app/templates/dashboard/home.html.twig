@@ -10,14 +10,14 @@
 </div>
 {% if memberships is empty %}
     {% if app.user.platformUser %}
-        <p class="empty">Use the area buttons on the left.</p>
+        <p class="empty">Use the area buttons at the top.</p>
     {% else %}
         <p class="empty">Your account is not a member of any client yet. Ask an operator to add you to a client.</p>
     {% endif %}
 {% else %}
-    <ul class="workspaces">
+    <ul class="workspaces grid">
         {% for m in memberships %}
-        <li><a class="card workspace" href="{{ path('dashboard_client_overview', {clientId: m.client.id.toRfc4122}) }}">
+        <li class="g-col-4 md:g-col-2 xl:g-col-1"><a class="card workspace" href="{{ path('dashboard_client_overview', {clientId: m.client.id.toRfc4122}) }}">
             <span class="avatar av-{{ m.client.companyName|tone_slot }}" aria-hidden="true">{{ m.client.companyName|initials }}</span>
             <span class="workspace-text"><span class="workspace-name">{{ m.client.companyName }}</span>
                 <span class="muted small">Your role: {{ m.role.value|capitalize }} · client status: {{ m.client.status.value|label('client_status') }}</span></span>

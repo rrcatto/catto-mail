@@ -195,7 +195,7 @@ body="$(curl -sk --max-time 10 "https://$(ev PROXY_HTTPS_BIND)/healthz")"
 note "GET /healthz: $body"
 [[ "$body" == *'"status":"ok"'* && "$body" == *'"sapi":"fpm-fcgi"'* ]] && pass "/healthz served by PHP-FPM through nginx" || fail "/healthz: $body"
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://$(ev PROXY_HTTPS_BIND)/")"
-[[ "$code" == 404 ]] && pass "no application routes in Phase 1 (/ -> 404)" || fail "/ returned $code"
+[[ "$code" == 200 ]] && pass "/ is the public front page through nginx (200)" || fail "/ returned $code"
 fpm_back() {
   podman restart smarthost-symfony-app || return 1
   for _ in $(seq 1 30); do curl -sk --max-time 5 "https://$(ev PROXY_HTTPS_BIND)/healthz" | grep -q fpm-fcgi && return 0; sleep 1; done

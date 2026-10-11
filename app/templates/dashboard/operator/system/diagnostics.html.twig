@@ -35,12 +35,14 @@
 <nav class="seg" aria-label="Components">{% for comp, s in by_component %}<a href="#c-{{ comp }}">{{ comp }}&nbsp;{{ ui.result(s.result) }}</a>{% endfor %}</nav>
 {% endif %}
 
+<div class="grid">
 {% for comp, checks in grouped %}
-    <section class="card card-flush" aria-labelledby="c-{{ comp }}">
+    <section class="card card-flush g-col-4 xl:g-col-2" aria-labelledby="c-{{ comp }}">
         <div class="card-head"><h2 id="c-{{ comp }}">{{ comp|capitalize }}</h2>{% if by_component[comp] is defined %}{{ ui.result(by_component[comp].result) }}{% endif %}</div>
         {{ ui.checks(checks) }}
     </section>
 {% else %}
-    <p class="empty">No check has run yet. {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}Use "Run all checks now".{% endif %}</p>
+    <p class="empty g-col-4">No check has run yet. {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}Use "Run all checks now".{% endif %}</p>
 {% endfor %}
+</div>
 {% endblock %}

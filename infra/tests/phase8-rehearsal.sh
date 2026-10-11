@@ -5,13 +5,14 @@
 # Podman engine as the separate instance `smarthost-rehearsal`, driven only through
 # `smarthostctl prod`, with SMARTHOST_ENV=production and live delivery off, but with
 # SMARTHOST_EGRESS_ENABLED=false (the egress network is internal too: nothing can
-# reach the Internet) and an ingress socket on loopback ports (18443, 12525). It never
+# reach the Internet) and an ingress socket on loopback ports (18443, 12525, 18080). It never
 # touches the development pod (checked) and removes everything it created at the end.
 #
 #   R  configuration: prod init-env + check, refusal of unsafe values
 #   D  deployment: build (tag rehearsal), tls, install (create), start, health
 #   T  topology: networks, membership, no published ports, the socket-activated
-#      ingress (systemd socket units installed in the engine host), no Mailpit
+#      ingress (systemd socket units installed in the engine host), plain HTTP
+#      redirected to HTTPS, no Mailpit
 #   N  client addresses (Phase 8 networking): a control shows rootless port forwarding
 #      collapsing two clients to one address; through the ingress the same two
 #      loopback sources stay distinct in nginx, Symfony (sign-in link IP hash, with a
@@ -94,7 +95,7 @@ prod init-env >/dev/null
 if prod check >/dev/null 2>&1; then fail "the untouched template must not pass (placeholders)"; else pass "the template is refused until the operator sets real values"; fi
 for kv in SMARTHOST_INSTANCE=$I SMARTHOST_IMAGE_TAG=rehearsal SMARTHOST_INTERNAL_SUBNET=10.89.30.0/24 SMARTHOST_EGRESS_SUBNET=10.89.31.0/24 \
           SMARTHOST_INGRESS_SUBNET=10.89.32.0/24 TRUSTED_PROXIES= SMARTHOST_EGRESS_ENABLED=false SMARTHOST_PUBLIC_IPV4=203.0.113.10 \
-          PROXY_HTTPS_BIND=127.0.0.1:18443 POSTFIX_SMTP_BIND=127.0.0.1:12525 \
+          PROXY_HTTPS_BIND=127.0.0.1:18443 POSTFIX_SMTP_BIND=127.0.0.1:12525 PROXY_HTTP_BIND=127.0.0.1:18080 \
           SMARTHOST_PUBLIC_BASE_URL=https://mail.$NAME PROXY_SERVER_NAME=mail.$NAME POSTFIX_MYHOSTNAME=mta.$NAME \
           SMARTHOST_BOUNCE_DOMAIN=bounce.$NAME VALIDATOR_SMTP_HELO_HOSTNAME=mta.$NAME VALIDATOR_SMTP_MAIL_FROM=validator@bounce.$NAME \
           APP_ADMIN_EMAIL=admin@$NAME APP_MAIL_FROM=no-reply@$NAME; do
@@ -128,11 +129,13 @@ $ok && pass "egress only for postfix, symfony-app, webhook-worker, validator; in
 ports="$(for s in postgres opendkim postfix symfony-app webhook-worker nginx validator delivery; do podman port "$I-$s" 2>/dev/null | sed "s/^/$s /"; done)"
 [[ -z "$ports" ]] && pass "no container publishes a port (no rootless port forwarding)" || fail "ports: $ports"
 listen="$(prod machine systemctl show -p Listen --value "$I-ingress.socket" | awk '{print $1}' | sort | tr '\n' ' ')"
-[[ "$(prod machine systemctl is-active "$I-ingress.socket" "$I-ingress.service" | tr '\n' ' ')" == "active active " && "$listen" == "127.0.0.1:12525 127.0.0.1:18443 " ]] \
-  && pass "HTTPS and SMTP listeners belong to the systemd ingress socket; nginx runs under its service" || fail "ingress units: '$listen'"
+[[ "$(prod machine systemctl is-active "$I-ingress.socket" "$I-ingress.service" | tr '\n' ' ')" == "active active " && "$listen" == "127.0.0.1:12525 127.0.0.1:18080 127.0.0.1:18443 " ]] \
+  && pass "HTTPS, SMTP and HTTP listeners belong to the systemd ingress socket; nginx runs under its service" || fail "ingress units: '$listen'"
 inherited() { podman logs --since "$(podman inspect "$I-nginx" --format '{{.State.StartedAt.Format "2006-01-02T15:04:05Z07:00"}}')" "$I-nginx" 2>&1 \
-  | grep -F 'using inherited sockets from "3;4;"' >/dev/null; }   # not grep -q: with pipefail an early exit fails the pipe
-inherited && pass "nginx inherited both sockets from systemd (its startup notice)" || fail "nginx did not inherit the sockets"
+  | grep -F 'using inherited sockets from "3;4;5;"' >/dev/null; }   # not grep -q: with pipefail an early exit fails the pipe
+inherited && pass "nginx inherited the three sockets from systemd (its startup notice)" || fail "nginx did not inherit the sockets"
+redirect="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 "http://127.0.0.1:18080/docs/api?x=1")"
+[[ "$redirect" == "301 https://mail.$NAME/docs/api?x=1" ]] && pass "plain HTTP redirects to https://PROXY_SERVER_NAME with the same path" || fail "HTTP redirect: $redirect"
 [[ "$(podman ps -a --filter "label=smarthost.instance=$I" --format '{{.Names}}' | grep -c -E 'mailpit|fake-smtp')" == 0 ]] && pass "no Mailpit or fake SMTP in production" || fail "dev services present"
 
 echo "== N client addresses"
@@ -286,7 +289,7 @@ grep -q "^FAIL  tls: nginx certificate trust" <<<"$tls" && grep -q "^PASS  tls: 
 dns="$(prod preflight --section dns --section dkim 2>&1)"; rc=$?
 [[ $rc -ne 0 && "$dns" == *"dkim: send.$NAME selector r1"* ]] && pass "DNS/DKIM: unresolvable rehearsal names are reported, not passed" || fail "dns: ${dns: -400}"
 prod dns-checklist | grep -q "bounce.$NAME.  MX  10 mta.$NAME." && pass "DNS checklist generated" || fail "checklist"
-prod firewall | grep -q "tcp dport { 22, 25, 443 }" && pass "firewall ruleset generated" || fail "firewall"
+prod firewall | grep -q "tcp dport { 22, 25, 80, 443 }" && pass "firewall ruleset generated" || fail "firewall"
 
 echo "== G delivery controls"
 out="$(prod live-enable --operator "admin@$NAME" --note "rehearsal" 2>&1)"

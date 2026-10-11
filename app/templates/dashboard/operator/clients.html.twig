@@ -48,22 +48,24 @@
 {{ ui.pager(page, 'clients') }}
 
 {% if is_granted('PLATFORM.CLIENT.APPROVE') %}
-<section class="card" id="new-client" aria-labelledby="new-h">
-    <h2 id="new-h">Create a client record</h2>
-    <p class="muted">The record starts <em>pending approval</em>: it cannot create work until you approve it on its page, after reviewing it, setting its limits and recording its policy acceptance where required. Users, memberships and API keys come after approval.</p>
-    <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="form-grid">
-        {{ ui.csrf() }}
-        <label>Organisation name <input type="text" name="company_name" required maxlength="200"></label>
-        <label>Primary operational contact (email) <input type="email" name="contact_email" required maxlength="320"></label>
-        <label>Billing contact (email, if different) <input type="email" name="billing_contact_email" maxlength="320"></label>
-        <label>Abuse/security contact (email) <input type="email" name="abuse_contact_email" maxlength="320"></label>
-        <label>Plan <input type="text" name="plan" value="standard" required maxlength="100"></label>
-        <label>Service policy acceptance
-            <select name="policy_acceptance"><option value="required">Required before approval (external client)</option><option value="exempt">Exempt (internal client)</option></select>
-        </label>
-        <label class="span-all">Private note (optional, operators only) <textarea name="note" maxlength="4000" rows="2"></textarea></label>
-        <div class="form-actions span-all"><button type="submit">Create pending client</button></div>
-    </form>
-</section>
+<div class="grid">
+    <section class="card g-col-4 lg:g-col-2" id="new-client" aria-labelledby="new-h">
+        <h2 id="new-h">Create a client record</h2>
+        <p class="muted">The record starts <em>pending approval</em>: it cannot create work until you approve it on its page, after reviewing it, setting its limits and recording its policy acceptance where required. Users, memberships and API keys come after approval.</p>
+        <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="form-grid">
+            {{ ui.csrf() }}
+            <label>Organisation name <input type="text" name="company_name" required maxlength="200"></label>
+            <label>Primary operational contact (email) <input type="email" name="contact_email" required maxlength="320"></label>
+            <label>Billing contact (email, if different) <input type="email" name="billing_contact_email" maxlength="320"></label>
+            <label>Abuse/security contact (email) <input type="email" name="abuse_contact_email" maxlength="320"></label>
+            <label>Plan <input type="text" name="plan" value="standard" required maxlength="100"></label>
+            <label>Service policy acceptance
+                <select name="policy_acceptance"><option value="required">Required before approval (external client)</option><option value="exempt">Exempt (internal client)</option></select>
+            </label>
+            <label class="span-all">Private note (optional, operators only) <textarea name="note" maxlength="4000" rows="2"></textarea></label>
+            <div class="form-actions span-all"><button type="submit">Create pending client</button></div>
+        </form>
+    </section>
+</div>
 {% endif %}
 {% endblock %}

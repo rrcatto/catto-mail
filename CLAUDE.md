@@ -160,6 +160,11 @@ points span components and need several files to see:
   `env-migrate` converts older files); System › Settings overrides the operational settings of
   `docs/contracts/settings.json` without changing the file (`setting_overrides`, applied by
   `settings-apply`).
+- **Since v0.2.3, not yet released** (owner decisions): every page has the version in its head and
+  the footer (`templates/_site.html.twig`, `PageFrameTest`); Bootstrap 6.0.0-alpha.1 is the base
+  of the design and every dashboard page uses its four-column `.grid`, with the area buttons in the
+  top bar; the public front page at `/` (`FrontPageController`, `templates/front.html.twig`); production
+  port 80 redirects to HTTPS (`PROXY_HTTP_BIND`, `infra/nginx/production/http-redirect.conf.template`).
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## Public repository
@@ -172,9 +177,9 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - Production containers are `<instance>-<service>` on `<instance>-internal`/`-ingress`/`-egress`.
     Only Postfix, validator, webhook worker and the app join egress, and only nginx and Postfix
     join ingress. **No production container publishes a port:** rootless port forwarding hides
-    client addresses. 443/25 belong to the systemd socket `<instance>-ingress.socket`, which
+    client addresses. 443/25/80 belong to the systemd socket `<instance>-ingress.socket`, which
     `<instance>-ingress.service` hands to nginx. nginx passes SMTP to Postfix with the PROXY
-    protocol.
+    protocol; port 80 (`PROXY_HTTP_BIND`) only redirects to `https://PROXY_SERVER_NAME`.
   - Start or stop production nginx only through those units (the topology script), never with
     plain `podman start`/`restart`. `TRUSTED_PROXIES` stays empty in production.
   - `prod preflight --section exposure` and `--section ingress` (`prod ingress-check`) enforce
@@ -221,13 +226,27 @@ This is a public repository. Documentation, comments, examples, tests, configura
   not covered by the ORM tenant filter). Sorts and filters are whitelisted; changes are POST + CSRF
   through the existing audited services. UI wording: "Remote accepted" (never "delivered"),
   "Recorded open/click" (never "read").
-- **Dashboard UI (v0.2.2).**
+- **Dashboard UI (v0.2.2; Bootstrap 6 base and the four-column grid, owner decision 2026-10-10).**
   - The Content-Security-Policy allows no inline styles: every style lives in
-    `app/assets/styles/app.css`, and data-driven widths or positions are SVG attributes.
-  - New pages use the shell's areas and pills (`Navigation`, gated by permission keys) and the
-    existing card, table and chart patterns; charts go through `chart_controller.js`.
+    `app/assets/styles/app.css`, and data-driven widths or positions are SVG attributes (Bootstrap's
+    CSS Grid examples set `--bs-columns` inline: never do that here).
+  - Bootstrap 6.0.0-alpha.1's compiled CSS (`app/assets/vendor/bootstrap/`, no Bootstrap JS) is linked
+    before `app.css`; Bootstrap's rules sit in cascade layers, so `app.css` (unlayered) always wins,
+    even over Bootstrap classes in the markup. A class name Bootstrap also defines picks up its
+    component styles underneath ours: check `bootstrap.min.css` before naming a new class.
+  - Page layout is Bootstrap's `.grid` (four columns, 20px gaps): every direct child names its span,
+    mobile first (`g-col-4 md:g-col-2 xl:g-col-1` a quarter, `g-col-4 lg:g-col-2` a half,
+    `g-col-4 xl:g-col-3` + `g-col-4 xl:g-col-1` main and side, `g-col-4` full width; `sticky-side`
+    for a sticky side column). A child without a span takes one column. Wide tables stay full width;
+    a half or main column holding a table of five or more columns pairs only from `2xl:` (1536px).
+  - New pages use the shell's areas and pills (`Navigation`, gated by permission keys; the area
+    buttons sit in the top bar) and the existing card, table and chart patterns; charts go through
+    `chart_controller.js`.
   - Show times with the `ts` filter and compute dashboard days, quota days and billing months with
     `App\Util\InstallationTime`.
+  - Every HTML page imports `templates/_site.html.twig`: `application_meta()` in the head and
+    `footer()` after `main` (version, administrator's address, time zone). A new standalone page
+    does the same and gets a line in `PageFrameTest`.
   - When pages change visibly, retake the affected `docs/screenshots/` images (test data only).
 - **Every time is in the installation's time zone** (`SMARTHOST_TIMEZONE`, default
   `Africa/Johannesburg`; owner decision). Never write UTC or a `Z` suffix:

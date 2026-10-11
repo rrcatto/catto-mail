@@ -4,6 +4,42 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.11.
 
+## [Unreleased]
+
+### Added
+- A public front page at `/` (owner decision): someone who types the installation's address sees
+  what the service is, a sign-in link, the API documentation, and for recipients of its mail whom
+  the mail comes from, how to stop it, how to report it and what tracked links do, instead of a 404.
+  Static, with no session, cookie, script or form; it says there is no public sign-up.
+- Every HTML page (the front page, the dashboard signed in and out, the error page, the API
+  documentation and the re-permission page) names the software version in its head,
+  `<meta name="application-name" content="catto-mail v<version>">`, and ends with the same footer:
+  what catto-mail is, the version, the administrator's address (`APP_ADMIN_EMAIL`) as a contact
+  link, and the time zone the times are in (owner decision). The footer replaces the dashboard's
+  one-line version note. The administrator's address is therefore public; the installer and the
+  install guide say so.
+- Bootstrap 6 (6.0.0-alpha.1) is the base of the design (owner decision): its compiled CSS is
+  vendored through the import map (no Bootstrap JavaScript, no CDN) and linked before the
+  application's stylesheet, which keeps the look because Bootstrap's rules sit in cascade layers.
+
+### Changed
+- Production answers plain HTTP (owner decision): the ingress socket also binds port 80
+  (`PROXY_HTTP_BIND`, built in as `0.0.0.0:80`, so an existing `infra/.env` needs no change), and
+  nginx redirects every request there to the same path on `https://PROXY_SERVER_NAME`; nothing is
+  served or logged on port 80. The generated firewall rules, the installer's low-port step and
+  the ingress preflight (`prod ingress-check`, which now tests the redirect) include it. If you
+  applied the firewall rules, generate and apply them again after upgrading (installation guide
+  §8).
+- Every dashboard page is laid out in a four-column grid that spans the full width (Bootstrap's
+  CSS Grid, 20px gaps and page margins; designed for 2560 x 1440, about 615px a column): cards take
+  a quarter, a half, three quarters or the full width, wide tables keep the full width, and the
+  columns fall back to two and then one on narrower screens.
+- The round area buttons moved from the left rail into the top bar, next to the logo, so the grid
+  can use the full width; below 2200px the page pills take a second row.
+- Class names that Bootstrap also defines were renamed where Bootstrap's version would change them:
+  `label.check` is `label.checkline`, `.prose` is `.readable`, `form.row` is `form.formrow`; the
+  old layout classes (`row-2`, `row-wide-left`, `cards`, `grid-4`, `with-aside`) are gone.
+
 ## [0.2.3] - 2026-10-10
 
 Every time in the installation's time zone, a short grouped `infra/.env`, and the operational

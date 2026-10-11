@@ -19,11 +19,12 @@
 #                        to Postfix's PROXY-protocol listener (postfix-ingress:25).
 #
 # Ingress (client addresses preserved): no container publishes a port. The systemd
-# socket <instance>-ingress.socket binds PROXY_HTTPS_BIND (443) and POSTFIX_SMTP_BIND
-# (25) on the host, and <instance>-ingress.service starts nginx with both sockets.
-# nginx terminates HTTPS (REMOTE_ADDR = the client) and passes SMTP to Postfix with
-# the PROXY protocol (Postfix logs and checks the client). nginx is therefore started
-# and stopped only through those units (hostctl below), never with `podman start`.
+# socket <instance>-ingress.socket binds PROXY_HTTPS_BIND (443), POSTFIX_SMTP_BIND (25)
+# and PROXY_HTTP_BIND (80) on the host, and <instance>-ingress.service starts nginx with
+# those sockets. nginx terminates HTTPS (REMOTE_ADDR = the client), passes SMTP to
+# Postfix with the PROXY protocol (Postfix logs and checks the client) and redirects
+# plain HTTP to HTTPS. nginx is therefore started and stopped only through those units
+# (hostctl below), never with `podman start`.
 # Services have fixed addresses on each network and /etc/hosts entries for each other,
 # so name resolution does not depend on the aardvark-dns version or on the order of a
 # dual-homed container's resolvers.
@@ -41,7 +42,7 @@
 #   start              ordered start: postgres -> DB tasks -> services (nginx through
 #                      the ingress units) -> wait healthy
 #   stop               stop the services in reverse order (containers are kept; the
-#                      ingress socket is stopped with nginx and releases 25/443)
+#                      ingress socket is stopped with nginx and releases 25/80/443)
 #   remove             remove the containers (volumes and networks are kept)
 #   replace <svc...>   recreate the named containers from the current images and
 #                      configuration and start them (e.g. postfix delivery after a
@@ -69,6 +70,7 @@ INGRESS_SUBNET=${SMARTHOST_INGRESS_SUBNET}
 EGRESS_ENABLED=${SMARTHOST_EGRESS_ENABLED}
 PROXY_HTTPS_BIND=${PROXY_HTTPS_BIND}
 POSTFIX_SMTP_BIND=${POSTFIX_SMTP_BIND}
+PROXY_HTTP_BIND=${PROXY_HTTP_BIND}
 POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_DB=${POSTGRES_DB}
 PROXY_TLS_CERT_FILE=${PROXY_TLS_CERT_FILE}
@@ -204,12 +206,13 @@ create_one() {
         --health-cmd smarthost-webhook-worker-healthcheck --health-interval 30s --health-start-period 20s --health-retries 3 \
         "$(image app)" php bin/console smarthost:webhook:work ;;
     nginx)
-      # No published port: the HTTPS and SMTP sockets come from <instance>-ingress.socket
-      # (NGINX="3;4;" makes nginx inherit them). The production templates listen on
-      # PROXY_HTTPS_BIND and POSTFIX_SMTP_BIND exactly, so the inherited sockets match.
+      # No published port: the HTTPS, SMTP and HTTP sockets come from <instance>-ingress.socket
+      # (NGINX="3;4;5;" makes nginx inherit them). The production templates listen on
+      # PROXY_HTTPS_BIND, POSTFIX_SMTP_BIND and PROXY_HTTP_BIND exactly, so the inherited
+      # sockets match.
       restart=no service nginx "$(internal nginx)" "$(ingress nginx)" "$(ingress_host)" "$(env_file proxy)" \
         -e NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-production \
-        -e "NGINX=3;4;" \
+        -e "NGINX=3;4;5;" \
         --secret "$I-proxy-tls-cert,type=mount,target=$PROXY_TLS_CERT_FILE" \
         --secret "$I-proxy-tls-key,type=mount,target=$PROXY_TLS_KEY_FILE" \
         --health-cmd "wget -q -O /dev/null http://127.0.0.1:8080/nginx-health" \
@@ -276,7 +279,7 @@ ingress_start() {
   hostctl reset-failed "$UNIT_SOCKET" "$UNIT_INGRESS" >/dev/null 2>&1 || true
   if ! hostctl start "$UNIT_SOCKET" "$UNIT_INGRESS"; then
     hostctl status --no-pager --lines 5 "$UNIT_SOCKET" "$UNIT_INGRESS" >&2 || true
-    die "the ingress did not start. If the socket could not bind $PROXY_HTTPS_BIND/$POSTFIX_SMTP_BIND, set net.ipv4.ip_unprivileged_port_start=25 on the host (runbook §1; smarthostctl prod preflight --section host)"
+    die "the ingress did not start. If the socket could not bind $PROXY_HTTPS_BIND/$POSTFIX_SMTP_BIND/$PROXY_HTTP_BIND, set net.ipv4.ip_unprivileged_port_start=25 on the host (runbook §1; smarthostctl prod preflight --section host)"
   fi
 }
 

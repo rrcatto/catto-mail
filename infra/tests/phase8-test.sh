@@ -15,7 +15,8 @@
 #      the production port-25 listener (PROXY protocol on postfix-ingress only; the
 #      address in the PROXY header is the client Postfix logs)
 #   N  nginx: the production templates (HTTPS listen = PROXY_HTTPS_BIND, SMTP stream
-#      server on POSTFIX_SMTP_BIND with the PROXY protocol); development unchanged
+#      server on POSTFIX_SMTP_BIND with the PROXY protocol, HTTP redirect on
+#      PROXY_HTTP_BIND); development unchanged
 #   K  production DKIM key tool: generate, activate, rotate, retire, dns, pubkey
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -155,14 +156,16 @@ nginx_conf() {  # template-dir [extra env...]: the rendered configuration (nginx
     -e NGINX_LOCAL_RESOLVERS=10.89.20.1 ${dir:+-e NGINX_ENVSUBST_TEMPLATE_DIR=$dir} "$@" --entrypoint sh "localhost/smarthost-nginx:$TAG" \
     -c '/docker-entrypoint.sh nginx -v >/dev/null 2>&1 && nginx -T 2>&1'
 }
-conf="$(nginx_conf /etc/nginx/templates-production -e PROXY_HTTPS_BIND=127.0.0.3:443 -e POSTFIX_SMTP_BIND=127.0.0.3:25)"
+conf="$(nginx_conf /etc/nginx/templates-production -e PROXY_HTTPS_BIND=127.0.0.3:443 -e POSTFIX_SMTP_BIND=127.0.0.3:25 \
+  -e PROXY_HTTP_BIND=127.0.0.3:80 -e PROXY_SERVER_NAME=mail.example.org)"
 grep -q 'syntax is ok' <<<"$conf" && grep -q '^    listen 127.0.0.3:443 ssl;' <<<"$conf" && grep -q '^    listen 127.0.0.3:25;' <<<"$conf" \
   && grep -q '^    proxy_pass postfix-ingress:25;' <<<"$conf" && grep -q '^    proxy_protocol on;' <<<"$conf" \
-  && pass "production nginx: HTTPS on PROXY_HTTPS_BIND, SMTP stream on POSTFIX_SMTP_BIND -> postfix-ingress:25 with the PROXY protocol (nginx -t ok)" \
-  || fail "production nginx: $(grep -E 'listen|proxy_|emerg' <<<"$conf" | head -8)"
+  && grep -q '^    listen 127.0.0.3:80;' <<<"$conf" && grep -qF '        return 301 https://mail.example.org$request_uri;' <<<"$conf" \
+  && pass "production nginx: HTTPS on PROXY_HTTPS_BIND, SMTP stream on POSTFIX_SMTP_BIND -> postfix-ingress:25 with the PROXY protocol, HTTP on PROXY_HTTP_BIND redirects to https://PROXY_SERVER_NAME (nginx -t ok)" \
+  || fail "production nginx: $(grep -E 'listen|proxy_|return|emerg' <<<"$conf" | head -8)"
 conf="$(nginx_conf "")"
-grep -q 'syntax is ok' <<<"$conf" && grep -q '^    listen 443 ssl;' <<<"$conf" && ! grep -q 'stream {\|proxy_protocol' <<<"$conf" \
-  && pass "development nginx unchanged: listen 443, no SMTP stream" || fail "development nginx: $(grep -E 'listen|stream' <<<"$conf" | head -5)"
+grep -q 'syntax is ok' <<<"$conf" && grep -q '^    listen 443 ssl;' <<<"$conf" && ! grep -q 'stream {\|proxy_protocol\|return 301' <<<"$conf" \
+  && pass "development nginx unchanged: listen 443, no SMTP stream, no HTTP listener" || fail "development nginx: $(grep -E 'listen|stream|return' <<<"$conf" | head -5)"
 
 echo "== K production DKIM keys"
 out="$(podman run --rm --name smarthost-phase8-dkim --label project=smarthost --network none -e OPENDKIM_KEY_DIR=/k -e OPENDKIM_TABLES_DIR=/t --entrypoint sh "localhost/smarthost-opendkim:$TAG" -c '

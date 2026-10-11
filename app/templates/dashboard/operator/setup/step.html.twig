@@ -11,8 +11,8 @@
     <div class="actions">{% for t in topics %}{{ ui.help(t, 'Help: ' ~ t|replace({'-': ' '})) }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
 </div>
 
-<div class="with-aside with-aside-left">
-    <aside class="card" aria-labelledby="steps-h">
+<div class="grid">
+    <aside class="card g-col-4 xl:g-col-1 sticky-side" aria-labelledby="steps-h">
         <h2 id="steps-h">Steps</h2>
         <ol class="stepper">
         {% for s in steps %}
@@ -25,7 +25,7 @@
         <p class="small"><a href="{{ path('dashboard_operator_setup') }}">Overview of all steps</a></p>
     </aside>
 
-    <div class="step-main">
+    <div class="step-main g-col-4 xl:g-col-3">
         {% include 'dashboard/operator/setup/steps/' ~ step.key ~ '.html.twig' %}
 
         {% if checks is not empty or step.key not in ['welcome', 'seed_test', 'bounce_test', 'readiness'] %}

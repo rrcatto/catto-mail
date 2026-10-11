@@ -23,9 +23,9 @@
     <p class="empty">Nothing matches “{{ q }}”.</p>
 {% else %}
     <p class="muted">{{ total }} result{{ total == 1 ? '' : 's' }} for “{{ q }}”{% if total >= 20 %} (at most 20 of each kind){% endif %}.</p>
-    <div class="results">
+    <div class="grid">
     {% for s in results %}
-        <section class="card card-flush" aria-labelledby="res-{{ s.key }}">
+        <section class="card card-flush g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="res-{{ s.key }}">
             <div class="card-head"><h2 id="res-{{ s.key }}">{{ s.title }}</h2><span class="count count-dark">{{ s.rows|length }}</span></div>
             <ul class="result-list">
                 {% for r in s.rows %}

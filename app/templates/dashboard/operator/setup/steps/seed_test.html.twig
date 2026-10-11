@@ -8,7 +8,7 @@ in HELD mode the job waits at "Claimed by the delivery daemon" — that itself s
     <label>Send as client <select name="client">{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.domains }})</option>{% endfor %}</select></label>
     <label>From address (at one of that client's verified domains) <input name="sender_email" type="email" required></label>
     <label>Your addresses (1 to 5, separated by spaces) <textarea name="addresses" rows="2" required></textarea></label>
-    <label class="check"><input type="checkbox" name="i_own_these" value="1" required> I own or control every one of these mailboxes.</label>
+    <label class="checkline"><input type="checkbox" name="i_own_these" value="1" required> I own or control every one of these mailboxes.</label>
     <button type="submit">Send the seed test</button>
 </form>{% endif %}
 <p class="muted">After it arrives: show images (to record the open) and click the link (to record the click), then confirm below what you see in the message's headers.</p>

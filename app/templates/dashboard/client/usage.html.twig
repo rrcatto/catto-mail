@@ -20,8 +20,8 @@
     {% endfor %}
 </div>
 
-<div class="row-2 row-wide-left">
-    <section class="card" aria-labelledby="quota-h">
+<div class="grid">
+    <section class="card g-col-4 xl:g-col-3" aria-labelledby="quota-h">
         <h2 id="quota-h">Limits and quotas</h2>
         {% set shown = limits.quotas|filter(q => q.limit is not null or q.used > 0) %}
         {% if shown is not empty %}
@@ -47,7 +47,7 @@
         </table></div>
         <p class="muted small">Quotas count work as it is admitted (jobs created, addresses submitted, recipients accepted); usage counts work done. A request over a quota is refused with HTTP 429 and the problem type quota-exceeded, which names the quota, its limit, the amount used and when it resets.</p>
     </section>
-    <section class="card card-flush" aria-labelledby="limits-h">
+    <section class="card card-flush g-col-4 xl:g-col-1" aria-labelledby="limits-h">
         <div class="card-head"><h2 id="limits-h">Limits</h2></div>
         <div class="scroll"><table>
             <thead><tr><th scope="col">Limit</th><th scope="col" class="num">Effective</th></tr></thead>
@@ -56,7 +56,8 @@
     </section>
 </div>
 
-<section aria-labelledby="custom-h">
+<div class="grid">
+<section class="g-col-4 lg:g-col-2" aria-labelledby="custom-h">
     <h2 id="custom-h">A period of your choice</h2>
     <form method="get" class="filters" aria-label="Custom period">
         <label>From <input type="date" name="from" value="{{ range.from }}"></label><label>to (exclusive) <input type="date" name="to" value="{{ range.to }}"></label>
@@ -76,14 +77,14 @@
 </section>
 
 {% if statements is not empty %}
-<section class="card card-flush" aria-labelledby="bill-h">
+<section class="card card-flush g-col-4 lg:g-col-2" aria-labelledby="bill-h">
     <div class="card-head"><h2 id="bill-h">Billing statements</h2></div>
     <div class="scroll"><table><thead><tr><th scope="col">Period</th><th scope="col">Status</th><th scope="col">Totals</th></tr></thead>
     <tbody>{% for s in statements %}<tr><td>{{ s.period_start }} – {{ s.period_end }} (exclusive)</td><td>{{ s.status|label('statement_status') }}</td><td>{% for k, v in s.totals %}{{ k|label('usage_type') }}: {{ v|number_format }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% endif %}
 
-<section class="card card-flush" aria-labelledby="months-h">
+<section class="card card-flush g-col-4 lg:g-col-2" aria-labelledby="months-h">
     <div class="card-head"><h2 id="months-h">By month (last 12 months)</h2></div>
     {% if usage.months is empty %}<p class="empty">No usage recorded yet.</p>{% else %}
     <div class="scroll">
@@ -95,7 +96,7 @@
     {% endif %}
 </section>
 
-<section aria-labelledby="records-h">
+<section class="g-col-4 lg:g-col-2" aria-labelledby="records-h">
     <h2 id="records-h">Usage records</h2>
     <form method="get" class="filters" role="search" aria-label="Filter usage records">
         {{ ui.select('type', 'Type', label_options('usage_type'), filters.type) }}
@@ -116,5 +117,6 @@
     </div>
     {{ ui.pager(usage.records, 'records') }}
 </section>
+</div>
 <p class="muted">Usage is recorded for billing; pricing and payment happen outside Smarthost.</p>
 {% endblock %}

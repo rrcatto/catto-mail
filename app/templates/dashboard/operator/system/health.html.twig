@@ -12,9 +12,9 @@
 </div>
 {% if not setup_complete and is_granted('SYSTEM.SETUP.MANAGE') %}<p class="warn">The setup is not complete. <a href="{{ path('dashboard_operator_setup') }}">Continue the System setup</a>.</p>{% endif %}
 
-<div class="row-2 row-wide-left">
-    {% include 'dashboard/operator/system/_delivery_controls.html.twig' %}
-    <section class="card" aria-labelledby="daemon-h">
+<div class="grid">
+    {% include 'dashboard/operator/system/_delivery_controls.html.twig' with {span: 'g-col-4 xl:g-col-3'} %}
+    <section class="card g-col-4 xl:g-col-1" aria-labelledby="daemon-h">
         <div class="card-head"><h2 id="daemon-h">Delivery daemon</h2>
             {% if daemon and daemon.alive %}<span class="st st-active">Running</span>{% else %}<span class="st st-failed">Not running</span>{% endif %}</div>
         {% if daemon %}
@@ -39,14 +39,14 @@
 
 <section aria-labelledby="modes-h">
     <h2 id="modes-h">What HELD, LIVE, PAUSED and STOPPED mean</h2>
-    <div class="grid grid-4">
+    <div class="grid">
         {% for m, text in {
             HELD: 'The installation has not been switched to live delivery. Send jobs are accepted and wait; nothing goes to the Internet except dashboard sign-in mail. This is how every installation starts.',
             LIVE: "Mail is delivered to recipients' mail servers, within the configured rate limits. Switching to LIVE is a deliberate, audited action that first runs the activation preflight.",
             PAUSED: 'The emergency stop is in force: the delivery daemon starts no new message and Postfix holds its queue. Nothing is lost; resuming continues where it stopped.',
             STOPPED: 'The delivery daemon is not running at all (crashed, or the system is stopped). Nothing is sent and bounces wait in the spool until it runs again.',
         } %}
-        <article class="card{{ m == d.mode ? ' card-accent' : '' }}">
+        <article class="card g-col-4 md:g-col-2 xl:g-col-1{{ m == d.mode ? ' card-accent' : '' }}">
             <h3 class="mode-title"><span class="dot mode-{{ m }}" aria-hidden="true"></span>{{ m }}{% if m == d.mode %} <span class="count count-dark">now</span>{% endif %}</h3>
             <p class="small">{{ text }}</p>
         </article>
@@ -54,9 +54,9 @@
     </div>
 </section>
 
-<div class="row-2 row-wide-left">
-    {% include 'dashboard/operator/_submission_rate.html.twig' with {period_route: 'dashboard_operator_system'} %}
-    <section class="card" aria-labelledby="queue-h">
+<div class="grid">
+    {% include 'dashboard/operator/_submission_rate.html.twig' with {period_route: 'dashboard_operator_system', span: 'g-col-4 xl:g-col-3'} %}
+    <section class="card g-col-4 xl:g-col-1" aria-labelledby="queue-h">
         <div class="card-head"><h2 id="queue-h">Postfix queue</h2>
             <span class="live live-{{ d.queue and d.queue_snapshot_age is not null and d.queue_snapshot_age <= 300 ? 'on' : 'bad' }}">{{ d.queue_snapshot_age is null ? 'no snapshot' : 'snapshot ' ~ (d.queue_snapshot_age|duration) ~ ' old' }}</span></div>
         {% if d.queue %}
@@ -75,8 +75,8 @@
     </section>
 </div>
 
-<div class="row-2">
-    <section class="card card-flush" aria-labelledby="req-h">
+<div class="grid">
+    <section class="card card-flush g-col-4 2xl:g-col-2" aria-labelledby="req-h">
         <div class="card-head"><div><h2 id="req-h">Host requests</h2>
             <p class="muted small">The web application never runs commands on the server: actions are recorded here and carried out by the host agent{% if agent_age is null %}, <strong>which has never reported</strong>{% else %}, last report {{ agent_age|duration }} ago{% endif %}. {{ pending_requests }} waiting.</p></div>
             <a class="more" href="{{ path('dashboard_operator_system_requests') }}">Request log</a></div>
@@ -89,7 +89,7 @@
             </tr>{% else %}<tr><td colspan="5"><span class="muted">No request yet.</span></td></tr>{% endfor %}</tbody>
         </table></div>
     </section>
-    <section class="card" aria-labelledby="comp-h">
+    <section class="card g-col-4 2xl:g-col-2" aria-labelledby="comp-h">
         <div class="card-head"><h2 id="comp-h">Components</h2><a class="more" href="{{ path('dashboard_operator_diagnostics') }}">All diagnostics</a></div>
         <p class="muted small">Every line is the worst result of that component's latest checks — never just "the container exists". The web application runs its own checks; the <strong>host agent</strong> (a small service on the server) runs the host, DNS, TLS, Postfix and backup checks
             {% if agent_age is null %}<strong>but has never reported</strong>{% else %}and last reported {{ agent_age|duration }} ago{% endif %}. {{ ui.help('components', 'What each component does') }}</p>

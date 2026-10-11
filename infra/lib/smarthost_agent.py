@@ -308,7 +308,7 @@ class Agent:
                        "pass" if main.get("enabled") == "enabled (boot)" and main.get("active") == "active" else "fail",
                        f"enabled: {main.get('enabled')}, active: {main.get('active')}"))
         ingress = u.get(f"{self.i}-ingress.socket", {})
-        c.append(check("boot.ingress-socket", "boot", "Ingress socket (ports 443 and 25)",
+        c.append(check("boot.ingress-socket", "boot", "Ingress socket (ports 443, 25 and 80)",
                        "pass" if ingress.get("active") == "active" else "fail", f"active: {ingress.get('active')}"))
         timers = ((f"{self.i}-backup.timer", "Backup timer"), (f"{self.i}-tls-renew.timer", "Certificate renewal timer"),
                   (f"{self.i}-reputation-evaluate.timer", "Reputation timer"),
