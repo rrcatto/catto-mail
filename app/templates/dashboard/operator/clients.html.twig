@@ -12,15 +12,17 @@
 </div>
 
 <nav class="seg" aria-label="Client lists">
-    <a href="{{ path('dashboard_operator_clients') }}"{% if not filters.status %} aria-current="page"{% endif %}>All</a>
+    <a href="{{ path('dashboard_operator_clients') }}"{% if not filters.status and not filters.origin %} aria-current="page"{% endif %}>All</a>
+    <a href="{{ path('dashboard_operator_clients', {origin: 'public_application', sort: 'created', dir: 'desc'}) }}"{% if filters.origin == 'public_application' and not filters.status %} aria-current="page"{% endif %}>Public sign-ups</a>
     <a href="{{ path('dashboard_operator_clients', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}) }}"{% if filters.status == 'pending_approval' %} aria-current="page"{% endif %}>Approval queue</a>
     <a href="{{ path('dashboard_operator_clients', {status: 'throttled'}) }}"{% if filters.status == 'throttled' %} aria-current="page"{% endif %}>Throttled</a>
     <a href="{{ path('dashboard_operator_clients', {status: 'suspended'}) }}"{% if filters.status == 'suspended' %} aria-current="page"{% endif %}>Suspended</a>
 </nav>
-<p class="muted small">The approval queue lists the clients pending approval, oldest first.</p>
+<p class="muted small">The approval queue lists the clients pending approval, oldest first. Public sign-ups are active at once in the starter tier (owner decision); review them, and throttle, suspend or close any that misuse the service.</p>
 
 <form method="get" class="filters" role="search" aria-label="Filter clients">
     {{ ui.select('status', 'Status', label_options('client_status'), filters.status) }}
+    {{ ui.select('origin', 'Origin', label_options('client_origin'), filters.origin) }}
     <label>Name or contact contains <input type="text" name="q" value="{{ filters.q }}"></label>
     <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
     <button type="submit">Apply</button>
@@ -28,13 +30,13 @@
 </form>
 
 <section class="card card-flush" aria-labelledby="list-h">
-    <div class="card-head"><h2 id="list-h">{{ filters.status ? filters.status|label('client_status') : 'All clients' }}</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
+    <div class="card-head"><h2 id="list-h">{{ filters.status ? filters.status|label('client_status') : (filters.origin ? filters.origin|label('client_origin') : 'All clients') }}</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
     {% if page.rows is empty %}<p class="empty">No clients match.</p>{% else %}
     <div class="scroll"><table class="table-clients">
         <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Organisation') }}</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">{{ ui.sort(listing, 'status_changed', 'Status since') }}</th><th scope="col">Approved</th><th scope="col">Plan</th><th scope="col">Open alerts</th><th scope="col">Global opt-outs</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th></tr></thead>
         <tbody>{% for c in page.rows %}
             <tr>
-                <td><a class="client-name" href="{{ path('dashboard_operator_client', {id: c.id}) }}"><span class="avatar av-{{ c.company_name|tone_slot }}" aria-hidden="true">{{ c.company_name|initials }}</span>{{ c.company_name }}</a>{% if c.origin == 'public_application' %} <span class="tag">application</span>{% endif %}</td>
+                <td><a class="client-name" href="{{ path('dashboard_operator_client', {id: c.id}) }}"><span class="avatar av-{{ c.company_name|tone_slot }}" aria-hidden="true">{{ c.company_name|initials }}</span>{{ c.company_name }}</a>{% if c.origin == 'public_application' %} <span class="tag">sign-up</span>{% endif %}</td>
                 <td>{{ c.contact_email }}</td>
                 <td>{{ ui.status(c.status, 'client_status') }}</td><td>{{ c.status_changed_at|ts }}</td><td>{{ c.approved_at|ts }}</td><td>{{ c.plan }}</td>
                 <td>{% if c.open_alerts > 0 %}<span class="st st-sev-{{ c.worst_alert }}"><strong>{{ c.open_alerts }}</strong>&nbsp;({{ c.worst_alert|label('alert_severity') }})</span>{% else %}—{% endif %}</td>

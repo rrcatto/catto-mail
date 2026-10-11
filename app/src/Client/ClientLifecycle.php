@@ -25,8 +25,10 @@ use Doctrine\ORM\EntityManagerInterface;
  *                   active for an internal client created by an operator (approved at once);
  *   apply           a public application record (origin public_application): only while
  *                   APP_PUBLIC_ONBOARDING_ENABLED is true, always pending_approval, no user,
- *                   no key - an operator reviews and approves it. No route calls it in this
- *                   release; it is the single entry point a future public channel must use;
+ *                   no key. It is the single entry point of a public channel: the public
+ *                   sign-up (App\Client\PublicSignUp, owner decision 2026-10-11) calls it, then
+ *                   adds the client admin, the policy acceptance and the starter limits and
+ *                   activates the client;
  *   changeStatus    approve, throttle, suspend, lift a throttle, reactivate, close
  *                   (ClientStatusTransitions), always with an operator note, audited with
  *                   the actor; the client row is locked so concurrent changes serialise;
@@ -98,13 +100,13 @@ final class ClientLifecycle
     }
 
     /** A public application (gated by APP_PUBLIC_ONBOARDING_ENABLED); never credentials or approval. */
-    public function apply(string $companyName, string $contactEmail, ?string $abuseContactEmail = null): Client
+    public function apply(string $companyName, string $contactEmail, ?string $abuseContactEmail = null, string $plan = 'application'): Client
     {
         if (!$this->publicOnboardingEnabled) {
             throw new DomainRuleViolation('Public onboarding is disabled (APP_PUBLIC_ONBOARDING_ENABLED=false).');
         }
 
-        return $this->create($companyName, $contactEmail, 'application', ClientStatus::PendingApproval,
+        return $this->create($companyName, $contactEmail, $plan, ClientStatus::PendingApproval,
             AuditActor::system('public_application'), true, null, $abuseContactEmail, ClientOrigin::PublicApplication);
     }
 

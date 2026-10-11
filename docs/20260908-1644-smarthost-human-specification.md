@@ -1460,11 +1460,23 @@ What each state means:
 
 The installation-wide kill switch remains the Phase 8 delivery pause.
 
-**Public onboarding gate.**
-- `APP_PUBLIC_ONBOARDING_ENABLED` is false by default and in the production profile.
-- No public registration route exists. The one gated entry point can only create a
-  `pending_approval` client of origin `public_application`.
-- Enabling it is an owner decision, with the criteria listed in `docs/production/onboarding.md`.
+**Public onboarding gate and public sign-up.**
+- `APP_PUBLIC_ONBOARDING_ENABLED` is false by default and in the production profile; then the
+  sign-up page does not exist.
+- The one gated entry point creates a `pending_approval` client of origin `public_application`.
+- **Public sign-up** (owner decision, 11 October 2026; it replaces "approval stays manual"). When
+  the gate is open, a person gives an organisation and an email address on `/dashboard/sign-up`
+  and confirms the emailed single-use link. Nothing is created before that. Confirming, in one
+  transaction:
+  - creates the client through the gated entry point;
+  - makes the person its client admin;
+  - records the acceptance of the service policy in force;
+  - applies the starter limits (dashboard settings, never above the installation ceilings);
+  - activates the client.
+- Abuse protection: rate limits per client IP and per address on the form and on the
+  verification, a honeypot field, and no account enumeration. The operator is emailed, sees the
+  sign-ups in the client list and *Needs attention*, and can throttle, suspend or close any of
+  them. The criteria before opening it are in `docs/production/onboarding.md`.
 
 **Service policy.**
 - `APP_ACCEPTABLE_USE_POLICY_VERSION` names the policy version in force. Smarthost stores
@@ -2314,13 +2326,14 @@ Exit criteria:
 
 **Repository side implemented (specification 2.10).** The SaaS operations of section 16 are
 proven by the Phase 2 suite, including a two-client tenant-isolation review, an 8-process quota
-race and query plans at representative scale, and by the production rehearsal. Public onboarding
-remains disabled. Still pending, and decided by the owner:
+race and query plans at representative scale, and by the production rehearsal. Public sign-up
+exists since the owner's decision of 11 October 2026 and is off until the operator turns it on.
+Still pending, and decided by the owner:
 
 - pricing and plans;
 - the policy text;
 - calibrating the thresholds on live traffic;
-- the decision to open public onboarding.
+- when to turn public sign-up on for an installation.
 
 ---
 

@@ -361,6 +361,54 @@
       "group": "API and client limits"
     },
     {
+      "name": "APP_STARTER_SEND_RECIPIENTS_PER_DAY",
+      "label": "Starter tier: recipients per day",
+      "kind": "integer",
+      "min": 0,
+      "max": 10000000,
+      "group": "Public sign-up"
+    },
+    {
+      "name": "APP_STARTER_SEND_RECIPIENTS_PER_MONTH",
+      "label": "Starter tier: recipients per month",
+      "kind": "integer",
+      "min": 0,
+      "max": 100000000,
+      "group": "Public sign-up"
+    },
+    {
+      "name": "APP_STARTER_VALIDATION_ADDRESSES_PER_DAY",
+      "label": "Starter tier: addresses validated per day",
+      "kind": "integer",
+      "min": 0,
+      "max": 10000000,
+      "group": "Public sign-up"
+    },
+    {
+      "name": "APP_STARTER_API_KEY_LIMIT",
+      "label": "Starter tier: API keys",
+      "kind": "integer",
+      "min": 1,
+      "max": 1000,
+      "group": "Public sign-up"
+    },
+    {
+      "name": "APP_STARTER_WEBHOOK_ENDPOINT_LIMIT",
+      "label": "Starter tier: webhook endpoints",
+      "kind": "integer",
+      "min": 0,
+      "max": 1000,
+      "group": "Public sign-up"
+    },
+    {
+      "name": "APP_STARTER_SENDING_DOMAIN_LIMIT",
+      "label": "Starter tier: sending domains",
+      "kind": "integer",
+      "min": 1,
+      "max": 10000,
+      "group": "Public sign-up"
+    },
+    {
       "name": "APP_REPERMISSION_RESPONSE_DAYS",
       "label": "Days a re-permission link stays valid",
       "kind": "integer",

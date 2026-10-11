@@ -496,6 +496,8 @@ label.checkline, .stack label.checkline, .filters label.checkline { display: fle
 form.formrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .inline { display: inline; }
 .narrow { max-width: 30rem; }
+/* The sign-up form's honeypot: off screen for people, filled in by form robots. */
+.hp { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
 fieldset.perms { border: 1px solid var(--line); border-radius: 16px; margin: .6rem 0; padding: .6rem 1rem; }
 fieldset.perms label { display: block; margin: .3rem 0; }
 progress { width: 100%; max-width: 40rem; height: 12px; accent-color: var(--green); }

@@ -1,0 +1,12 @@
+New sign-up on Catto Mail
+
+{{ client.companyName }} signed up through the public sign-up page and is active in the starter
+tier (owner decision: public sign-ups are activated automatically).
+
+Client admin:  {{ client_admin }}
+Signed up:     {{ at|date('Y-m-d H:i:s T') }}
+Starter limits: {{ limits.send_recipients_per_day }} recipients a day, {{ limits.send_recipients_per_month }} a month, {{ limits.validation_addresses_per_day }} addresses validated a day,
+                {{ limits.max_api_keys }} API keys, {{ limits.max_webhook_endpoints }} webhook endpoints, {{ limits.max_sending_domains }} sending domains
+
+Review the client, and throttle, suspend or close it if needed:
+{{ url }}

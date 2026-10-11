@@ -9,7 +9,7 @@
 <li><strong>Clients and API keys</strong>, their lifecycle, limits and quotas.</li>
 <li><strong>Sending domains</strong> and their TXT verification.</li>
 <li><strong>Tracking endpoints</strong> (<code>/t/o</code>, <code>/t/c</code>) and <strong>re-permission pages</strong> (<code>/p</code>).</li>
-<li><strong>The public front page</strong> (<code>/</code>): what the service is, the sign-in link, the API documentation, and for recipients of its mail how to stop it and how to reach the administrator. There is no public sign-up.</li>
+<li><strong>The public front page</strong> (<code>/</code>): what the service is, the sign-in link, the API documentation, and for recipients of its mail how to stop it and how to reach the administrator. Public sign-up exists only when the operator turns it on (<code>APP_PUBLIC_ONBOARDING_ENABLED</code>): <code>/dashboard/sign-up</code> then opens an active client in the starter tier after the person confirms the emailed link.</li>
 <li><strong>Suppression administration</strong> (operators), reputation alerts, usage and billing statements.</li>
 <li><strong>The webhook outbox</strong>: it records events for the webhook worker in the same database transaction.</li>
 </ul>

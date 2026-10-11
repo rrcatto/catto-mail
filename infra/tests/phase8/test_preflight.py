@@ -187,9 +187,10 @@ def levels(results: list[pf.Check], section: str | None = None) -> dict[str, str
 
 
 class DnsAndDkimChecksTest(unittest.TestCase):
-    def run_pf(self, zone: dict, activation: bool = False, host: FakeHost | None = None, sections=("dns", "dkim")) -> list[pf.Check]:
+    def run_pf(self, zone: dict, activation: bool = False, host: FakeHost | None = None, sections=("dns", "dkim"),
+               client_details: bool = True) -> list[pf.Check]:
         values = production_values()
-        p = pf.Preflight(values, host or host_for(values), FakeResolver(zone), activation=activation)
+        p = pf.Preflight(values, host or host_for(values), FakeResolver(zone), activation=activation, client_details=client_details)
         return p.run(sections)
 
     def test_a_correct_identity_passes(self) -> None:
@@ -246,6 +247,31 @@ class DnsAndDkimChecksTest(unittest.TestCase):
                     self.assertIn(f"client {client}:", by[name].detail)
                 self.assertIn("does not block the installation", by["client-b.org"].detail)
                 self.assertEqual([], [(r.name, r.detail) for r in res if r.level == "FAIL"], "nothing blocks")
+
+    def test_client_domain_warnings_are_counted_in_one_line_by_default(self) -> None:
+        """Many self-service clients must not bury the installation's own checks: by default each
+        section counts its client gaps in one WARN; --client-domains lists them."""
+        values = production_values()
+        zone = good_zone(values, KEY)
+        del zone[("_dmarc.client-a.net", "TXT")]
+        del zone[("s1._domainkey.client-a.net", "TXT")]
+        rows = [["client-a.net", "active", "s1", "Client A"]] + [[f"c{i}.example.org", "pending_dns", "cm202610abcd", f"Client {i}"] for i in range(7)]
+        res = self.run_pf(zone, activation=True, host=host_for(values, sql={"FROM sending_domains": rows}), client_details=False)
+        by = {r.name: r for r in res}
+        dkim = by["client sending domains without an active, published key"]
+        self.assertEqual(("dkim", "WARN", False), (dkim.section, dkim.level, dkim.activation))
+        self.assertTrue(dkim.detail.startswith("8 domains of 8 clients"), dkim.detail)
+        self.assertIn("client-a.net selector s1 (Client A)", dkim.detail)
+        self.assertIn("and 3 more", dkim.detail)
+        self.assertIn("--client-domains", dkim.detail)
+        dmarc = by["client sending domains without a usable DMARC record"]
+        self.assertEqual(("dns", "WARN", False), (dmarc.section, dmarc.level, dmarc.activation))
+        self.assertTrue(dmarc.detail.startswith("8 domains of 8 clients"), dmarc.detail)
+        for gone in ("client-a.net selector s1", "DMARC client-a.net", "c0.example.org", "DMARC c0.example.org"):
+            self.assertNotIn(gone, by, "no line per client domain by default")
+        self.assertEqual([], [(r.name, r.detail) for r in res if r.level == "FAIL"])
+        listed = self.run_pf(zone, host=host_for(values, sql={"FROM sending_domains": rows}), client_details=True)
+        self.assertEqual(16, len([r for r in listed if r.level == "WARN" and "client Client" in r.detail]), "on demand: every one")
 
     def test_the_installations_own_domain_still_fails_without_a_key(self) -> None:
         values = production_values()

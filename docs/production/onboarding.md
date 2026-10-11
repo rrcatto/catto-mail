@@ -6,10 +6,11 @@ commands (`smarthostctl prod console …`; in development `smarthostctl console 
 action also has a dashboard form under Clients › Clients › *client*, Clients › Abuse & reputation and
 Clients › Usage & billing.
 
-Public self-service onboarding is **disabled** (`APP_PUBLIC_ONBOARDING_ENABLED=false`), and no
-public registration route exists. Every client is created and approved by an operator. See
-[Opening public onboarding](#opening-public-onboarding-a-later-owner-decision) for the decision
-that would change this.
+Clients come in two ways:
+- **Created by an operator**, reviewed and approved by an operator (sections 1 and 2).
+- **Public sign-up**, when the operator enables it (`APP_PUBLIC_ONBOARDING_ENABLED=true`; off by
+  default). The new client is activated automatically into a starter tier with low limits
+  (owner decision 2026-10-11). See [Public sign-up](#public-sign-up-owner-decision-2026-10-11).
 
 ## 1. Checklist for a new client
 
@@ -244,18 +245,76 @@ The OPERATOR role holds every Phase 9 permission. A custom role can hold any sub
 | `PLATFORM.ABUSE.VIEW` | alerts and reputation figures |
 | `PLATFORM.ABUSE.MANAGE` | run the evaluation, acknowledge alerts |
 
-## Opening public onboarding (a later owner decision)
+## Public sign-up (owner decision 2026-10-11)
 
-`APP_PUBLIC_ONBOARDING_ENABLED=true` alone opens nothing: no public route exists.
+**The decision.** Members of the public may open an account and start sending without an
+operator running commands or approving them one by one. A new client is activated automatically
+into a **starter tier** with low limits. The operator is notified, and can throttle, suspend or
+close any client as usual (section 2). This replaces the earlier rule that approval would stay
+manual. Operator-created clients are still reviewed and approved by hand.
 
-Opening public onboarding would need, in a later reviewed change:
-- a registration workflow that calls the single gated entry point, which can only create a
-  `pending_approval` client of origin `public_application`;
-- abuse protection on that form (rate limits, challenge, verified email).
+**Turning it on.** Set `APP_PUBLIC_ONBOARDING_ENABLED=true` in `infra/.env` (group *Public
+sign-up*), then `smarthostctl prod check` and `prod recreate`. While it is `false` (the default),
+the sign-up page does not exist (404), and the front page and the sign-in page do not offer it.
 
-Approval would stay manual.
+**What a person does.**
+1. On `/dashboard/sign-up` (linked from the front page and the sign-in page) they give the
+   organisation's name and their email address.
+2. A confirmation link arrives by email. It is the same single-use passwordless link as for
+   signing in, valid for `APP_LOGIN_LINK_TTL_SECONDS`. Nothing is created until it is used.
+3. The link's page shows what will be created, and, when `APP_ACCEPTABLE_USE_POLICY_VERSION` is
+   set, asks them to accept that policy version. Opening the account:
+   - creates the client through the gated entry point for public applications (origin
+     *public sign-up*, plan `starter`);
+   - makes the person its client admin;
+   - records the policy acceptance;
+   - sets the starter limits;
+   - activates the client;
+   - signs them in. Every step is audited (actor `public-sign-up`).
+4. The client's overview then shows the next steps: add a sending domain (they set it up
+   themselves, DKIM included), create an API key, add a webhook.
 
-Decide it only with evidence for each of these:
+**The starter tier** (System › Settings, group *Public sign-up*, or `infra/.env`). It is applied
+when an account is opened, never above the installation ceilings. Later changes do not touch
+existing clients: raise or lower an existing client's limits on its page (section 3). The
+defaults:
+
+| Setting | Limit | Default |
+|---|---|---|
+| `APP_STARTER_SEND_RECIPIENTS_PER_DAY` | `send_recipients_per_day` | 200 |
+| `APP_STARTER_SEND_RECIPIENTS_PER_MONTH` | `send_recipients_per_month` | 3,000 |
+| `APP_STARTER_VALIDATION_ADDRESSES_PER_DAY` | `validation_addresses_per_day` | 1,000 |
+| `APP_STARTER_API_KEY_LIMIT` | `max_api_keys` | 2 |
+| `APP_STARTER_WEBHOOK_ENDPOINT_LIMIT` | `max_webhook_endpoints` | 2 |
+| `APP_STARTER_SENDING_DOMAIN_LIMIT` | `max_sending_domains` | 2 |
+
+There is no automatic promotion out of the starter tier: an operator raises limits per client.
+
+**Abuse protection** (no third-party service):
+- The form accepts at most 10 submissions an hour per client IP. Each address gets at most 3
+  confirmation links an hour.
+- The confirmation page and its confirmation share 20 requests an hour per client IP; at most 5
+  confirmations an hour are accepted per address.
+- A honeypot field that people never see: a form robot that fills it in is answered like a
+  success, and nothing is sent.
+- The answer never says whether an address already has an account. An address that already
+  belongs to a user or to a client's contact gets no sign-up link; a user gets an ordinary
+  sign-in link instead.
+- Every form is a CSRF-protected POST; the link's page (a GET) changes nothing; tokens are
+  stored only as hashes and never logged.
+- A new client still cannot send until its own domain is verified and, in production, has an
+  active DKIM key, and the starter limits cap what it can send.
+
+**What the operator sees.**
+- An email to `APP_ADMIN_EMAIL` for every sign-up, with a link to the client's page.
+- Clients › Clients: the tab *Public sign-ups* (and an *Origin* filter), newest first, with
+  the time each one signed up.
+- The Clients button's badge and *Needs attention* on the overview count the sign-ups of the
+  last 7 days.
+- Review new clients as you would any other (section 1). Throttle, suspend or close one that
+  misuses the service (section 2), and watch Clients › Abuse & reputation (section 5).
+
+**Before turning it on**, have evidence for each of these:
 
 - [ ] **Stability:** several weeks of production without unplanned delivery outages; the
       upgrade and rollback procedures (runbook §18) exercised at least once.
@@ -265,10 +324,12 @@ Decide it only with evidence for each of these:
 - [ ] **Bounce and complaint handling:** proven with live traffic (DSNs and ARF reports
       processed, suppressions created, alerts raised and handled).
 - [ ] **Backups:** off-host, encrypted, scheduled, and one restore rehearsed with recent data.
-- [ ] **Abuse procedures:** who watches alerts and how often; response times; when to throttle,
-      suspend and close; how to handle abuse reports and legal requests.
+- [ ] **Abuse procedures:** who watches the sign-up notifications and the alerts, and how often;
+      response times; when to throttle, suspend and close; how to handle abuse reports and legal
+      requests.
+- [ ] **Starter tier:** limits you are comfortable letting anyone use without review.
 - [ ] **Commercial terms:** plans and their limits, pricing, the billing system the statements
-      feed, payment collection and dunning.
+      feed, payment collection and dunning (catto-mail has no billing provider).
 - [ ] **Service policy:** the published policy text and its version
       (`APP_ACCEPTABLE_USE_POLICY_VERSION`).
 - [ ] **Retention:** decided periods for each data category (runbook §16).

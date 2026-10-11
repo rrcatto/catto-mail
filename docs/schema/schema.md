@@ -357,6 +357,7 @@ Other indexes:
 | `suppressions` | D-18 normalisation (local part never case-folded). A `recipient_global_opt_out` row, and only it, carries `source_client_id` (and may carry `external_reference`), and is global and address-scoped; its requests and their idempotency keys are in `global_suppression_requests`. `hard_bounce`, `complaint` and `recipient_global_opt_out` never expire; `repeated_soft_bounce` is the temporary reason. `source_event_id` requires `source_message_id`. |
 | `global_suppression_requests` | One row per (`client_id`, `operation`, `idempotency_key`); `operation` from the vocabulary (`create_global_opt_out`); `response_status` is 201 (created) or 200 (already active). |
 | `validation_addresses` | A suggestion has both a reason code and a confidence. A claimed row has a lease. |
+| `auth_login_tokens` | `purpose` is `sign_in` or `sign_up`. A `sign_up` link (public sign-up) carries the organisation's name and belongs to no user; a `sign_in` link carries no organisation. Only the token's SHA-256 is stored. |
 | `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. `dkim_public_key`, when set, is base64 (at most 2000 characters): the public half of the key the host agent generated for the client dashboard, never a private key. |
 | `clients` | `closed` requires `closed_at`; `origin` is `operator` or `public_application`. |
 | `api_keys` | `expires_at`, when set, is after `created_at`. |

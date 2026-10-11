@@ -79,7 +79,7 @@ Migration `Version20261007000100`.
 - `App\Client\ClientLifecycle` is the only way to create a client or change its status. Each
   transition needs its permission (`PLATFORM.CLIENT.APPROVE` or `PLATFORM.CLIENT.RESTRICT`) and
   a reason, and is audited. Public onboarding is gated by `APP_PUBLIC_ONBOARDING_ENABLED`
-  (false), and no route uses it. Approval needs the policy version in force
+  (false; since 2026-10-11 the public sign-up uses it, see below). Approval needs the policy version in force
   (`APP_ACCEPTABLE_USE_POLICY_VERSION`) when the client requires it.
 - Per-client limits (`ClientLimitPolicy`) under installation ceilings. `QuotaEnforcer` admits
   volume quotas in the creating transaction: `429 quota-exceeded` with `Retry-After` and a
@@ -152,7 +152,16 @@ results when it finishes a request. The application never sees a private key: it
 public half (`sending_domains.dkim_public_key`). The agent's periodic `smarthost:system:agent
 domains` activates keys whose record appeared in DNS. Migration `Version20261013000100`.
 
-**Later phases:** retention commands; a public registration workflow (owner decision).
+**Public sign-up (owner decision, 2026-10-11):** behind `APP_PUBLIC_ONBOARDING_ENABLED` (off by
+default; every route 404 while it is), `/dashboard/sign-up` (`PublicSignUpController`,
+`App\Client\PublicSignUp`) emails a passwordless confirmation link (`LoginLinkService::requestSignUp`;
+`auth_login_tokens` purpose `sign_up`). Its confirming POST opens an active client in the starter
+tier (`APP_STARTER_*`, System › Settings) through `ClientLifecycle::apply`, with the person as client
+admin and the policy acceptance, and signs them in; the overview shows the next steps. Rate limits
+(`public_sign_up*` in framework.yaml, links per address), a honeypot, CSRF, no account enumeration;
+the operator is emailed. Migration `Version20261014000100`.
+
+**Later phases:** retention commands; promotion out of the starter tier and billing (owner decisions).
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
 `.env` file). Run console commands in the development pod with

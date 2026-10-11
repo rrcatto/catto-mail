@@ -59,7 +59,7 @@ final class OperatorDashboardController extends AbstractController
     #[IsGranted('PLATFORM.CLIENT.VIEW')]
     public function clients(Request $request): Response
     {
-        $filters = ClientDashboardController::filters($request, ['status', 'q']);
+        $filters = ClientDashboardController::filters($request, ['status', 'origin', 'q']);
         $listing = Listing::fromRequest($request, array_keys(OperatorReadModel::CLIENT_SORTS), 'created');
 
         return $this->page('clients.html.twig', 'clients', [

@@ -264,7 +264,9 @@ Each check reports PASS, WARN, FAIL, INFO or SKIP. The checks cover:
     upgrades of a live installation, which run the activation preflight.
   - **Every verified domain of an active or throttled client:** a domain without an active key,
     or whose published record is missing or differs, is the client's unfinished work. It is a
-    WARN naming the client and never blocks activation or upgrades. The domain cannot send
+    WARN naming the client and never blocks activation or upgrades. By default such domains
+    (and client domains without DMARC) are counted in one WARN per section with the first five
+    named; `prod preflight --section dkim --client-domains` lists every one. The domain cannot send
     meanwhile: the API refuses to submit its jobs in production (`422 submit-rejected`, "The
     sending domain has no active DKIM configuration"), and the delivery daemon refuses them again
     when it claims a job.
@@ -548,6 +550,12 @@ prod console smarthost:reputation evaluate      # also every 15 minutes by <inst
 prod console smarthost:usage:reconcile --client <client-id> --period previous_month
 prod console smarthost:billing:statement prepare --client <client-id> --period previous_month --operator admin@example.com
 ```
+
+**Public sign-up** (owner decision, off by default): with `APP_PUBLIC_ONBOARDING_ENABLED=true` in
+`infra/.env`, members of the public open accounts themselves into the starter tier (`APP_STARTER_*`,
+System › Settings). You are emailed for every sign-up and see them under Clients › Clients ›
+*Public sign-ups*; throttle, suspend or close as above. Details, defaults and the criteria before
+turning it on: [onboarding.md](onboarding.md#public-sign-up-owner-decision-2026-10-11).
 
 Alerts (Clients › Abuse & reputation) never act on a client: decide, act through the lifecycle above, and
 acknowledge the alert with a note. A failing preflight `runtime / reputation evaluation` check

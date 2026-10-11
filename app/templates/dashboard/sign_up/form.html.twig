@@ -1,0 +1,22 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Sign up{% endblock %}
+{% block body %}
+<section class="narrow" aria-labelledby="signup-h">
+    <h1 id="signup-h">Open a Catto Mail account</h1>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <p>Validate address lists and send tracked mail from your own application through the API. Give your organisation's name and your email address: we email you a link, and the account opens when you use it. There is no password.</p>
+    <form method="post" action="{{ path('dashboard_sign_up_request') }}" class="stack">
+        <label>Organisation
+            <input type="text" name="organisation" value="{{ organisation }}" required minlength="2" maxlength="200" autocomplete="organization" autofocus>
+        </label>
+        <label>Your email address
+            <input type="email" name="email" value="{{ email }}" required maxlength="320" autocomplete="email">
+        </label>
+        {# Not for people: a form robot fills it in, and then nothing is sent. #}
+        <div class="hp" aria-hidden="true"><label>Leave this field empty <input type="text" name="website" value="" tabindex="-1" autocomplete="off"></label></div>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('sign-up') }}">
+        <button type="submit">Email me the confirmation link</button>
+    </form>
+    <p class="muted small">New accounts start in a starter tier with low sending limits; the operator of this installation can raise them. Already have an account? <a href="{{ path('dashboard_login') }}">Sign in</a>.</p>
+</section>
+{% endblock %}

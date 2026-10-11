@@ -1,0 +1,9 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Too many attempts{% endblock %}
+{% block body %}
+<section class="narrow" aria-labelledby="many-h">
+    <h1 id="many-h">Too many attempts</h1>
+    <p>This sign-up was tried too often from your network or for this address. Please wait an hour and try again.</p>
+    <p><a href="{{ path('front_page') }}">Back to the front page</a></p>
+</section>
+{% endblock %}

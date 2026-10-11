@@ -33,6 +33,22 @@ framework:
             policy: sliding_window
             limit: 1200
             interval: '1 minute'
+        # Public sign-up (owner decision 2026-10-11): every submission of the form per client IP
+        # (also the invalid ones and the honeypot's catches); the verification page and its
+        # confirmation per client IP, and the confirmation per address. Links per address:
+        # App\Security\LoginLinkService::SIGN_UP_MAX_PER_EMAIL.
+        public_sign_up:
+            policy: sliding_window
+            limit: 10
+            interval: '1 hour'
+        public_sign_up_verify:
+            policy: sliding_window
+            limit: 20
+            interval: '1 hour'
+        public_sign_up_address:
+            policy: sliding_window
+            limit: 5
+            interval: '1 hour'
 
 when@test:
     framework:

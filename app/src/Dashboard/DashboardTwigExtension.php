@@ -24,7 +24,15 @@ final class DashboardTwigExtension
         private readonly Navigation $nav,
         private readonly InstallationTime $time,
         #[Autowire('%app.admin_email%')] private readonly string $adminEmail = '',
+        #[Autowire('%app.public_onboarding_enabled%')] private readonly bool $publicSignUp = false,
     ) {
+    }
+
+    /** Whether the public sign-up page exists (APP_PUBLIC_ONBOARDING_ENABLED, owner decision 2026-10-11). */
+    #[AsTwigFunction('public_sign_up_open')]
+    public function publicSignUpOpen(): bool
+    {
+        return $this->publicSignUp;
     }
 
     /** The installation's time zone name (SMARTHOST_TIMEZONE), for the date filter and the charts. */

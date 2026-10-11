@@ -69,7 +69,7 @@ final class Labels
         'dsn_status' => ['open' => 'Open', 'match_requested' => 'Match requested (awaiting delivery daemon)', 'matched' => 'Matched', 'dismissed' => 'Dismissed'],
         'usage_type' => ['validation_address' => 'Validation addresses', 'message_submitted' => 'Messages submitted'],
         // Phase 9
-        'client_origin' => ['operator' => 'Created by an operator', 'public_application' => 'Public application'],
+        'client_origin' => ['operator' => 'Created by an operator', 'public_application' => 'Public sign-up'],
         'quota_metric' => ['validation_jobs' => 'Validation jobs', 'validation_addresses' => 'Validation addresses submitted',
             'send_jobs' => 'Send jobs', 'send_recipients' => 'Send recipients accepted'],
         'quota_period' => ['day' => 'Today', 'month' => 'This month'],

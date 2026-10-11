@@ -41,6 +41,18 @@
 </section>
 {% endif %}
 
+{% if not (steps.domain and steps.api_key and steps.webhook) %}
+<section class="card card-accent get-started" aria-labelledby="start-h">
+    <div class="card-head"><h2 id="start-h">Get started</h2><span class="muted small">{{ [steps.domain, steps.api_key, steps.webhook]|filter(s => s)|length }} of 3 done</span></div>
+    <ol class="stepper stepper-row">
+        <li class="{{ steps.domain ? 'done' }}"><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Add a sending domain</a></li>
+        <li class="{{ steps.api_key ? 'done' }}"><a href="{{ path('dashboard_client_api_keys', {clientId: cid}) }}">Create an API key</a></li>
+        <li class="{{ steps.webhook ? 'done' }}"><a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}">Add a webhook</a></li>
+    </ol>
+    <p class="muted small">Your messages go out from your own domain: add it, publish the DNS records shown, and it is ready once its DKIM key is active. Your application then sends through the API with a key (the <a href="{{ path('docs_api') }}">API documentation</a> explains every call), and a webhook endpoint tells it what happened to each message.{% if not may_admin %} A client admin takes these steps.{% endif %}</p>
+</section>
+{% endif %}
+
 <div class="grid">
     {% include 'dashboard/_flow_card.html.twig' with {flow_title: 'Messages per ' ~ period.unit, span: 'g-col-4 xl:g-col-3'} %}
     <section class="card g-col-4 xl:g-col-1" aria-labelledby="quota-h">

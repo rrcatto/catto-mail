@@ -175,7 +175,9 @@ final class OperatorReadModel
                    (SELECT count(*) FROM webhook_worker_heartbeats WHERE stopped_at IS NULL AND last_seen_at > now() - interval '2 minutes') AS webhook_workers,
                    (SELECT jsonb_object_agg(status, n) FROM (SELECT status, count(*) AS n FROM clients GROUP BY status) t) AS clients,
                    (SELECT jsonb_object_agg(severity, n) FROM (SELECT severity, count(*) AS n FROM client_alerts WHERE resolved_at IS NULL GROUP BY severity) t) AS alerts,
-                   (SELECT company_name FROM clients WHERE status = 'pending_approval' ORDER BY status_changed_at LIMIT 1) AS first_pending_client
+                   (SELECT company_name FROM clients WHERE status = 'pending_approval' ORDER BY status_changed_at LIMIT 1) AS first_pending_client,
+                   (SELECT count(*) FROM clients WHERE origin = 'public_application' AND created_at > now() - interval '7 days') AS new_sign_ups,
+                   (SELECT company_name FROM clients WHERE origin = 'public_application' ORDER BY created_at DESC LIMIT 1) AS newest_sign_up
               FROM (SELECT count(*) FILTER (WHERE processing_state = 'pending') AS pending,
                            count(*) FILTER (WHERE processing_state = 'retry_scheduled') AS retry_scheduled,
                            count(*) FILTER (WHERE processing_state = 'claimed' AND lease_expires_at > now()) AS claimed,
@@ -216,6 +218,7 @@ final class OperatorReadModel
             'clients' => $ints('clients'),
             'alerts' => $ints('alerts'),
             'first_pending_client' => $r['first_pending_client'] ?? null,
+            'new_sign_ups' => (int) ($r['new_sign_ups'] ?? 0), 'newest_sign_up' => $r['newest_sign_up'] ?? null,
         ];
     }
 
@@ -325,6 +328,7 @@ final class OperatorReadModel
         $r = $this->connection->fetchAssociative(<<<'SQL'
             SELECT (SELECT count(*) FROM client_alerts WHERE resolved_at IS NULL) AS open_alerts,
                    (SELECT count(*) FROM clients WHERE status = 'pending_approval') AS pending_clients,
+                   (SELECT count(*) FROM clients WHERE origin = 'public_application' AND created_at > now() - interval '7 days') AS new_sign_ups,
                    (SELECT count(*) FROM unmatched_dsns WHERE status = 'open') AS open_dsns,
                    (SELECT count(*) FILTER (WHERE status = 'failed') FROM webhook_deliveries
                      WHERE status <> 'pending' AND created_at > now() - interval '24 hours') AS failed_webhooks,
@@ -332,7 +336,7 @@ final class OperatorReadModel
                    (SELECT count(*) FROM system_checks WHERE result = 'fail') AS fail_checks
             SQL) ?: [];
 
-        return array_map('intval', $r + ['open_alerts' => 0, 'pending_clients' => 0, 'open_dsns' => 0, 'failed_webhooks' => 0, 'warn_checks' => 0, 'fail_checks' => 0]);
+        return array_map('intval', $r + ['open_alerts' => 0, 'pending_clients' => 0, 'new_sign_ups' => 0, 'open_dsns' => 0, 'failed_webhooks' => 0, 'warn_checks' => 0, 'fail_checks' => 0]);
     }
 
     /**
@@ -347,6 +351,10 @@ final class OperatorReadModel
         if ('' !== ($filters['status'] ?? '')) {
             $where[] = 'c.status = ?';
             $params[] = $filters['status'];
+        }
+        if (\in_array($filters['origin'] ?? '', ['operator', 'public_application'], true)) {
+            $where[] = 'c.origin = ?';
+            $params[] = $filters['origin'];
         }
         if ('' !== ($filters['q'] ?? '')) {
             $where[] = "(c.company_name ILIKE ? ESCAPE '\\' OR c.contact_email ILIKE ? ESCAPE '\\')";

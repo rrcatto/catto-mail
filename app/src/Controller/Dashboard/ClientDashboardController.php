@@ -42,6 +42,7 @@ final class ClientDashboardController extends AbstractController
         private readonly ClientReadModel $read,
         private readonly \App\Dashboard\ClientAccountReadModel $account,
         private readonly \App\Util\InstallationTime $time,
+        private readonly string $smarthostEnv,
     ) {
     }
 
@@ -57,7 +58,8 @@ final class ClientDashboardController extends AbstractController
             'kpis' => TrendCharts::kpis($o['trends'], $period), 'flow' => TrendCharts::flow($o['trends'], $period),
             'validation' => TrendCharts::validation($o['trends']['validation']),
             'limits' => $this->account->limits($client), 'policy' => $this->account->policy($client),
-            'may_admin' => $this->access->may(ClientVoter::ADMIN, $client)]);
+            'may_admin' => $this->access->may(ClientVoter::ADMIN, $client),
+            'steps' => $this->account->nextSteps($clientId, 'production' === $this->smarthostEnv)]);
     }
 
     #[Route('/validation-jobs', name: 'dashboard_client_validation_jobs', methods: ['GET'])]

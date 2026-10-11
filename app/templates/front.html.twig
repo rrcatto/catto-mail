@@ -25,13 +25,18 @@
             <h1 id="front-h">Email validation and tracked delivery</h1>
             <p>This server runs catto-mail. The client applications of this installation check addresses and send their email through it, and it
                 handles bounces, complaints and suppressions for them.</p>
-            <p class="front-actions"><a class="btn" href="{{ path('dashboard_login') }}">Sign in</a><a class="btn btn-secondary" href="{{ path('docs_api') }}">API documentation</a></p>
+            <p class="front-actions">{% if public_sign_up_open() %}<a class="btn" href="{{ path('dashboard_sign_up') }}">Sign up</a>{% endif %}<a class="btn{{ public_sign_up_open() ? ' btn-secondary' : '' }}" href="{{ path('dashboard_login') }}">Sign in</a><a class="btn btn-secondary" href="{{ path('docs_api') }}">API documentation</a></p>
         </section>
         <section class="card front-card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="front-signin-h">
             <h2 id="front-signin-h">{{ icon.i('access', 22) }}Operators and clients</h2>
             <p>Sign in to the dashboard with your email address: a single-use link arrives by email. There are no passwords.</p>
+            {% if public_sign_up_open() %}
+            <p>Open an account yourself: give your organisation and your email address, and confirm the link we send. New accounts start with low sending limits.</p>
+            <p><a href="{{ path('dashboard_sign_up') }}">Sign up</a> · <a href="{{ path('dashboard_login') }}">Sign in</a></p>
+            {% else %}
             <p>There is no public sign-up. The administrator creates the accounts.</p>
             <p><a href="{{ path('dashboard_login') }}">Sign in</a></p>
+            {% endif %}
         </section>
         <section class="card front-card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="front-api-h">
             <h2 id="front-api-h">{{ icon.i('send', 22) }}Client applications</h2>

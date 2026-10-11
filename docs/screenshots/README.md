@@ -53,7 +53,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Clients › Clients
 
-`/dashboard/operator/clients`
+`/dashboard/operator/clients` · The lists (all, public sign-ups, approval queue, throttled, suspended), the status and origin filters, and every client with its status, plan, alerts and domains.
 
 ![Clients › Clients](operator-clients.png)
 
@@ -163,7 +163,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Overview
 
-`/dashboard/c/{client}` · Period pills, messages per day, quota rings, KPIs, validation, sending domains, engagement and recent jobs (opened by an operator, hence the strip at the top).
+`/dashboard/c/{client}` · *Get started* (until the client has a sending domain that can send, an API key and a webhook), period pills, messages per day, quota rings, KPIs, validation, sending domains, engagement and recent jobs (opened by an operator, hence the strip at the top).
 
 ![Overview](client-overview.png)
 
@@ -236,6 +236,12 @@ the records to publish, *Check DNS now*, and for client admins *Add a sending do
 its mail. A full-width banner over four quarter cards.
 
 ![Front page](public-front-page.png)
+
+### Sign up
+
+`/dashboard/sign-up` · Only when the operator turns public sign-up on (`APP_PUBLIC_ONBOARDING_ENABLED=true`; otherwise 404). An organisation and an email address; the confirmation link arrives by email, and the account opens in the starter tier when it is used.
+
+![Sign up](public-sign-up.png)
 
 ### Sign in
 

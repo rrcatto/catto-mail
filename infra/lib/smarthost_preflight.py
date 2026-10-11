@@ -664,6 +664,11 @@ class Preflight:
     raw: dict[str, str] | None = None   # the .env as written (default: values); checked against the layout
     results: list[Check] = field(default_factory=list)
     now: dt.datetime | None = None   # default: now in the installation's zone (SMARTHOST_TIMEZONE)
+    # Each client domain's warning on its own line (--client-domains); by default they are
+    # counted in one line per section, so many self-service clients do not bury the
+    # installation's own checks.
+    client_details: bool = False
+    client_gaps: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.zone = render.zone_of(self.values)
@@ -674,6 +679,24 @@ class Preflight:
         if self.activation and activation and level == "WARN":
             level, detail = "FAIL", detail + " [required for live activation]"
         self.results.append(Check(section, name, level, detail, activation))
+
+    def client_gap(self, section: str, name: str, client: str, detail: str) -> None:
+        """A client's unfinished domain: a WARN that never blocks (owner decision 2026-10-11)."""
+        if self.client_details:
+            self.add(section, name, "WARN", f"client {client}: {detail}", False)
+        else:
+            self.client_gaps.setdefault(section, []).append((name, client))
+
+    def summarise_client_gaps(self, section: str, title: str, what: str) -> None:
+        gaps = self.client_gaps.pop(section, [])
+        if not gaps:
+            return
+        clients = sorted({c for _n, c in gaps})
+        shown = ", ".join(f"{n} ({c})" for n, c in gaps[:5]) + (f" and {len(gaps) - 5} more" if len(gaps) > 5 else "")
+        self.add(section, title, "WARN",
+                 f"{len(gaps)} {'domain' if len(gaps) == 1 else 'domains'} of {len(clients)} {'client' if len(clients) == 1 else 'clients'} "
+                 f"{what}: {shown}. They do not block the installation; each client finishes its own under Settings › Sending "
+                 f"domains. Every one: smarthostctl prod preflight --section {section} --client-domains", False)
 
     @property
     def v(self) -> dict[str, str]:
@@ -1111,6 +1134,7 @@ class Preflight:
             self.check_dmarc(row["domain"], None if row["domain"] == mail_from_domain else row["client"])
         if mail_from_domain not in {row["domain"] for row in rows}:
             self.check_dmarc(mail_from_domain)
+        self.summarise_client_gaps("dns", "client sending domains without a usable DMARC record", "have no DMARC record that could be read")
         admin = f"mailbox {v.get('APP_ADMIN_EMAIL', '')} (administrator)"
         try:
             self.add("dns", admin, *admin_mailbox(v, r))
@@ -1134,6 +1158,8 @@ class Preflight:
         """client: the domain belongs to that client (its DNS is the client's), so a gap is a
         warning that never blocks activation; None: the installation's own domain."""
         act, who = client is None, "" if client is None else f"client {client}: "
+        if client is not None:
+            gap = lambda detail: self.client_gap("dns", f"DMARC {domain}", client, detail)  # noqa: E731
         try:
             pol = dmarc_policy(self.resolver.query(f"_dmarc.{domain}", "TXT"))
             where = f"_dmarc.{domain}"
@@ -1141,15 +1167,24 @@ class Preflight:
                 pol = dmarc_policy(self.resolver.query(f"_dmarc.{org_domain(domain)}", "TXT"))
                 where = f"_dmarc.{org_domain(domain)} (organisational domain)"
         except DnsError as exc:
-            self.add("dns", f"DMARC {domain}", "WARN", who + str(exc), act)
+            if client is not None:
+                gap(str(exc))
+            else:
+                self.add("dns", f"DMARC {domain}", "WARN", str(exc), act)
             return
         if pol is None:
-            self.add("dns", f"DMARC {domain}", "WARN", who + "no DMARC record (create one; p=none with rua= is a safe start)", act)
+            if client is not None:
+                gap("no DMARC record (create one; p=none with rua= is a safe start)")
+            else:
+                self.add("dns", f"DMARC {domain}", "WARN", "no DMARC record (create one; p=none with rua= is a safe start)", act)
             return
         p = pol.get("p", "?")
-        self.add("dns", f"DMARC {domain}", "PASS" if p in ("none", "quarantine", "reject") else "WARN",
-                 who + f"{where}: p={p}" + (f" sp={pol['sp']}" if "sp" in pol else "") + (f" pct={pol['pct']}" if "pct" in pol else "")
-                 + (f" rua={pol['rua']}" if "rua" in pol else " (no rua: no aggregate reports)"), act)
+        detail = (f"{where}: p={p}" + (f" sp={pol['sp']}" if "sp" in pol else "") + (f" pct={pol['pct']}" if "pct" in pol else "")
+                  + (f" rua={pol['rua']}" if "rua" in pol else " (no rua: no aggregate reports)"))
+        if p not in ("none", "quarantine", "reject") and client is not None:
+            gap(detail)
+        else:
+            self.add("dns", f"DMARC {domain}", "PASS" if p in ("none", "quarantine", "reject") else "WARN", who + detail, act)
 
     # ------------------------------------------------------------------ dkim
     def sending_domains(self) -> list[dict[str, str]]:
@@ -1189,9 +1224,9 @@ class Preflight:
             who = f"client {row['client']}: "
             if row["dkim_status"] != "active" or not sel:
                 if not own:   # the installation's domain is judged below, by OpenDKIM's tables
-                    self.add("dkim", f"{d}", "WARN", who + f"verified but DKIM is {row['dkim_status']} (selector '{sel or '-'}'): "
-                             "its send jobs are refused in production until the key is active (the client finishes it under "
-                             "Settings › Sending domains); this does not block the installation", False)
+                    self.client_gap("dkim", f"{d}", row["client"], f"verified but DKIM is {row['dkim_status']} (selector '{sel or '-'}'): "
+                                    "its send jobs are refused in production until the key is active (the client finishes it under "
+                                    "Settings › Sending domains); this does not block the installation")
                 continue
             active = [s for s, (act, _k) in table.get(d, {}).items() if act]
             if sel not in table.get(d, {}):
@@ -1205,6 +1240,8 @@ class Preflight:
                 continue
             signed.add(d)
             self.check_dkim_dns(d, sel, None if own else row["client"])
+        self.summarise_client_gaps("dkim", "client sending domains without an active, published key",
+                                   "have no active DKIM key yet, or its record is missing from DNS or different")
         mf_active = [s for s, (act, _k) in table.get(mail_from, {}).items() if act]
         if mf_active:
             if mail_from not in signed:
@@ -1223,15 +1260,21 @@ class Preflight:
         act, who = client is None, "" if client is None else f"client {client}: "
         gap = "FAIL" if act else "WARN"
         fix = f"smarthostctl prod dkim dns {domain}" if act else "the client publishes it from Settings › Sending domains; this does not block the installation"
+        name = f"{domain} selector {selector}"
         try:
             published = dkim_public_key(self.resolver.query(f"{selector}._domainkey.{domain}", "TXT"))
         except DnsError as exc:
-            self.add("dkim", f"{domain} selector {selector}", "WARN", who + str(exc), act)
+            if client is not None:
+                self.client_gap("dkim", name, client, str(exc))
+            else:
+                self.add("dkim", name, "WARN", str(exc), act)
             return
-        if published is None:
-            self.add("dkim", f"{domain} selector {selector}", gap, who + f"no DKIM TXT at {selector}._domainkey.{domain} ({fix})", act)
-        elif published != key.strip():
-            self.add("dkim", f"{domain} selector {selector}", gap, who + f"the published public key does not match the installed private key ({fix})", act)
+        problem = (f"no DKIM TXT at {selector}._domainkey.{domain} ({fix})" if published is None
+                   else f"the published public key does not match the installed private key ({fix})" if published != key.strip() else None)
+        if problem is not None and client is not None:
+            self.client_gap("dkim", name, client, problem)
+        elif problem is not None:
+            self.add("dkim", name, gap, problem, act)
         else:
             self.add("dkim", f"{domain} selector {selector}", "PASS", who + "key installed, active, and published in DNS", act)
 
@@ -1434,6 +1477,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--pre-upgrade", action="store_true", help="before an upgrade: skip the grant comparison (the upgrade applies the new grants)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--quiet", action="store_true", help="print only FAIL lines and the summary")
+    p.add_argument("--client-domains", action="store_true",
+                   help="one line per client sending domain that is not finished (by default they are counted in one line)")
     p.add_argument("--smtp-egress-probe", default="", metavar="DOMAIN")
     p.add_argument("--resolver", action="append", metavar="IP", help="DNS server(s) to ask instead of the system resolver")
     p.add_argument("--checklist", action="store_true")
@@ -1478,7 +1523,7 @@ def main(argv: list[str]) -> int:
             print(f"{values.get('APP_ADMIN_EMAIL', '')}: {detail}")
         return 0
     pf = Preflight(values, host, Resolver(a.resolver), raw=raw, activation=a.activation, egress_probe=a.smtp_egress_probe,
-                   pre_upgrade=a.pre_upgrade)
+                   pre_upgrade=a.pre_upgrade, client_details=a.client_domains)
     return report(pf.run(tuple(a.section) if a.section else None), a.json, a.quiet)
 
 

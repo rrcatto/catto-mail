@@ -9,7 +9,8 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * A single-use emailed sign-in link. Only the SHA-256 of the token is stored.
+ * A single-use emailed sign-in link, or the verification link of a public sign-up (purpose
+ * sign_up, with the organisation's name). Only the SHA-256 of the token is stored.
  * Written and redeemed with DBAL by App\Security\LoginLinkService (the redeem is
  * one atomic UPDATE ... RETURNING); mapped for the schema model and audits.
  */
@@ -46,6 +47,13 @@ class LoginToken
     #[ORM\Column(type: 'timestamptz', nullable: true)]
     private ?\DateTimeImmutable $usedAt = null;
 
+    /** sign_in, or sign_up: the verification link of a public sign-up (no user yet). */
+    #[ORM\Column(type: 'text')]
+    private string $purpose = 'sign_in';
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $organisationName = null;
+
     private function __construct()
     {
         $this->id = Uuid::v7();
@@ -57,4 +65,6 @@ class LoginToken
     public function getUser(): ?User { return $this->user; }
     public function getExpiresAt(): \DateTimeImmutable { return $this->expiresAt; }
     public function getUsedAt(): ?\DateTimeImmutable { return $this->usedAt; }
+    public function getPurpose(): string { return $this->purpose; }
+    public function getOrganisationName(): ?string { return $this->organisationName; }
 }

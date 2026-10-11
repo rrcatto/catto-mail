@@ -40,6 +40,24 @@ final class ClientAccountReadModel
      *
      * @return array{limits: list<array<string, mixed>>, quotas: list<array<string, mixed>>}
      */
+    /**
+     * The first steps of a new client (shown on its overview until all are done): a sending domain
+     * that can send (verified, and in production with an active DKIM key), a usable API key, an
+     * enabled webhook endpoint.
+     *
+     * @return array{domain: bool, api_key: bool, webhook: bool}
+     */
+    public function nextSteps(string $clientId, bool $production): array
+    {
+        $r = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT EXISTS (SELECT 1 FROM sending_domains WHERE client_id = :c AND status = 'verified' AND (dkim_status = 'active' OR :prod = 0)) AS domain,
+                   EXISTS (SELECT 1 FROM api_keys WHERE client_id = :c AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS api_key,
+                   EXISTS (SELECT 1 FROM webhook_endpoints WHERE client_id = :c AND status = 'enabled') AS webhook
+            SQL, ['c' => $clientId, 'prod' => $production ? 1 : 0], ['prod' => \Doctrine\DBAL\ParameterType::INTEGER]) ?: [];
+
+        return ['domain' => (bool) ($r['domain'] ?? false), 'api_key' => (bool) ($r['api_key'] ?? false), 'webhook' => (bool) ($r['webhook'] ?? false)];
+    }
+
     public function limits(Client $client): array
     {
         $own = $this->limits->clientLimits($client);

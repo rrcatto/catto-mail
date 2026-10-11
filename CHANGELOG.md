@@ -4,6 +4,50 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.11.
 
+## [Unreleased]
+
+Upgrading: `infra/.env` gains the group *Public sign-up* (`APP_PUBLIC_ONBOARDING_ENABLED=false` and
+the six starter settings). Run `prod env-migrate` before `prod check` (in development
+`smarthostctl env-migrate`); `prod upgrade` runs it too. It keeps the old file beside it.
+
+### Added
+- Public sign-up (owner decision; off by default). With `APP_PUBLIC_ONBOARDING_ENABLED=true`, the
+  page `/dashboard/sign-up` (offered by the front page and the sign-in page) asks for an
+  organisation and an email address and emails a confirmation link. The link is a single-use
+  passwordless link of the existing mechanism, and nothing is created until it is used.
+  - The link's page shows what will be created and asks for the acceptance of
+    `APP_ACCEPTABLE_USE_POLICY_VERSION` when one is set. Confirming:
+    - creates the client through the gated entry point for public applications (origin public
+      sign-up, plan `starter`);
+    - makes the person its client admin;
+    - records the policy acceptance;
+    - applies the starter limits;
+    - activates the client and signs the person in. Every step is audited (actor
+      `public-sign-up`).
+  - The starter tier is six new settings, editable in System › Settings (group *Public
+    sign-up*): 200 recipients a day, 3,000 a month, 1,000 addresses validated a day, 2 API keys,
+    2 webhook endpoints, 2 sending domains. They are applied once, when an account is opened,
+    and never above the installation ceilings.
+  - Abuse protection without third-party services:
+    - 10 form submissions an hour per client IP, and 3 confirmation links an hour per address;
+    - 20 verification requests an hour per client IP, and 5 confirmations an hour per address;
+    - a honeypot field;
+    - CSRF on every POST, and a link page (GET) that changes nothing;
+    - no account enumeration: an address that already belongs to a user or a client's contact
+      gets no sign-up link (a user gets an ordinary sign-in link instead).
+  - The operator is emailed for every sign-up. Clients › Clients has a *Public sign-ups* tab and
+    an *Origin* filter, and the Clients badge and *Needs attention* count the sign-ups of the
+    last 7 days.
+  - A client's overview shows *Get started* until it has a sending domain that can send, an API
+    key and a webhook endpoint.
+  - Migration `Version20261014000100` (`auth_login_tokens.purpose` and `organisation_name`). This
+    replaces the "approval stays manual" rule (docs/production/onboarding.md, *Public sign-up*).
+
+### Changed
+- The production preflight counts the client sending domains that are not finished in one WARN
+  per section, listing the first five, so many self-service clients do not bury the
+  installation's own checks. `prod preflight --client-domains` lists every one.
+
 ## [0.2.4] - 2026-10-11
 
 A public front page, plain HTTP that redirects to HTTPS, the Bootstrap 6 four-column dashboard, the

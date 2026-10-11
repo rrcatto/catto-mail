@@ -25,8 +25,7 @@ internal wiring the topology fixes (database host, port, name and role names, mo
 spool group and delivery UID, the milter address, the submission accounts and ports, certificate
 mount targets, the FastCGI address, worker identities, the instance name and subnets), values that
 follow from the environment (`APP_ENV`, `TRUSTED_PROXIES`, `POSTFIX_RELAYHOST`,
-`VALIDATOR_SMTP_ROUTE_OVERRIDE`, `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`,
-`APP_PUBLIC_ONBOARDING_ENABLED`, `SMARTHOST_LOG_FORMAT`), the settings of the other environment, and
+`VALIDATOR_SMTP_ROUTE_OVERRIDE`, `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, `SMARTHOST_LOG_FORMAT`), the settings of the other environment, and
 the long-term retention periods that no deletion command uses yet. A `.env` may still name a
 built-in variable to change its value (a production rehearsal does); `smarthostctl prod check`
 applies the same rules to it.
@@ -203,7 +202,13 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `APP_MAIL_SUBMISSION_PORT` | app | no | 6 | `587` | Authenticated submission port (STARTTLS, OpenDKIM milter). |
 | `APP_MAIL_SUBMISSION_USERNAME` | app, postfix | no | 6 | `smarthost-app` | SASL account of the web application on Postfix submission (separate from the delivery daemon's). |
 | `APP_MAIL_SUBMISSION_PASSWORD` | app, postfix | **yes** | 6 | | SASL password for that account. |
-| `APP_PUBLIC_ONBOARDING_ENABLED` | app | no | 9 | `false` | Gate for any public or self-service client onboarding (specification 2.10). `false` (the default and the production profile): no public channel may create a client; clients are created by operators only. `true` admits public application records, which are always `pending_approval` and never receive credentials before an operator approves them. This release contains no public registration route; enabling the gate is a later operator decision (docs/production/onboarding.md). |
+| `APP_PUBLIC_ONBOARDING_ENABLED` | app | no | 9 | `false` | Public sign-up (owner decision 2026-10-11; docs/production/onboarding.md). `false` (the default and the production profile): the sign-up page does not exist (404) and clients are created by operators only. `true`: the sign-up page at `/dashboard/sign-up` asks for an organisation and an email address and emails a verification link; using it creates the client (through the gated entry point for public applications), makes the person its client admin, records the acceptance of `APP_ACCEPTABLE_USE_POLICY_VERSION` when one is set, applies the starter limits (`APP_STARTER_*`) and activates the client. The operator is notified and can throttle, suspend or close it like any client. |
+| `APP_STARTER_SEND_RECIPIENTS_PER_DAY` | app | no | 9 | `200` | Starter tier of a public sign-up: recipients the client may submit per calendar day of the installation's zone (the client's own `send_recipients_per_day`). An operator raises it per client. |
+| `APP_STARTER_SEND_RECIPIENTS_PER_MONTH` | app | no | 9 | `3000` | Starter tier: recipients per calendar month (`send_recipients_per_month`). |
+| `APP_STARTER_VALIDATION_ADDRESSES_PER_DAY` | app | no | 9 | `1000` | Starter tier: addresses validated per calendar day (`validation_addresses_per_day`). |
+| `APP_STARTER_API_KEY_LIMIT` | app | no | 9 | `2` | Starter tier: usable API keys (`max_api_keys`), never above `APP_CLIENT_API_KEY_LIMIT`. |
+| `APP_STARTER_WEBHOOK_ENDPOINT_LIMIT` | app | no | 9 | `2` | Starter tier: webhook endpoints (`max_webhook_endpoints`), never above `APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT`. |
+| `APP_STARTER_SENDING_DOMAIN_LIMIT` | app | no | 9 | `2` | Starter tier: sending domains (`max_sending_domains`), never above `APP_CLIENT_SENDING_DOMAIN_LIMIT`. |
 | `APP_ACCEPTABLE_USE_POLICY_VERSION` | app | no | 9 | | Identifier of the service-policy (acceptable use) version in force, for example `2026-10`. Empty: no policy version in force, nothing to accept. When set, approving a client that requires policy acceptance needs a recorded acceptance of exactly this version. Only the version is stored, never the policy text. |
 | `APP_THROTTLED_CLIENT_API_RATE_PER_MINUTE` | app | no | 9 | `60` | API requests per minute for all keys of a `throttled` client together (the lower of this and the client's own limit). |
 | `APP_CLIENT_API_KEY_LIMIT` | app | no | 9 | `10` | Installation ceiling of usable (neither revoked nor expired) API keys per client; a client limit may only lower it. |
@@ -330,7 +335,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `POSTFIX_SMTP_BIND` | `0.0.0.0:25` | Public inbound SMTP for the bounce domain (IPv4), bound by the systemd ingress socket; nginx passes it to Postfix with the PROXY protocol. |
 | `PROXY_HTTP_BIND` | `0.0.0.0:80` | Public plain HTTP (IPv4), bound by the systemd ingress socket; nginx redirects every request to `https://PROXY_SERVER_NAME`. |
 | `TRUSTED_PROXIES` | | No proxy in front of nginx: Symfony uses `REMOTE_ADDR`, the client address nginx accepted, and ignores forwarded headers. |
-| `APP_PUBLIC_ONBOARDING_ENABLED` | `false` | Clients are created and approved by operators only (Phase 9). Enabling public onboarding is a later operator decision. |
+| `APP_PUBLIC_ONBOARDING_ENABLED` | `false` | No public sign-up until the operator enables it in `infra/.env` (owner decision 2026-10-11: sign-ups are then activated automatically into the starter tier). |
 | `POSTFIX_MYHOSTNAME` | `smarthost.example.com` | EHLO name; the sending IP's PTR must name it. |
 | `POSTFIX_RELAYHOST` | | No relay in production. |
 | `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |

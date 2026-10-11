@@ -2402,12 +2402,31 @@ saas_operations:
       production_operations (Phase 8): `prod delivery pause` stops all outbound delivery at once;
       it is separate from the per-client suspension.
   public_onboarding_gate: >-
-    APP_PUBLIC_ONBOARDING_ENABLED (default and production profile false). No public registration
-    route exists in this revision; ClientLifecycle::apply is the single gated entry point that a
-    future reviewed workflow would call, and it can only create a pending_approval client with
-    origin public_application. Enabling public onboarding is an owner decision recorded in
-    docs/production/onboarding.md (stability, reputation, bounce/complaint rates, backup
-    evidence, upgrades, abuse procedures, commercial terms, retention).
+    APP_PUBLIC_ONBOARDING_ENABLED (default and production profile false: no sign-up route answers,
+    404). ClientLifecycle::apply is the single gated entry point for public channels; it creates a
+    pending_approval client with origin public_application. Enabling it is the operator's choice,
+    with the evidence listed in docs/production/onboarding.md.
+  public_sign_up: >-
+    owner decision (2026-10-11), replacing "approval stays manual": while the gate is open,
+    /dashboard/sign-up asks for an organisation and an email address (CSRF) and emails a
+    confirmation link - a single-use passwordless link of the existing mechanism
+    (auth_login_tokens purpose sign_up, with the organisation's name; only its hash stored);
+    nothing else is created until it is used. The link's page (GET) changes nothing; its
+    confirming POST (CSRF), in one transaction, uses the link, calls ClientLifecycle::apply (plan
+    starter), makes the person the client admin, records the acceptance of
+    APP_ACCEPTABLE_USE_POLICY_VERSION when one is in force (required), sets the starter limits
+    (APP_STARTER_SEND_RECIPIENTS_PER_DAY, _PER_MONTH, APP_STARTER_VALIDATION_ADDRESSES_PER_DAY,
+    APP_STARTER_API_KEY_LIMIT, APP_STARTER_WEBHOOK_ENDPOINT_LIMIT, APP_STARTER_SENDING_DOMAIN_LIMIT;
+    dashboard settings; never above the installation ceilings) and activates the client (audited
+    as public-sign-up), then signs the person in and leads to the overview's next steps (a sending
+    domain, an API key, a webhook). Abuse protection without third-party services: 10 form
+    submissions an hour per client IP, 3 links an hour per address, 20 verification requests an
+    hour per client IP, 5 confirmations an hour per address, a honeypot field, and no account
+    enumeration (an address that already belongs to a user or a client's contact gets no sign-up
+    link; a user gets an ordinary sign-in link). The operator is emailed (APP_ADMIN_EMAIL) and sees
+    sign-ups in Clients › Clients (Public sign-ups, origin filter) and Needs attention (last 7
+    days); throttling, suspension and closure work as for any client. No automatic promotion out
+    of the starter tier, no billing.
   policy_acceptance:
     - APP_ACCEPTABLE_USE_POLICY_VERSION names the service-policy version in force (empty = none); Smarthost stores versions and acceptances, never policy text
     - clients.policy_acceptance_required (true for new clients; operator-created active clients and pre-Phase 9 clients are exempt) blocks approval until the version in force is accepted
@@ -2728,7 +2747,7 @@ production_operations:
       ingress: "the ingress socket and service active with exactly the configured binds, nginx holding the inherited sockets, Postfix port 25 as the PROXY-protocol listener on the ingress network only, TRUSTED_PROXIES empty, and the two-source proof at nginx and Postfix (smarthostctl prod ingress-check)"
       tls: "the certificates served on 443 and 25 (STARTTLS): validity, expiry within 14 days, names, trust"
       dns: "A records, PTR, forward-confirmed reverse DNS, bounce-domain MX to this host, SPF of the bounce domain and the EHLO name, DMARC of every sending domain (a client's gap is a WARN naming the client that never blocks activation), inbound SMTP reachability"
-      dkim: "the APP_MAIL_FROM domain (the installation's own) - an active, published key, or FAIL; per verified sending domain of an active client - no active key, or a missing or different published record, is a WARN naming the client that never blocks activation or upgrades (owner decision 2026-10-11; its jobs are refused at submit), while OpenDKIM disagreeing with the database (selector, key file, signing selector) stays a FAIL"
+      dkim: "the APP_MAIL_FROM domain (the installation's own) - an active, published key, or FAIL; per verified sending domain of an active client - no active key, or a missing or different published record, is a WARN naming the client that never blocks activation or upgrades (owner decision 2026-10-11; its jobs are refused at submit), counted in one WARN per section by default (--client-domains lists each), while OpenDKIM disagreeing with the database (selector, key file, signing selector) stays a FAIL"
       postfix: "hostname, no relayhost, mynetworks, relay refusal (live RCPT test, no DATA), bounce domain, VERP delimiter, TLS, sender ownership, milter, held/live mode, pause, optional outbound port-25 probe (EHLO/QUIT)"
       delivery: "heartbeat, state against the configuration, queue snapshot freshness"
     outputs: [text, json, dns checklist, nftables ruleset]
@@ -2958,8 +2977,9 @@ user_interfaces:
     # Specification 2.6: what the Phase 6 dashboards provide and how.
     authentication: >-
       passwordless since specification 2.7 - /dashboard/login asks for an email address (CSRF) and
-      emails a single-use link to /dashboard/login/verify; sign-out is a POST with a CSRF token; no
-      self-service registration (operators create users on the Users page); APP_ADMIN_EMAIL always
+      emails a single-use link to /dashboard/login/verify; sign-out is a POST with a CSRF token; users
+      are created by operators on the Users page, or by the public sign-up when it is open
+      (saas_operations.public_sign_up); APP_ADMIN_EMAIL always
       may sign in and receives ADMIN; API keys never authenticate a browser
     access_control: >-
       operator pages each require a permission key (PLATFORM.OVERVIEW.VIEW, PLATFORM.CLIENT.VIEW/

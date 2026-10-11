@@ -146,7 +146,7 @@ final class Navigation
         $c = $this->counts ??= $this->read->navCounts();
         $can = fn (string $permission): bool => $this->security->isGranted($permission);
         $alerts = $can('PLATFORM.ABUSE.VIEW') ? $c['open_alerts'] : 0;
-        $pending = $can('PLATFORM.CLIENT.VIEW') ? $c['pending_clients'] : 0;
+        $pending = $can('PLATFORM.CLIENT.VIEW') ? $c['pending_clients'] + $c['new_sign_ups'] : 0;   // and public sign-ups of the last 7 days
         $dsns = $can('PLATFORM.DSN.VIEW') ? $c['open_dsns'] : 0;
         $webhooks = $can('PLATFORM.WEBHOOK.VIEW') ? $c['failed_webhooks'] : 0;
         $checks = $can('PLATFORM.SYSTEM.VIEW') ? $c['warn_checks'] + $c['fail_checks'] : 0;

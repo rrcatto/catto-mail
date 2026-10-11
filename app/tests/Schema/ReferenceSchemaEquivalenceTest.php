@@ -47,7 +47,7 @@ final class ReferenceSchemaEquivalenceTest extends TestCase
     public function testMigrationsAreRecordedAndOwnedByTheSchemaOwner(): void
     {
         $c = Db::owner();
-        self::assertSame(17, (int) $c->fetchOne('SELECT count(*) FROM doctrine_migration_versions'));
+        self::assertSame(18, (int) $c->fetchOne('SELECT count(*) FROM doctrine_migration_versions'));
         $owners = $c->fetchFirstColumn("SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'");
         self::assertSame([Db::env('SMARTHOST_DB_OWNER_USER')], $owners);
     }

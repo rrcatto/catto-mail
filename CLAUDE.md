@@ -160,14 +160,15 @@ points span components and need several files to see:
   `env-migrate` converts older files); System › Settings overrides the operational settings of
   `docs/contracts/settings.json` without changing the file (`setting_overrides`, applied by
   `settings-apply`).
-- **v0.2.4** (owner decisions): every page has the version in its head and
+- **v0.2.4** (owner decisions) and, since then, unreleased: every page has the version in its head and
   the footer (`templates/_site.html.twig`, `PageFrameTest`); Bootstrap 6.0.0-alpha.1 is the base
   of the design and every dashboard page uses its four-column `.grid`, with the area buttons in the
   top bar; the public front page at `/` (`FrontPageController`, `templates/front.html.twig`); production
   port 80 redirects to HTTPS (`PROXY_HTTP_BIND`, `infra/nginx/production/http-redirect.conf.template`);
   client admins set up sending domains in the client dashboard, the DKIM key through the host agent
   (`ClientDomainController`, `App\Domain\DkimSetup`, `smarthost:system:agent domains`,
-  `ClientDomainSetupTest`); a client's unfinished domain is a preflight WARN, never blocking (only
+  `ClientDomainSetupTest`); public sign-up into a starter tier behind `APP_PUBLIC_ONBOARDING_ENABLED`
+  (`PublicSignUpController`, `App\Client\PublicSignUp`, `PublicSignUpTest`); a client's unfinished domain is a preflight WARN, never blocking (only
   the `APP_MAIL_FROM` domain must have its key); `prod dkim activate` reloads OpenDKIM (SIGUSR1,
   confirmed by `smarthost_preflight.py --dkim-probe`) and restarts it only as the fallback.
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
@@ -326,8 +327,13 @@ This is a public repository. Documentation, comments, examples, tests, configura
     restart. A milter client talking to OpenDKIM must wait for each reply: OpenDKIM 2.11 crashes
     when a pipelined session meets a pending reload.
 - **SaaS operations (Phase 9, spec 2.10).**
-  - Public onboarding stays disabled (`APP_PUBLIC_ONBOARDING_ENABLED=false`) and has no route.
-    Never add a public registration route without an explicit owner decision.
+  - Public sign-up (owner decision 2026-10-11) exists only behind `APP_PUBLIC_ONBOARDING_ENABLED`
+    (default false: every sign-up route is 404). It creates clients only through
+    `ClientLifecycle::apply` (`App\Client\PublicSignUp`), which then adds the client admin, the
+    policy acceptance and the starter limits (`APP_STARTER_*`, capped by the ceilings) and
+    activates the client. Keep it: GET never changes state, every POST has CSRF, the answer never
+    reveals whether an address has an account, the rate limits and the honeypot stay, tokens are
+    stored only as hashes and never logged. No other public route may create clients.
   - Create clients and change their status only through `ClientLifecycle`, never by setting
     `clients.status`. Every transition has its permission and a reason, and is audited.
   - Volume quotas are admitted only through `QuotaEnforcer::admit`, inside the transaction that

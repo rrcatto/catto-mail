@@ -245,6 +245,11 @@ final class OperatorOverview
             $n = $o['unmatched_dsns']['open'];
             $add('info', 'inbox', \sprintf('%d unmatched DSN%s to review', $n, 1 === $n ? '' : 's'), 'Bounces not tied to a message', $url('dashboard_operator_dsns'));
         }
+        if ($can('PLATFORM.CLIENT.VIEW') && $o['new_sign_ups'] > 0) {
+            $n = $o['new_sign_ups'];
+            $add('info', 'user', 1 === $n ? 'New public sign-up: '.$o['newest_sign_up'] : \sprintf('%d new public sign-ups', $n),
+                'Last 7 days · active in the starter tier · review them', $url('dashboard_operator_clients', ['origin' => 'public_application', 'sort' => 'created', 'dir' => 'desc']));
+        }
         if ($can('PLATFORM.CLIENT.VIEW') && ($o['clients']['pending_approval'] ?? 0) > 0) {
             $n = $o['clients']['pending_approval'];
             $add('info', 'user', 1 === $n ? $o['first_pending_client'].' awaits approval' : \sprintf('%d clients await approval', $n), 'Approval queue',

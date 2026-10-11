@@ -127,12 +127,20 @@ CREATE TABLE auth_login_tokens (
     created_at         timestamptz NOT NULL DEFAULT now(),
     expires_at         timestamptz NOT NULL,
     used_at            timestamptz NULL,
-    CONSTRAINT auth_login_tokens_expiry_after_creation CHECK (expires_at > created_at)
+    -- Public sign-up (owner decision 2026-10-11): a sign-up link names the organisation and
+    -- belongs to no user; nothing else exists until it is used.
+    purpose            text        NOT NULL DEFAULT 'sign_in' CHECK (purpose IN ('sign_in', 'sign_up')),
+    organisation_name  text        NULL CHECK (organisation_name IS NULL OR length(organisation_name) BETWEEN 1 AND 200),
+    CONSTRAINT auth_login_tokens_expiry_after_creation CHECK (expires_at > created_at),
+    CONSTRAINT auth_login_tokens_sign_up_fields CHECK (
+        (purpose = 'sign_in' AND organisation_name IS NULL)
+     OR (purpose = 'sign_up' AND organisation_name IS NOT NULL AND user_id IS NULL))
 );
 CREATE UNIQUE INDEX auth_login_tokens_hash_uq ON auth_login_tokens (token_hash);
 CREATE INDEX auth_login_tokens_email_created_idx ON auth_login_tokens (lower(email), created_at);
 CREATE INDEX auth_login_tokens_ip_created_idx ON auth_login_tokens (requested_ip_hash, created_at);
 CREATE INDEX auth_login_tokens_user_idx ON auth_login_tokens (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX auth_login_tokens_purpose_ip_created_idx ON auth_login_tokens (purpose, requested_ip_hash, created_at);
 
 -- Sending domains with DNS TXT verification and DKIM status (D-13, D-26).
 -- TXT record: _smarthost-verification.<domain>  "smarthost-verification=<token>".

@@ -34,12 +34,21 @@ use Symfony\Component\Uid\Uuid;
  * link signs in at most once even under concurrent clicks. The configured
  * administrator's account is created on first use and given ADMIN at every
  * sign-in. Disabled users are refused.
+ *
+ * Public sign-up (owner decision 2026-10-11) uses the same links with purpose sign_up:
+ * requestSignUp() emails <base>/dashboard/sign-up/verify?token=<token> and stores only its
+ * hash, the address and the organisation's name (at most SIGN_UP_MAX_PER_EMAIL per address
+ * and hour); signUpLink() reads a valid link without using it (the confirmation page, a GET);
+ * claimSignUpLink() uses it once (the confirming POST, inside its transaction). A sign-up link
+ * never signs anyone in, and a sign-in link is never a sign-up.
  */
 final class LoginLinkService
 {
     public const MAX_PER_EMAIL = 5;
     public const MAX_PER_IP = 20;
     public const WINDOW_SECONDS = 900;
+    public const SIGN_UP_MAX_PER_EMAIL = 3;
+    public const SIGN_UP_WINDOW_SECONDS = 3600;
     private const TOKEN_PATTERN = '/^[A-Za-z0-9_-]{43}$/';
 
     public function __construct(
@@ -161,7 +170,7 @@ final class LoginLinkService
         return $this->connection->transactional(function () use ($token): ?array {
             $row = $this->connection->fetchAssociative(<<<'SQL'
                 UPDATE auth_login_tokens SET used_at = now()
-                 WHERE token_hash = ? AND used_at IS NULL AND expires_at > now()
+                 WHERE token_hash = ? AND purpose = 'sign_in' AND used_at IS NULL AND expires_at > now()
                 RETURNING email, return_path
                 SQL, [hash('sha256', $token)]);
             if (false === $row) {
@@ -198,7 +207,88 @@ final class LoginLinkService
     {
         $since = Clock::now()->modify('-'.self::WINDOW_SECONDS.' seconds')->format('Y-m-d H:i:s.uP');
 
-        return (int) $this->connection->fetchOne('SELECT count(*) FROM auth_login_tokens WHERE lower(email) = lower(?) AND created_at > ?', [$email, $since]) >= self::MAX_PER_EMAIL
-            || (int) $this->connection->fetchOne('SELECT count(*) FROM auth_login_tokens WHERE requested_ip_hash = ? AND created_at > ?', [$ipHash, $since]) >= self::MAX_PER_IP;
+        return (int) $this->connection->fetchOne("SELECT count(*) FROM auth_login_tokens WHERE lower(email) = lower(?) AND purpose = 'sign_in' AND created_at > ?", [$email, $since]) >= self::MAX_PER_EMAIL
+            || (int) $this->connection->fetchOne("SELECT count(*) FROM auth_login_tokens WHERE requested_ip_hash = ? AND purpose = 'sign_in' AND created_at > ?", [$ipHash, $since]) >= self::MAX_PER_IP;
+    }
+
+    /**
+     * Emails the verification link of a public sign-up. The caller (App\Client\PublicSignUp)
+     * has validated both values and refused taken addresses; nothing but the link is stored.
+     *
+     * @return bool whether a link was sent (never shown to the requester)
+     */
+    public function requestSignUp(string $email, string $organisation, ?string $clientIp): bool
+    {
+        $since = Clock::now()->modify('-'.self::SIGN_UP_WINDOW_SECONDS.' seconds')->format('Y-m-d H:i:s.uP');
+        if ((int) $this->connection->fetchOne("SELECT count(*) FROM auth_login_tokens WHERE lower(email) = lower(?) AND purpose = 'sign_up' AND created_at > ?",
+            [$email, $since]) >= self::SIGN_UP_MAX_PER_EMAIL) {
+            $this->logger->warning('Sign-up link request rate-limited for the address.', ['email_hash' => hash('sha256', strtolower($email))]);
+
+            return false;
+        }
+        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $hash = hash('sha256', $token);
+        $now = Clock::now();
+        $this->connection->insert('auth_login_tokens', [
+            'id' => Uuid::v7()->toRfc4122(), 'email' => $email, 'user_id' => null, 'token_hash' => $hash, 'return_path' => null,
+            'requested_ip_hash' => hash_hmac('sha256', (string) $clientIp, $this->secret), 'purpose' => 'sign_up', 'organisation_name' => $organisation,
+            'created_at' => $now->format('Y-m-d H:i:s.uP'), 'expires_at' => $now->modify('+'.$this->ttlSeconds.' seconds')->format('Y-m-d H:i:s.uP'),
+        ]);
+        $url = rtrim($this->publicBaseUrl, '/').'/dashboard/sign-up/verify?token='.$token;
+        try {
+            $this->mailer->send((new TemplatedEmail())
+                ->from(new Address($this->mailFrom, 'Catto Mail'))
+                ->to(new Address($email))
+                ->subject('Confirm your Catto Mail sign-up')
+                ->textTemplate('email/sign_up_link.txt.twig')
+                ->htmlTemplate('email/sign_up_link.html.twig')
+                ->context(['url' => $url, 'minutes' => intdiv($this->ttlSeconds, 60), 'organisation' => $organisation]));
+        } catch (\Throwable $e) {
+            $this->connection->delete('auth_login_tokens', ['token_hash' => $hash]);
+            $this->logger->error('The sign-up email could not be sent.', ['exception' => $e::class]);
+            throw new \RuntimeException('The confirmation email could not be sent. Please try again shortly.', 0, $e);
+        }
+        $this->audit->record(AuditActor::system('public-sign-up'), 'auth.sign_up_link_requested', 'user', null,
+            ['email_hash' => hash('sha256', strtolower($email))]);
+
+        return true;
+    }
+
+    /**
+     * A valid sign-up link, read without using it (the confirmation page).
+     *
+     * @return array{email: string, organisation: string}|null
+     */
+    public function signUpLink(string $token): ?array
+    {
+        if (1 !== preg_match(self::TOKEN_PATTERN, $token)) {
+            return null;
+        }
+        $row = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT email, organisation_name FROM auth_login_tokens
+             WHERE token_hash = ? AND purpose = 'sign_up' AND used_at IS NULL AND expires_at > now()
+            SQL, [hash('sha256', $token)]);
+
+        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name']];
+    }
+
+    /**
+     * Uses a sign-up link once (one atomic UPDATE ... RETURNING; call it inside the transaction
+     * that creates the account, so a failure leaves the link usable).
+     *
+     * @return array{email: string, organisation: string}|null
+     */
+    public function claimSignUpLink(string $token): ?array
+    {
+        if (1 !== preg_match(self::TOKEN_PATTERN, $token)) {
+            return null;
+        }
+        $row = $this->connection->fetchAssociative(<<<'SQL'
+            UPDATE auth_login_tokens SET used_at = now()
+             WHERE token_hash = ? AND purpose = 'sign_up' AND used_at IS NULL AND expires_at > now()
+            RETURNING email, organisation_name
+            SQL, [hash('sha256', $token)]);
+
+        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name']];
     }
 }
