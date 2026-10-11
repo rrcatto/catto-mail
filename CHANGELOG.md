@@ -2,7 +2,72 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.11.
+the *specification* version, which is 2.12.
+
+## [0.2.6] - 2026-10-11
+
+An application can be connected with one approval instead of a copied API key and webhook secret
+(specification 2.12, OpenAPI 1.0.0-draft.10), a read-only API for a client's sending domains, and
+the acceptable use policy as a page linked from every footer. One new migration
+(`application_connections`; `webhook_endpoints.status` gains `removed`). No existing `/v1`
+operation changes, and `infra/.env` gains nothing.
+
+Upgrading from 0.2.5: `git checkout v0.2.6`, `prod check`, `prod upgrade 0.2.6`. From 0.2.4 or
+earlier, first follow the notes of the versions in between.
+
+### Added
+- **Application connect** (owner instruction; specification 2.12, `api.connect`): an
+  authorisation-code flow with PKCE (`S256`), so that an application such as a mailing-list
+  application gets its API key and webhook endpoint by one approval of a client admin.
+  - The connect page `GET /dashboard/connect` takes `application_name`, `redirect_uri`,
+    `webhook_url`, `state`, `code_challenge` and `code_challenge_method=S256`. It changes nothing
+    and stores nothing. A request that is incomplete or refused is explained on the page, and the
+    person is never redirected to an address that was not accepted.
+  - Redirect and webhook URLs must be `https` (plain `http` only in development and test), and
+    the webhook URL must pass the webhook target guard.
+  - A visitor is offered sign-in and, only while `APP_PUBLIC_ONBOARDING_ENABLED` is true, account
+    creation through the public sign-up. Both lead back to the connect step: the emailed link
+    carries it as its return path, so it also works from another browser.
+  - The person chooses one of their workspaces and approves (POST, CSRF). Only a client admin
+    can approve, and only for an active client. If the client's limit on usable API keys or on
+    webhook endpoints leaves no room, the page says so and nothing is created.
+  - The approval answers with a redirect to the application carrying a single-use code (10
+    minutes) and the state; declining answers `error=access_denied`. A key or secret is never
+    in a redirect. Only the hash of the code is stored.
+  - `POST /v1/connect/exchange` (no API key; the code, the PKCE code verifier and the redirect
+    URI) returns the credentials once: the API key, the webhook signing secret, the API base URL
+    and the client's sending domains. The key, named after the application, and the endpoint,
+    subscribed to `validation.completed`, `validation.failed`, `send.completed`, `send.failed`,
+    `message.hard_bounced` and `message.complained`, are created by this exchange: an API key is
+    stored only as a hash, so it cannot exist before the application is there to receive it.
+  - Every reason a code is not accepted is one answer, `400 invalid-connect-code`. A good code
+    whose client is no longer active or has no room left answers `409 connect-refused`, creates
+    nothing and stays usable until it expires. The exchange is rate limited per client address.
+  - Connecting again with the same webhook URL replaces the earlier connection at the exchange,
+    so it also works at the limits; until then the earlier key keeps working.
+  - `DELETE /v1/connection` lets a connected application end its own connection. A client admin
+    ends one in the new page Settings › Connected applications. Either way the key is revoked
+    and the endpoint removed.
+  - Every approval, connection and revocation is audited (`application_connection.approved`,
+    `.connected`, `.revoked`). Codes, code verifiers, keys and secrets are never logged or
+    audited. The global-opt-out capability is never granted by connecting.
+- **`GET /v1/sending-domains`**: the authenticated client's sending domains with their
+  verification and DKIM status and `can_send`, the submit rule applied to the domain as it is
+  now, so that an application can warn before it sends from a domain that cannot send yet.
+- **Acceptable use policy**: `/acceptable-use-policy`, a public page built from `docs/AUP.md`,
+  linked from the footer of every page. An installation that publishes its own policy replaces
+  that file before building its images.
+- A webhook endpoint can be `removed` (terminal): the endpoint of an ended connection receives
+  nothing, cannot be changed, is not listed and counts against no limit; its delivery history
+  is kept.
+- Migration `Version20261015000100`.
+
+### Changed
+- Sign-in and sign-up accept `return_to`, but only a path of the connect page; anything else is
+  ignored. A return path can no longer end in a line break.
+- The submit rule for a sending domain is one class, `App\Sending\SendingDomainRule`, used by
+  the submit of a send job and by `can_send`.
+- The integration guide lists `repermission.responded` and `webhook.test` with the other events.
 
 ## [0.2.5] - 2026-10-11
 

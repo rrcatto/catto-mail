@@ -35,6 +35,9 @@ final class WebhookTestController
         $client = $this->tenant->client();
         $data = $this->json->decode($request, 'WebhookTestRequest')['data'];
         $endpoint = $this->tenant->webhookEndpoint((string) $data['webhook_endpoint_id']) ?? throw ApiProblem::notFound();
+        if ($endpoint->isRemoved()) {   // the endpoint of an ended application connection no longer exists for the API
+            throw ApiProblem::notFound();
+        }
         $id = $this->tests->request($client, $endpoint, AuditActor::apiKey($this->tenant->apiClientUser()->getApiKey()))
             ?? throw ApiProblem::conflict('webhook-endpoint-disabled', 'Webhook endpoint disabled',
                 'This webhook endpoint is disabled; enable it to send a test event.');

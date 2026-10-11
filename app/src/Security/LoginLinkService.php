@@ -41,6 +41,11 @@ use Symfony\Component\Uid\Uuid;
  * and hour); signUpLink() reads a valid link without using it (the confirmation page, a GET);
  * claimSignUpLink() uses it once (the confirming POST, inside its transaction). A sign-up link
  * never signs anyone in, and a sign-in link is never a sign-up.
+ *
+ * Both kinds of link carry an optional return path (a /dashboard path, safeReturnPath()): where
+ * the person was going. The connect page (specification 2.12) uses it, so that signing in or
+ * signing up from there leads back to the connect step, also when the link is opened in another
+ * browser.
  */
 final class LoginLinkService
 {
@@ -199,7 +204,7 @@ final class LoginLinkService
 
     public static function safeReturnPath(?string $path): ?string
     {
-        return null !== $path && 1 === preg_match('#^/dashboard(/[A-Za-z0-9_\-/.?=&%]*)?$#', $path) && !str_contains($path, '//')
+        return null !== $path && 1 === preg_match('#^/dashboard(/[A-Za-z0-9_\-/.?=&%~]*)?\z#', $path) && !str_contains($path, '//')
             && !str_starts_with($path, '/dashboard/login') ? $path : null;
     }
 
@@ -217,7 +222,7 @@ final class LoginLinkService
      *
      * @return bool whether a link was sent (never shown to the requester)
      */
-    public function requestSignUp(string $email, string $organisation, ?string $clientIp): bool
+    public function requestSignUp(string $email, string $organisation, ?string $clientIp, ?string $returnPath = null): bool
     {
         $since = Clock::now()->modify('-'.self::SIGN_UP_WINDOW_SECONDS.' seconds')->format('Y-m-d H:i:s.uP');
         if ((int) $this->connection->fetchOne("SELECT count(*) FROM auth_login_tokens WHERE lower(email) = lower(?) AND purpose = 'sign_up' AND created_at > ?",
@@ -230,7 +235,7 @@ final class LoginLinkService
         $hash = hash('sha256', $token);
         $now = Clock::now();
         $this->connection->insert('auth_login_tokens', [
-            'id' => Uuid::v7()->toRfc4122(), 'email' => $email, 'user_id' => null, 'token_hash' => $hash, 'return_path' => null,
+            'id' => Uuid::v7()->toRfc4122(), 'email' => $email, 'user_id' => null, 'token_hash' => $hash, 'return_path' => self::safeReturnPath($returnPath),
             'requested_ip_hash' => hash_hmac('sha256', (string) $clientIp, $this->secret), 'purpose' => 'sign_up', 'organisation_name' => $organisation,
             'created_at' => $now->format('Y-m-d H:i:s.uP'), 'expires_at' => $now->modify('+'.$this->ttlSeconds.' seconds')->format('Y-m-d H:i:s.uP'),
         ]);
@@ -257,7 +262,7 @@ final class LoginLinkService
     /**
      * A valid sign-up link, read without using it (the confirmation page).
      *
-     * @return array{email: string, organisation: string}|null
+     * @return array{email: string, organisation: string, return_path: ?string}|null
      */
     public function signUpLink(string $token): ?array
     {
@@ -265,18 +270,19 @@ final class LoginLinkService
             return null;
         }
         $row = $this->connection->fetchAssociative(<<<'SQL'
-            SELECT email, organisation_name FROM auth_login_tokens
+            SELECT email, organisation_name, return_path FROM auth_login_tokens
              WHERE token_hash = ? AND purpose = 'sign_up' AND used_at IS NULL AND expires_at > now()
             SQL, [hash('sha256', $token)]);
 
-        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name']];
+        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name'],
+            'return_path' => self::safeReturnPath($row['return_path'] ?? null)];
     }
 
     /**
      * Uses a sign-up link once (one atomic UPDATE ... RETURNING; call it inside the transaction
      * that creates the account, so a failure leaves the link usable).
      *
-     * @return array{email: string, organisation: string}|null
+     * @return array{email: string, organisation: string, return_path: ?string}|null
      */
     public function claimSignUpLink(string $token): ?array
     {
@@ -286,9 +292,10 @@ final class LoginLinkService
         $row = $this->connection->fetchAssociative(<<<'SQL'
             UPDATE auth_login_tokens SET used_at = now()
              WHERE token_hash = ? AND purpose = 'sign_up' AND used_at IS NULL AND expires_at > now()
-            RETURNING email, organisation_name
+            RETURNING email, organisation_name, return_path
             SQL, [hash('sha256', $token)]);
 
-        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name']];
+        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name'],
+            'return_path' => self::safeReturnPath($row['return_path'] ?? null)];
     }
 }

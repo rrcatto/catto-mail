@@ -1,6 +1,6 @@
 # Screenshots
 
-Every page of the dashboard as of version 0.2.5 with the Bootstrap 6 four-column grid (most were taken at 0.2.3 and 0.2.4, so their footers show those numbers), taken on the
+Every page of the dashboard as of version 0.2.6 with the Bootstrap 6 four-column grid (most were taken at 0.2.3 to 0.2.5, so their footers show those numbers and lack the link to the acceptable use policy that 0.2.6 added; the four pages new in 0.2.6 were taken at 0.2.6, signed in as a client admin where a sign-in is needed), taken on the
 development pod (`smarthostctl`) at 1,440 pixels wide unless noted, signed in as the administrator. The grid was designed
 for 2,560 pixels; at 1,440 a half holding a wide table takes the full width. The figures come from the end-to-end test suites, so the clients, addresses and
 domains are test data. Every time is in the installation time zone (`SMARTHOST_TIMEZONE`, here SAST). The development pod is
@@ -222,6 +222,21 @@ the records to publish, *Check DNS now*, and for client admins *Add a sending do
 
 ![Settings › Webhooks](client-settings-webhooks.png)
 
+### Settings › Connected applications
+
+`/dashboard/c/{client}/connections` · The applications a client admin connected from the connect page: where each one's
+webhooks go, its API key's prefix and last use, who approved it, and *Disconnect*, which revokes the key and removes the
+endpoint. An ended connection stays in the list.
+
+![Settings › Connected applications](client-settings-connected-applications.png)
+
+### Connect an application: the approval
+
+`/dashboard/connect?…` signed in · What the application asks for, the workspace to connect (here it replaces an earlier
+connection to the same webhook address), *Connect* and *Cancel*, and what connecting does.
+
+![Connect an application: the approval](connect-approve.png)
+
 ### Usage & limits
 
 `/dashboard/c/{client}/usage`
@@ -248,6 +263,19 @@ its mail. A full-width banner over four quarter cards.
 `/dashboard/login` · Passwordless: the link arrives by email.
 
 ![Sign in](public-sign-in.png)
+
+### Connect an application: a visitor
+
+`/dashboard/connect?…` · Where an application sends a person to be connected: what is asked, and sign-in. *Create an
+account* is offered beside it only while public sign-up is on. Nothing is connected before a client admin approves.
+
+![Connect an application: a visitor](public-connect.png)
+
+### Acceptable use policy
+
+`/acceptable-use-policy` · Built from `docs/AUP.md`; every page's footer links to it.
+
+![Acceptable use policy](public-acceptable-use-policy.png)
 
 ### API documentation
 

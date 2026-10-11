@@ -115,7 +115,7 @@ final class ClientAccountReadModel
                 SELECT d.created_at, d.delivered_at FROM webhook_deliveries d
                  WHERE d.webhook_endpoint_id = e.id AND d.status = 'delivered' ORDER BY d.created_at DESC LIMIT 1
               ) last_ok ON true
-             WHERE e.client_id = ? ORDER BY e.created_at
+             WHERE e.client_id = ? AND e.status <> 'removed' ORDER BY e.created_at
             SQL, [$clientId]);
     }
 
@@ -196,7 +196,7 @@ final class ClientAccountReadModel
 
     /**
      * The client's audit history: actions on the client itself and on its API keys,
-     * sending domains and webhook endpoints (each served by audit_log_target_idx).
+     * sending domains, webhook endpoints and application connections (each served by audit_log_target_idx).
      *
      * @return list<array<string, mixed>>
      */
@@ -210,6 +210,7 @@ final class ClientAccountReadModel
                 UNION ALL SELECT 'api_key', id::text FROM api_keys WHERE client_id = CAST(:c AS uuid)
                 UNION ALL SELECT 'sending_domain', id::text FROM sending_domains WHERE client_id = CAST(:c AS uuid)
                 UNION ALL SELECT 'webhook_endpoint', id::text FROM webhook_endpoints WHERE client_id = CAST(:c AS uuid)
+                UNION ALL SELECT 'application_connection', id::text FROM application_connections WHERE client_id = CAST(:c AS uuid)
             )
             SELECT a.occurred_at, a.action, a.actor_type, a.actor_id, a.target_type, a.target_id, a.detail_json,
                    u.email AS actor_email

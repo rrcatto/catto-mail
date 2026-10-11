@@ -161,6 +161,26 @@ admin and the policy acceptance, and signs them in; the overview shows the next 
 (`public_sign_up*` in framework.yaml, links per address), a honeypot, CSRF, no account enumeration;
 the operator is emailed. Migration `Version20261014000100`.
 
+**Application connect (v0.2.6, specification 2.12):** an application is connected by one approval
+of a client admin, in an authorisation-code flow with PKCE (`App\Connect\ConnectRequest`,
+`ConnectService`).
+- `/dashboard/connect` (`Dashboard\ConnectController`): a visitor sees what is asked and is offered
+  sign-in, and account creation only while `APP_PUBLIC_ONBOARDING_ENABLED` is true; both return to
+  the connect step (`return_to`, a connect path only). A client admin of an active client approves
+  (POST, CSRF) within the key and endpoint limits; the redirect back carries a single-use code of
+  10 minutes and the state, never a key or secret.
+- `POST /v1/connect/exchange` (`Api\ConnectController`; no API key, rate limited per address)
+  creates the API key and the webhook endpoint and returns the credentials once. `DELETE
+  /v1/connection` ends the connection of the calling key.
+- Settings › Connected applications (`ClientConnectionController`) lists and ends connections. An
+  ended connection's key is revoked and its endpoint `removed`.
+- `GET /v1/sending-domains` (`Api\SendingDomainController`): the client's domains and `can_send`
+  (`App\Sending\SendingDomainRule`, the submit rule).
+- `/acceptable-use-policy` (`PolicyController`, `App\Util\Markdown`): the policy page, built from
+  `docs/AUP.md`; every footer links to it.
+- Rate limits `connect_page` and `connect_exchange` in framework.yaml. Migration
+  `Version20261015000100` (`application_connections`; `webhook_endpoints.status` `removed`).
+
 **Later phases:** retention commands; promotion out of the starter tier and billing (owner decisions).
 
 Configuration comes only from the variables in `docs/contracts/environment.md` (there is no
@@ -171,6 +191,7 @@ See `docs/PROJECT.md` for every file.
 Must not:
 - probe mailboxes;
 - send tracked or bulk mail (its only mail is the dashboard sign-in link, submitted to Postfix);
+- store a raw API key, connect code or code verifier, or put a key or secret in a redirect;
 - render templates or merge data;
 - hold or generate DKIM private keys (it asks the host agent and keeps only a key's public half);
 - call Python or Go over RPC.

@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.11). Every enum value used in the database, the /v1 API,
+# (specification 2.12). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.6.0"
-specification_version: "2.11"
+vocabulary_version: "2.7.0"
+specification_version: "2.12"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -551,6 +551,14 @@ webhook_endpoint_status:
   values:
     enabled: {origin: contract}
     disabled: {origin: contract}
+    removed: {origin: contract, meaning: "Terminal (specification 2.12): the endpoint of an ended application connection. It receives nothing, counts against no limit and keeps its delivery history."}
+
+application_connection_status:
+  description: application_connections.status - an application connected from the connect page (specification 2.12).
+  values:
+    pending: {origin: contract, meaning: "A client admin approved the connection; its single-use code has not been exchanged. No API key and no webhook endpoint exist yet."}
+    active: {origin: contract, meaning: "The application exchanged the code: the connection's API key and webhook endpoint exist."}
+    revoked: {origin: contract, meaning: "Terminal: ended by the application (DELETE /v1/connection) or a client admin, or replaced by a new connection to the same webhook URL. The key is revoked and the endpoint removed."}
 
 webhook_delivery_status:
   values:

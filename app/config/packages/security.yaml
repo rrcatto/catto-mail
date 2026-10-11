@@ -47,5 +47,10 @@ security:
         - { path: '^/dashboard/login(/sent|/verify)?$', roles: PUBLIC_ACCESS }
         # Public sign-up (owner decision 2026-10-11): 404 unless APP_PUBLIC_ONBOARDING_ENABLED is true.
         - { path: '^/dashboard/sign-up(/sent|/verify)?$', roles: PUBLIC_ACCESS }
+        # Application connect (specification 2.12): the connect page shows a visitor what is asked
+        # and offers sign-in (and sign-up); approving needs a signed-in client admin (the controller).
+        - { path: '^/dashboard/connect$', roles: PUBLIC_ACCESS }
         - { path: ^/dashboard, roles: ROLE_USER }
+        # The code exchange is the one /v1 operation without an API key (App\Security\ApiKeyAuthenticator).
+        - { path: '^/v1/connect/exchange$', roles: PUBLIC_ACCESS }
         - { path: ^/v1(/|$), roles: ROLE_API_CLIENT }

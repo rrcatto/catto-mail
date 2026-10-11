@@ -1,0 +1,29 @@
+{# The acceptable use policy (/acceptable-use-policy), rendered from docs/AUP.md by App\Util\Markdown, which
+   escapes all text: no session, no script; the stylesheets and font come from the application. #}
+{% import 'dashboard/_icons.html.twig' as icon %}
+{% import '_site.html.twig' as site %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {{ site.application_meta() }}
+    <title>{{ title }} · Catto Mail</title>
+    {{ site.stylesheets() }}
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+    <a class="brand" href="{{ path('front_page') }}">{{ icon.logo() }}<span>Catto Mail</span></a>
+    <a class="btn front-signin" href="{{ path('dashboard_login') }}">Sign in</a>
+</header>
+<main id="main" class="content">
+    <div class="grid">
+        <article class="card readable policy g-col-4" aria-label="{{ title }}">
+            {{ policy|raw }}
+        </article>
+    </div>
+</main>
+{{ site.footer() }}
+</body>
+</html>

@@ -49,6 +49,16 @@ framework:
             policy: sliding_window
             limit: 5
             interval: '1 hour'
+        # Application connect (specification 2.12), per client IP: the connect page and its
+        # answer (each look resolves the webhook host), and the code exchange of an application.
+        connect_page:
+            policy: sliding_window
+            limit: 120
+            interval: '1 hour'
+        connect_exchange:
+            policy: sliding_window
+            limit: 30
+            interval: '1 minute'
 
 when@test:
     framework:

@@ -1,7 +1,7 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.11. This is a documentation revision, not a software release version.
-**Revision date:** 6 October 2026 (original: 8 September 2026)
+**Specification version:** 2.12. This is a documentation revision, not a software release version.
+**Revision date:** 11 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
 The canonical, machine-readable specification is `docs/20260908-1644-smarthost-llm-spec.yaml`.
@@ -1247,11 +1247,35 @@ POST /v1/webhooks/test                 (one named endpoint: webhook_endpoint_id 
 POST /v1/global-suppressions           (trusted clients only: recipient global opt-out)
 GET  /v1/global-suppressions/{id}
 POST /v1/global-suppressions/{id}/lift
+
+POST /v1/connect/exchange              (no API key: the code of an approved connection for its credentials)
+DELETE /v1/connection                  (a connected application ends its own connection)
+GET /v1/sending-domains                (the client's sending domains and whether each can send)
 ```
 
 Job processing is asynchronous. The client either polls or receives a signed webhook when a job changes state.
 
 Request bodies are limited to 10 MiB. The full contract is `docs/api/openapi.v1.yaml`.
+
+## Connecting an application (specification 2.12)
+
+An application such as a mailing-list application can be connected with one approval, instead of someone copying an API key and a webhook secret from the dashboard into its configuration. The flow is an authorisation-code flow with PKCE, as in OAuth 2 (RFC 7636, `S256` only). The application is not registered beforehand.
+
+1. **The application sends the person's browser to the connect page**, `/dashboard/connect`, with its name (`application_name`), where to send the person back to (`redirect_uri`), where its webhooks go (`webhook_url`), its own `state` value, and a `code_challenge` with `code_challenge_method=S256`. The page is part of the dashboard, not of `/v1`.
+   - Both URLs must be `https`; plain `http` is accepted only by a development installation. The webhook URL must also pass the webhook target guard, exactly like an endpoint added in the dashboard.
+   - Opening the page changes nothing and stores nothing. A request that is incomplete or refused is explained on the page, and the person is never redirected to an address that was not accepted.
+2. **The person signs in, or opens an account.** A visitor sees what is asked and is offered sign-in. Creating an account there and then uses the public sign-up and follows the same switch, `APP_PUBLIC_ONBOARDING_ENABLED`: when it is false, only sign-in is offered. Either way the emailed link carries the connect step as its return path, so the person comes back to it, even when the link is opened in another browser.
+3. **The person chooses a workspace and approves.** Only a client admin can approve, and only for an active client. The approval is a POST with a CSRF token. If the client's limit on usable API keys or on webhook endpoints leaves no room, the page says so and nothing is created.
+4. **The person is sent back with a single-use code.** The redirect carries only the `code` and the `state` (or `error=access_denied` after declining). The code expires after 10 minutes. A key or a secret is never put in a redirect address.
+5. **The application exchanges the code, server to server**, with `POST /v1/connect/exchange`, giving the code, its code verifier and the redirect URI. This is the one `/v1` operation without an API key. The answer carries, once, the API key, the webhook signing secret, the API base URL and the client's sending domains.
+   - The API key (named after the application) and the webhook endpoint are created by this exchange, not by the approval: an API key is stored only as a hash, so it can exist in the clear only in the response that hands it over. The endpoint is subscribed to `validation.completed`, `validation.failed`, `send.completed`, `send.failed`, `message.hard_bounced` and `message.complained`.
+   - A code works once. An unknown, used, expired or revoked code, a wrong code verifier and a different redirect URI all get the same answer.
+   - An earlier connection of the same client to the same webhook URL is ended at that moment, so connecting again replaces it.
+6. **Disconnecting.** The application ends its own connection with `DELETE /v1/connection`; a client admin can end it in the dashboard (Settings › Connected applications). Either way the API key is revoked and the webhook endpoint is removed. A removed endpoint receives nothing and counts against no limit; its delivery history is kept.
+
+Every approval, connection and revocation is audited. Codes, code verifiers, keys and secrets are never logged. The global-opt-out capability is never granted by connecting: it stays an operator's decision.
+
+`GET /v1/sending-domains` lists the client's sending domains with their verification and DKIM status and `can_send`, the submit rule applied to the domain as it is now, so that an application can warn before it sends from a domain that cannot send yet.
 
 ## Idempotency
 
@@ -1669,6 +1693,7 @@ The client-facing Symfony UI should eventually provide (Phase 6 status below):
 - recorded open/click statistics;
 - API key management;
 - webhook endpoint management;
+- connected applications (specification 2.12), with disconnection by a client admin;
 - usage information;
 - sending-domain verification and DKIM status.
 
@@ -1774,7 +1799,10 @@ stop it, how to report unwanted mail to the administrator and what tracked links
 When public sign-up is turned on it offers it; otherwise it says there is none. It has no session, cookie, script or form.
 Every HTML page names the software version in its head
 (`<meta name="application-name" content="catto-mail v<version>">`) and ends with the same footer:
-what catto-mail is, the version, the administrator's address (`APP_ADMIN_EMAIL`) and the time zone.
+what catto-mail is, the version, the administrator's address (`APP_ADMIN_EMAIL`), the time zone and a
+link to the acceptable use policy. The policy page, `/acceptable-use-policy` (owner decision, 2026-10-11),
+is built from the repository document `docs/AUP.md`, which is copied into the image; it is public and
+static like the front page. An installation with its own policy replaces that file before building.
 
 ## Settings in the dashboard and the .env file (owner decision, 2026-10-10)
 
@@ -2397,6 +2425,7 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 | Version | Date | Summary |
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
+| 2.12 | 11 October 2026 | Application connect (section 15, *Connecting an application*): an application is connected with one approval in an authorisation-code flow with PKCE instead of a copied API key and webhook secret. The connect page `/dashboard/connect` (sign-in, or account creation while `APP_PUBLIC_ONBOARDING_ENABLED` is true, returning to the connect step); approval by a client admin of an active client within its key and endpoint limits; a single-use code of 10 minutes; `POST /v1/connect/exchange`, which creates the API key and the webhook endpoint and returns the credentials once; `DELETE /v1/connection`; the client's Connected applications page; `GET /v1/sending-domains`. Schema: `application_connections`, and `webhook_endpoints.status` gains the terminal value `removed`. The global-opt-out capability stays operator-only. The acceptable use policy is published at `/acceptable-use-policy` from `docs/AUP.md` and linked from every footer. OpenAPI 1.0.0-draft.10; status vocabulary 2.7.0. No existing `/v1` operation changes. |
 | 2.11 | 7 October 2026 | Operator self-service (section 19, *Operator self-service*; Phase 10): the one-command installer for Ubuntu Server 26.04 LTS from an exact release tag, the bootstrap sign-in link, the host agent, the setup wizard, diagnostics with history and system health, the delivery modes and the web emergency stop, Let's Encrypt DNS-01 automation, scheduled, encrypted, off-host backups and the restore rehearsal, log shortcuts, help and tutorials, administrator address batches with separate address state dimensions, staged sends and re-permission with `repermission.responded`; the ctnlist integration document. |
 | 2.10 | 7 October 2026 | Phase 9 repository-side public SaaS hardening (section 16, *SaaS operations*): client lifecycle with approval, throttling, suspension and closure (reasons, permissions, audit); disabled public-onboarding gate; service-policy acceptance; contact metadata and private notes; per-client limits with installation ceilings and concurrency-safe quotas (`429 quota-exceeded`); API-key names and expiry; usage summaries, reconciliation, provider-neutral billing statements and export; reputation metrics and alerts without automatic action; webhook endpoint health; the public integration guide at `/docs/api`. |
 | 2.9 | 6 October 2026 | Phase 8 repository-side production readiness: production topology (standalone containers on internal and egress networks, network matrix, firewall), `smarthostctl prod`, the production configuration profile and safety rules, capture/held/live/paused delivery states with an audited, preflight-gated activation (`SYSTEM.DELIVERY.CONTROL`), the production preflight (host, runtime, exposure, ingress, TLS, DNS identity, SPF, DKIM, DMARC, bounce domain, Postfix, delivery), the socket-activated ingress that preserves client addresses (no published ports; SMTP to Postfix with the PROXY protocol; `TRUSTED_PROXIES` empty), the checked low-port host prerequisite, the launch decisions (IPv4 only, validator probing off, retention unset), production DKIM keys, Postfix submission sender ownership, the installation-wide warm-up ceiling and the throttled-client rate, emergency pause, `delivery_heartbeats` (Postfix queue depth), backups, upgrades, seed testing and the runbook; `APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS` and a response-header bound. |

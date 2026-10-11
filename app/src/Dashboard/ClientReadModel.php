@@ -412,7 +412,7 @@ final class ClientReadModel
               FROM webhook_endpoints e
               LEFT JOIN LATERAL (SELECT d.created_at, d.delivered_at FROM webhook_deliveries d
                                   WHERE d.webhook_endpoint_id = e.id AND d.status = 'delivered' ORDER BY d.created_at DESC LIMIT 1) last_ok ON true
-             WHERE e.client_id = ? ORDER BY e.created_at
+             WHERE e.client_id = ? AND e.status <> 'removed' ORDER BY e.created_at
             SQL, [$clientId]);
     }
 

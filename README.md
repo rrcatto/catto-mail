@@ -5,7 +5,7 @@ A self-hosted platform for **email validation**, **tracked outbound SMTP deliver
 mailing-list application. The data model is multi-tenant from the start, so it can later serve
 third-party clients as a SaaS.
 
-**Version:** 0.2.5 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); v0.2.0 runs the development environment on a local Linux Podman 4.9 engine; v0.2.1 fixes the installer when run from root's home; v0.2.2 redesigns the dashboard ([screenshots](#screenshots)); v0.2.3 puts every time in the installation's time zone (SAST by default), shortens `infra/.env` to grouped operator settings and adds System › Settings; v0.2.4 adds the public front page, the HTTP-to-HTTPS redirect, the four-column dashboard and sending domains that clients set up themselves; v0.2.5 adds public sign-up into a starter tier (off until the operator turns it on); live production steps and the ctnlist side of re-permission outstanding
+**Version:** 0.2.6 ([releases](https://github.com/rrcatto/catto-mail/releases)) · **Status:** Phases 0–7 complete (Phase 7 Smarthost side); Phases 8 and 9 repository side (v0.1.8); Phase 10 operator self-service (installer, setup wizard, diagnostics, help, address batches, re-permission) in v0.1.9 (specification 2.11); v0.2.0 runs the development environment on a local Linux Podman 4.9 engine; v0.2.1 fixes the installer when run from root's home; v0.2.2 redesigns the dashboard ([screenshots](#screenshots)); v0.2.3 puts every time in the installation's time zone (SAST by default), shortens `infra/.env` to grouped operator settings and adds System › Settings; v0.2.4 adds the public front page, the HTTP-to-HTTPS redirect, the four-column dashboard and sending domains that clients set up themselves; v0.2.5 adds public sign-up into a starter tier (off until the operator turns it on); v0.2.6 lets an application be connected with one approval (specification 2.12), adds a read-only API for sending domains and publishes the acceptable use policy; live production steps and the ctnlist side of re-permission outstanding
 
 **Install it:** [docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md) — one command on a clean Ubuntu Server 26.04 LTS VPS.
 
@@ -163,8 +163,27 @@ Clients use the versioned HTTPS API (`/v1`) with an API key and receive signed w
 touch catto-mail's database. The contract and the integration guide are served publicly at
 `/docs/api` ([docs/api/integration-guide.md](docs/api/integration-guide.md),
 [docs/api/openapi.v1.yaml](docs/api/openapi.v1.yaml)). The ctnlist mailing-list application's
-integration, including the outstanding re-permission handling:
+integration, including what is outstanding on its side:
 [docs/integration/ctnlist.md](docs/integration/ctnlist.md).
+
+### Connecting an application with one approval
+
+An application does not need a person to copy an API key and a webhook secret into it. It sends
+the person to the connect page, and collects its credentials itself (an authorisation-code flow
+with PKCE; integration guide, section 15):
+
+1. The application redirects the browser to `/dashboard/connect` with its name, its redirect and
+   webhook URLs, a `state` and a PKCE code challenge.
+2. The person signs in (or, while public sign-up is on, opens an account there and then),
+   chooses a workspace and approves. Only a client admin can, for an active client with room
+   under its key and endpoint limits.
+3. The browser returns to the application with a single-use code, valid for 10 minutes.
+4. The application exchanges the code with `POST /v1/connect/exchange` and receives, once, its
+   API key, its webhook signing secret, the API base URL and the client's sending domains.
+
+The application disconnects itself with `DELETE /v1/connection`, and the client admin can end a
+connection under Settings › Connected applications. `GET /v1/sending-domains` tells an
+application whether a domain can send before it tries.
 
 ## Troubleshooting
 
@@ -199,7 +218,8 @@ The full file-by-file description and workflow diagrams are in
 | [docs/production/VPS-INSTALL.md](docs/production/VPS-INSTALL.md) | **Installing on an Ubuntu VPS** (start here) |
 | [docs/production/components.md](docs/production/components.md) | Every component: container, unit, purpose, inputs, outputs, network, data |
 | [docs/production/architecture.md](docs/production/architecture.md) | What happens to an address and a message, step by step |
-| [docs/integration/ctnlist.md](docs/integration/ctnlist.md) | The ctnlist integration and its outstanding re-permission work |
+| [docs/integration/ctnlist.md](docs/integration/ctnlist.md) | The ctnlist integration, and what is outstanding on the ctnlist side |
+| [docs/AUP.md](docs/AUP.md) | The acceptable use policy, published at `/acceptable-use-policy` |
 | [docs/20260908-1644-smarthost-llm-spec.yaml](docs/20260908-1644-smarthost-llm-spec.yaml) | **Authoritative** specification (2.11) |
 | [docs/20260908-1644-smarthost-human-specification.md](docs/20260908-1644-smarthost-human-specification.md) | Human-readable companion |
 | [docs/PROJECT.md](docs/PROJECT.md) | Directory structure, every file's purpose, workflow diagrams |
@@ -259,7 +279,7 @@ python3 scripts/check-contracts.py
 |---|---|
 | 0: Architecture and contracts | **Complete** (current specification 2.11) |
 | 1: Rootless Podman development environment | **Complete.** `smarthostctl verify` passes all 176 checks (including the persistent pod lifecycle and the DSN spool with the Phase 5 daemon); `verify --clean` additionally proves a start from destroyed volumes. Since v0.2.0 it also runs on a local Linux engine with Podman 4.9, where two DNS checks fail for a known aardvark-dns limitation ([§1](docs/development-environment.md#1-requirements)). |
-| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 303/303 tests pass (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests, and the Phase 8 operations and production-guard tests). |
+| 2: Database and Symfony foundation | **Complete.** Migrations reproduce the reference schema; API-key auth, tenant isolation, idempotency, validation-job and send-job primitives. `smarthostctl test phase2`: 374/374 tests pass at v0.2.6 (including the Phase 5 opt-out API and operator commands, the Phase 6 tracking and dashboard tests, passwordless sign-in and ACL, and the Phase 7 webhook worker, dashboard, query-plan and web-isolation tests, and the Phase 8 operations and production-guard tests). |
 | 3: Python validation engine | **Complete.** Leased claiming, D-32 normalisation, syntax, typo suggestions, DNS/MX/Null MX, disposable/role flags, SMTP probing without DATA, per-domain/MX limits, retries, conservative classification, D-33 metering, outbox events. `smarthostctl test phase3`: 298 pytest tests and the 10,000-address end-to-end run pass. |
 | 4: Go/Postfix delivery pipeline | **Complete.** Leased send-job claiming, exactly-once message creation, suppression lookup, VERP, tracking, MIME and RFC 8058 headers, authenticated submission through OpenDKIM, queue-id capture with content purge and `message_submitted` metering, Postfix log ingestion with persistent cursors, D-27 reconciliation, pacing. `smarthostctl test phase4` (Go unit + PostgreSQL integration) and `test phase4-e2e` (real Postfix/OpenDKIM/Mailpit, crash/restart, 10,000 recipients) pass. |
 | 5: Inbound DSN, complaint and global suppression processing | **Complete** (v0.1.5; the spec 2.5 corrections D-36–D-38 in v0.1.6). D-30: global suppressions with provenance, the trusted-client opt-out API with durable request idempotency and operator capability, RFC 3464/6533 DSN and ARF parsing, correlation only by Smarthost identifiers (VERP, ENVID, Message-ID, queue id; never by recipient), conservative classification, the unmatched-DSN operator workflow, spool claim/reclaim/retention. `smarthostctl test phase5` and `test phase5-e2e` (real Postfix :25 and spool) pass. |
@@ -271,6 +291,7 @@ python3 scripts/check-contracts.py
 | 10: Operator self-service | **Repository side implemented** (v0.1.9; specification 2.11). The one-command installer for Ubuntu Server 26.04 LTS (exercised on Ubuntu 26.04 under systemd), the bootstrap sign-in link, the host agent, the administrator setup wizard, diagnostics with history and the system health dashboard, the web emergency stop, Let's Encrypt DNS-01 automation, scheduled encrypted off-host backups and restore rehearsals, log shortcuts, help and tutorials, address batches (10,000 addresses) with separate state dimensions and staged sends, and the re-permission page. **Outstanding:** the real VPS steps, and ctnlist's handling of `repermission.responded`. |
 | Dashboard redesign | **Complete** (v0.2.2; owner decision, specification `user_interfaces.dashboard_layout`). Every page in one full-width shell with area buttons and page pills, Chart.js charts, global search, a period choice on both overviews, a submission-rate chart and times, quota days and billing months in the installation time zone. [Screenshots](docs/screenshots/README.md). |
 | Time zone, configuration and settings | **Complete** (v0.2.3; owner decisions). Every time — database sessions, API and webhook timestamps, exports, every service's logs, Postfix, file names, quota and billing days — is in `SMARTHOST_TIMEZONE` (SAST by default, offset `+02:00`). `infra/.env` holds only the operator's settings under plain headings (`smarthostctl env-migrate` converts an older file and keeps it as `infra/.env.v<version>-<date and time>`). System › Settings overrides 69 operational settings without changing the file, with a reason and an audit record for every change. |
+| Application connect | **Implemented** (v0.2.6; owner instruction, specification 2.12). An application is connected by one approval of a client admin, in an authorisation-code flow with PKCE: the connect page `/dashboard/connect` (sign-in, or account creation while `APP_PUBLIC_ONBOARDING_ENABLED` is true, returning to the connect step), a single-use code of 10 minutes, `POST /v1/connect/exchange` returning the API key and the webhook signing secret once, `DELETE /v1/connection`, and the client page Settings › Connected applications. Also `GET /v1/sending-domains`, and the acceptable use policy at `/acceptable-use-policy`. `smarthostctl test phase2` covers it (`ConnectTest`, `ConnectRequestTest`, `SendingDomainApiTest`, `PolicyPageTest`). **Not yet proven on a VPS, and no application uses it yet**: ctnlist's side is the next step. |
 | Public sign-up | **Implemented** (v0.2.5; owner decision). With `APP_PUBLIC_ONBOARDING_ENABLED=true`, members of the public sign up with an organisation and an email address, confirm the emailed single-use link, accept the service policy and land in an active client in a starter tier with low limits (editable in System › Settings), with next steps to their first domain, API key and webhook. Rate limits per IP and per address, a honeypot and no account enumeration; the operator is emailed and sees sign-ups in Clients › Clients and *Needs attention*. Off by default. `smarthostctl test phase2` covers it (`PublicSignUpTest`). **Not yet proven on a VPS.** |
 | Sending domains in the client dashboard | **Implemented** (v0.2.4; owner decision). A client admin adds a domain within the client's limit, and verification requests its DKIM key from the host agent. The agent generates the key inside OpenDKIM. The page shows the DKIM, DMARC and SPF guidance, and the key is activated when the record appears in DNS: from *Check DNS now*, or by the host agent's periodic check. `smarthostctl test phase2` covers adding, the limit, the request and activation, and isolation between clients. **Not yet proven on a VPS.** |
 

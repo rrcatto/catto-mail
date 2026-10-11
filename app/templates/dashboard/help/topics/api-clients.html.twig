@@ -8,5 +8,14 @@
 <li>The client's admin adds and verifies its sending domain under Settings › Sending domains; the host agent generates and activates its DKIM key (see <a href="{{ path('dashboard_operator_help_topic', {topic: 'sending-domains'}) }}">Sending domains</a>).</li>
 <li>The client application calls the API with <code>Authorization: Bearer &lt;key&gt;</code>. The full contract and the integration guide are public at <a href="/docs/api">/docs/api</a>.</li>
 </ol>
+<h2>Connecting an application without copying a key</h2>
+<p>An application that supports it does steps 3 and the webhook endpoint by itself. It sends a client admin to this installation's connect page (<code>/dashboard/connect</code>), which shows the application's name, the site it returns to and the address its webhooks go to. The admin signs in (or, while public sign-up is on, opens an account there and then), chooses the workspace and presses <em>Connect</em>. The application then collects its API key and its webhook signing secret itself, with a code that works once, for 10 minutes.</p>
+<ul>
+<li>Only a client admin can connect an application, and only to an <em>active</em> client with room under its limits on usable API keys and webhook endpoints. If there is no room, the page says so and nothing is created.</li>
+<li>The API key (named after the application) and the webhook endpoint appear when the application collects its credentials, not at the approval. An approval that is never collected leaves nothing behind.</li>
+<li>The client workspace lists the connections under Settings › Connected applications. <em>Disconnect</em> there revokes the key and removes the endpoint; the application can also disconnect itself.</li>
+<li>Connecting the same application again (the same webhook address) replaces its earlier connection.</li>
+<li>Connecting never lets a client report recipients' global opt-outs: you grant that yourself.</li>
+</ul>
 <p>Client states: <em>pending approval</em> (reads only), <em>active</em>, <em>throttled</em> (works, more slowly), <em>suspended</em> (reads only; running sends stop), <em>closed</em> (keys stop working). See the onboarding guide <code>docs/production/onboarding.md</code>.</p>
 {% endblock %}

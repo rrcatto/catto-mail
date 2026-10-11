@@ -51,6 +51,8 @@ final class VocabularyConstraintTest extends TestCase
         'address_batch_entry_outcome' => ['address_batch_entries.outcome'], 'consent_state' => ['address_batch_entries.consent_state'],
         'batch_review_decision' => ['address_batch_entries.review_decision'], 'typo_decision' => ['address_batch_entries.typo_decision'],
         'batch_send_stage' => ['address_batch_sends.stage'],
+        // Specification 2.12
+        'application_connection_status' => ['application_connections.status'],
     ];
 
     /** @return array<string, list<string>> */

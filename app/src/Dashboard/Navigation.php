@@ -61,6 +61,7 @@ final class Navigation
             ['domains', 'Sending domains', 'dashboard_client_domains'],
             ['api_keys', 'API keys', 'dashboard_client_api_keys'],
             ['webhooks', 'Webhooks', 'dashboard_client_webhooks'],
+            ['connections', 'Connected applications', 'dashboard_client_connections'],
         ]],
         'usage' => ['Usage', 'usage', [['usage', 'Usage & limits', 'dashboard_client_usage']]],
     ];

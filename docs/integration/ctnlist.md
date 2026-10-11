@@ -1,9 +1,10 @@
 # Integrating ctnlist with catto-mail
 
-Specification 2.11. This describes the integration of the ctnlist mailing-list application with
+Specification 2.12. This describes the integration of the ctnlist mailing-list application with
 catto-mail: what each side owns, the API calls and webhook events, what ctnlist already does,
-and the **ctnlist-side work that is still outstanding** for the re-permission workflow. The
-ctnlist repository is maintained separately; nothing in it was changed as part of this work.
+and the **ctnlist-side work that is still outstanding**. The ctnlist repository
+(`github.com/rrcatto/ctnlist`) is maintained separately, with its own instructions, tests and
+releases.
 
 ## Responsibilities
 
@@ -18,7 +19,7 @@ catto-mail  = validation, sending, suppression, delivery events, bounces, compla
 They never share a database. ctnlist uses catto-mail only through the authenticated API
 (`/v1`, an API key of the ctnlist client) and receives signed webhooks.
 
-## What ctnlist already does (read from its repository, release 6.0.5)
+## What ctnlist already does (read from its repository, release 6.0.9)
 
 | Concern | catto-mail API / event | ctnlist |
 |---|---|---|
@@ -30,6 +31,33 @@ They never share a database. ctnlist uses catto-mail only through the authentica
 
 Ordinary list unsubscribes stay in ctnlist (its unsubscribe links), as catto-mail requires: they
 are never reported to catto-mail as global opt-outs.
+
+ctnlist tests this against its own hand-written fake of the `/v1` API. The two applications have
+not been run together end to end. ctnlist was written against OpenAPI 1.0.0-draft.7; where it is
+behind the contract is listed under *Outstanding ctnlist work*.
+
+## Connecting ctnlist with one approval (catto-mail side implemented, specification 2.12)
+
+Until now an administrator copied catto-mail's API key and webhook signing secret into ctnlist's
+`.env` by hand (`CATTOMAIL_API_KEY`, `CATTOMAIL_WEBHOOK_SECRET`). catto-mail now offers an
+authorisation-code flow with PKCE instead (integration guide, section 15):
+
+1. ctnlist sends its administrator's browser to `https://<catto-mail>/dashboard/connect` with
+   `application_name`, `redirect_uri` (a ctnlist route), `webhook_url`
+   (`<APP_BASE_URL>cattomail/webhook`), `state`, `code_challenge` and
+   `code_challenge_method=S256`.
+2. The administrator signs in to catto-mail (or opens an account, where public sign-up is on),
+   chooses the client workspace and approves.
+3. catto-mail redirects back with `code` and `state`; ctnlist exchanges the code with
+   `POST /v1/connect/exchange` and receives the API key, the webhook signing secret, the API
+   base URL and the client's sending domains, once.
+4. ctnlist can end the connection with `DELETE /v1/connection`, and read the client's sending
+   domains at any time with `GET /v1/sending-domains` (`can_send` says whether a From domain can
+   send now).
+
+The webhook endpoint this creates is subscribed to the six events ctnlist handles today, not to
+`repermission.responded`: a client admin adds that event in catto-mail (Settings › Webhooks)
+once ctnlist handles it.
 
 ## Re-permission: the catto-mail side (implemented)
 
@@ -69,6 +97,28 @@ carries the answer current at delivery time: apply the newest `responded_at` and
 ones. Delivery is at least once: de-duplicate by the event id, as for every event.
 
 ## Outstanding ctnlist work
+
+### Connect
+
+1. **The connect flow in ctnlist**: a "Connect to catto-mail" action for administrators (state
+   and code verifier kept server-side, the callback route, the exchange), storing the received
+   key and secret where ctnlist keeps its secrets, a disconnect action, and a warning from
+   `GET /v1/sending-domains` before sending from a domain that cannot send.
+2. **`FakeCattoMail`** extended with `POST /v1/connect/exchange`, `DELETE /v1/connection` and
+   `GET /v1/sending-domains` as the contract defines them.
+
+### Contract 1.0.0-draft.8 to draft.10
+
+3. **`429 quota-exceeded`** is handled like a rate limit: ctnlist retries in place and then on
+   every worker pass until the quota resets. It should stop retrying until the problem's
+   `quota.resets_at` and tell the administrator which quota was reached.
+4. **Limits below the contract ceilings.** ctnlist assumes 10,000 recipients per send job and
+   500 per batch. A client's `max_recipients_per_send_job` or the installation's
+   `APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH` can be lower; the batch that passes the limit is
+   refused (`422`, `recipient-limit-exceeded` or `batch-too-large`) and ctnlist marks the whole
+   job refused.
+
+### Re-permission
 
 1. **Subscribe the endpoint to the event.** In catto-mail, a ctnlist client admin adds
    `repermission.responded` to the ctnlist webhook endpoint's events (client workspace: Settings › Webhooks).

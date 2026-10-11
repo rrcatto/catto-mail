@@ -71,6 +71,8 @@ class WebhookEndpoint implements TenantOwned
     public function getUrl(): string { return $this->url; }
     public function getStatus(): WebhookEndpointStatus { return $this->status; }
     public function isEnabled(): bool { return WebhookEndpointStatus::Enabled === $this->status; }
+    /** Terminal: the endpoint of an ended application connection (specification 2.12). */
+    public function isRemoved(): bool { return WebhookEndpointStatus::Removed === $this->status; }
     /** @return list<string> */
     public function getSubscribedEventTypes(): array { return $this->subscribedEventTypes; }
     public function getSigningSecretCiphertext(): string { return $this->signingSecretCiphertext; }

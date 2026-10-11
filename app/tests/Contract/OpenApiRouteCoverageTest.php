@@ -47,7 +47,8 @@ final class OpenApiRouteCoverageTest extends KernelTestCase
             'MessageEventType' => \App\Enum\MessageEventType::class, 'WebhookEventType' => \App\Enum\WebhookEventType::class,
             'OverallClassification' => \App\Enum\OverallClassification::class, 'TypoReasonCode' => \App\Enum\TypoReasonCode::class,
             'SyntaxStatus' => \App\Enum\SyntaxStatus::class, 'DomainStatus' => \App\Enum\DomainStatus::class,
-            'SmtpStatus' => \App\Enum\SmtpStatus::class, 'ConfidenceLevel' => \App\Enum\ConfidenceLevel::class];
+            'SmtpStatus' => \App\Enum\SmtpStatus::class, 'ConfidenceLevel' => \App\Enum\ConfidenceLevel::class,
+            'SendingDomainStatus' => \App\Enum\SendingDomainStatus::class, 'DkimStatus' => \App\Enum\DkimStatus::class];
         foreach ($map as $schema => $enum) {
             self::assertSame($schemas[$schema]['enum'], array_column($enum::cases(), 'value'), $schema);
         }

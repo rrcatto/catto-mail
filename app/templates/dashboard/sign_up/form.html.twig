@@ -4,8 +4,11 @@
 <section class="narrow" aria-labelledby="signup-h">
     <h1 id="signup-h">Open a Catto Mail account</h1>
     {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    {% set back = return_to|default(null) ? {return_to: return_to} : {} %}
+    {% if back %}<p class="caveat">Once the account is open, you continue connecting the application.</p>{% endif %}
     <p>Validate address lists and send tracked mail from your own application through the API. Give your organisation's name and your email address: we email you a link, and the account opens when you use it. There is no password.</p>
     <form method="post" action="{{ path('dashboard_sign_up_request') }}" class="stack">
+        {% if back %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
         <label>Organisation
             <input type="text" name="organisation" value="{{ organisation }}" required minlength="2" maxlength="200" autocomplete="organization" autofocus>
         </label>
@@ -17,6 +20,6 @@
         <input type="hidden" name="_csrf_token" value="{{ csrf_token('sign-up') }}">
         <button type="submit">Email me the confirmation link</button>
     </form>
-    <p class="muted small">New accounts start in a starter tier with low sending limits; the operator of this installation can raise them. Already have an account? <a href="{{ path('dashboard_login') }}">Sign in</a>.</p>
+    <p class="muted small">New accounts start in a starter tier with low sending limits; the operator of this installation can raise them. Already have an account? <a href="{{ path('dashboard_login', back) }}">Sign in</a>.</p>
 </section>
 {% endblock %}

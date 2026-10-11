@@ -33,6 +33,8 @@ use Symfony\Component\Security\Http\EntryPoint\AuthenticationEntryPointInterface
 final class ApiKeyAuthenticator extends AbstractAuthenticator implements AuthenticationEntryPointInterface
 {
     private const LAST_USED_GRANULARITY_SECONDS = 60;
+    /** App\Controller\Api\ConnectController::EXCHANGE_PATH; public in config/packages/security.yaml too. */
+    public const PUBLIC_OPERATION = '/v1/connect/exchange';
 
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -45,7 +47,9 @@ final class ApiKeyAuthenticator extends AbstractAuthenticator implements Authent
 
     public function supports(Request $request): ?bool
     {
-        return true; // every /v1 request must authenticate
+        // Every /v1 request must authenticate, except the connect exchange: the application that
+        // presents its single-use code has no API key yet (specification 2.12).
+        return self::PUBLIC_OPERATION !== $request->getPathInfo();
     }
 
     public function authenticate(Request $request): Passport

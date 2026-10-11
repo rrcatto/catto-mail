@@ -30,7 +30,7 @@ final class TenantFilter extends SQLFilter
             'client_memberships', 'sending_domains', 'api_keys', 'validation_jobs', 'send_jobs', 'usage_records',
             'webhook_endpoints', 'webhook_events', 'webhook_deliveries', 'domain_reputation',
             'global_suppression_requests', 'client_limits', 'client_quota_usage', 'client_policy_acceptances',
-            'billing_statements' => "$a.client_id = $c",
+            'billing_statements', 'application_connections' => "$a.client_id = $c",
             'billing_statement_lines' => "$a.statement_id IN (SELECT bs.id FROM billing_statements bs WHERE bs.client_id = $c)",
             // A client sees its own client-scoped rows and the global opt-outs it reported;
             // other global suppressions (system, operator, other reporters) are not tenant data (D-30).

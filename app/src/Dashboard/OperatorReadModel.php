@@ -402,7 +402,7 @@ final class OperatorReadModel
         $client['webhook_endpoints'] = $c->fetchAllAssociative(<<<'SQL'
             SELECT id::text AS id, url, status, subscribed_event_types, created_at, updated_at,
                    previous_signing_secret_expires_at IS NOT NULL AND previous_signing_secret_expires_at > now() AS rotation_overlap
-              FROM webhook_endpoints WHERE client_id = ? ORDER BY created_at
+              FROM webhook_endpoints WHERE client_id = ? AND status <> 'removed' ORDER BY created_at
             SQL, [$clientId]);
 
         return $client;

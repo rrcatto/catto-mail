@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Controller\Dashboard;
 
+use App\Connect\ConnectRequest;
 use App\Dashboard\ClientAccess;
 use App\Security\LoginLinkService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -20,6 +22,9 @@ use Symfony\Component\Security\Http\Util\TargetPathTrait;
  * passwords. An operator creates users in the dashboard, the public sign-up creates its client
  * admins when it is turned on (PublicSignUpController), and APP_ADMIN_EMAIL can always sign in. Sign-out is a POST with a
  * CSRF token (the firewall's logout listener handles it).
+ *
+ * Someone who came from the connect page (specification 2.12) carries `return_to`, a connect
+ * path and nothing else (ConnectRequest::returnPath): the sign-in link leads back there.
  */
 #[Route('/dashboard')]
 final class DashboardController extends AbstractController
@@ -29,30 +34,34 @@ final class DashboardController extends AbstractController
     public const CSRF_LOGIN = 'login-link';
 
     #[Route('/login', name: 'dashboard_login', methods: ['GET'])]
-    public function login(AuthenticationUtils $authenticationUtils): Response
+    public function login(Request $request, AuthenticationUtils $authenticationUtils): Response
     {
+        $returnTo = ConnectRequest::returnPath($request->query->getString('return_to'));
         if (null !== $this->getUser()) {
-            return $this->redirectToRoute('dashboard_home');
+            return null !== $returnTo ? new RedirectResponse($returnTo) : $this->redirectToRoute('dashboard_home');
         }
         $error = $authenticationUtils->getLastAuthenticationError();
 
-        return $this->render('dashboard/login.html.twig', ['error' => $error?->getMessageKey()]);
+        return $this->render('dashboard/login.html.twig', ['error' => $error?->getMessageKey(), 'return_to' => $returnTo]);
     }
 
     /** Always answers the same way, whether or not a link was sent (no account enumeration). */
     #[Route('/login', name: 'dashboard_login_request', methods: ['POST'])]
     public function requestLink(Request $request, LoginLinkService $links): Response
     {
+        $returnTo = ConnectRequest::returnPath($request->request->getString('return_to'));
+        $back = null === $returnTo ? [] : ['return_to' => $returnTo];
         if (!$this->isCsrfTokenValid(self::CSRF_LOGIN, $request->request->getString('_csrf_token'))) {
             $this->addFlash('error', 'The form expired. Please try again.');
 
-            return $this->redirectToRoute('dashboard_login');
+            return $this->redirectToRoute('dashboard_login', $back);
         }
         // Symfony remembers the page an anonymous visitor asked for as an absolute URL;
         // only its path (and query) is kept, and LoginLinkService accepts /dashboard paths only.
+        // The connect page names its own way back with the form instead (return_to).
         $target = $this->getTargetPath($request->getSession(), 'dashboard');
-        $returnPath = null;
-        if (null !== $target) {
+        $returnPath = $returnTo;
+        if (null === $returnPath && null !== $target) {
             $parts = parse_url($target);
             $returnPath = ($parts['path'] ?? '').(isset($parts['query']) ? '?'.$parts['query'] : '');
         }
@@ -61,7 +70,7 @@ final class DashboardController extends AbstractController
         } catch (\RuntimeException $e) {
             $this->addFlash('error', $e->getMessage());
 
-            return $this->redirectToRoute('dashboard_login');
+            return $this->redirectToRoute('dashboard_login', $back);
         }
 
         return $this->redirectToRoute('dashboard_login_sent');

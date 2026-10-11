@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smarthost contract consistency check (specification 2.7).
+"""Smarthost contract consistency check (the specification version in EXPECTED_SPEC_VERSION).
 
 Cross-checks the canonical YAML specification, the human specification and the
 normative contract files so they cannot drift silently:
@@ -51,8 +51,8 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.11"
-EXPECTED_SPEC_DATE = "2026-10-07"
+EXPECTED_SPEC_VERSION = "2.12"
+EXPECTED_SPEC_DATE = "2026-10-11"
 # Decisions that must be incorporated across the revision history (all of D-01..D-38).
 EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
 
@@ -90,6 +90,8 @@ OPENAPI_ENUMS = {
     "MessageStatus": "message_status",
     "MessageEventType": "message_event_type",
     "WebhookEventType": "webhook_event_type",
+    "SendingDomainStatus": "sending_domain_status",
+    "DkimStatus": "dkim_status",
 }
 OPENAPI_COUNT_OBJECTS = {
     "ClassificationCounts": "overall_classification",
@@ -160,6 +162,8 @@ DDL_ENUMS = {
     ("address_batch_entries", "review_decision"): "batch_review_decision",
     ("address_batch_entries", "typo_decision"): "typo_decision",
     ("address_batch_sends", "stage"): "batch_send_stage",
+    # Specification 2.12
+    ("application_connections", "status"): "application_connection_status",
 }
 
 ENV_CONSUMERS = {"app", "webhook-worker", "validator", "delivery", "postfix", "opendkim", "deployment",

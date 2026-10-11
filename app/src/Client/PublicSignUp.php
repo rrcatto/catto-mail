@@ -79,20 +79,23 @@ final class PublicSignUp
     }
 
     /**
+     * @param string|null $returnPath where the person was going (the connect page, specification 2.12);
+     *                                the emailed link leads back there once the account is open
+     *
      * @return 'sent'|'limited'|'taken' what happened (for tests and logs; the page never says)
      */
-    public function request(string $organisation, string $email, ?string $clientIp): string
+    public function request(string $organisation, string $email, ?string $clientIp, ?string $returnPath = null): string
     {
         $this->assertEnabled();
         [$organisation, $email] = self::valid($organisation, $email);
         if ($this->isTaken($email)) {
             // Its owner gets an ordinary sign-in link (when the address is a user that may sign in).
-            $this->links->request($email, $clientIp);
+            $this->links->request($email, $clientIp, $returnPath);
 
             return 'taken';
         }
 
-        return $this->links->requestSignUp($email, $organisation, $clientIp) ? 'sent' : 'limited';
+        return $this->links->requestSignUp($email, $organisation, $clientIp, $returnPath) ? 'sent' : 'limited';
     }
 
     /** An address that already belongs to an account: a user, or a contact of a client. */
@@ -122,7 +125,7 @@ final class PublicSignUp
     /**
      * Opens the account of a sign-up link.
      *
-     * @return array{client: Client, user: User}
+     * @return array{client: Client, user: User, return_path: ?string}
      */
     public function complete(string $token, bool $policyAccepted): array
     {
@@ -153,7 +156,7 @@ final class PublicSignUp
                 'public sign-up: activated automatically into the starter tier (owner decision 2026-10-11)');
             $this->audit->record(AuditActor::user($user), 'auth.login', 'user', $user->getId()->toRfc4122(), ['method' => 'public_sign_up']);
 
-            return ['client' => $client, 'user' => $user];
+            return ['client' => $client, 'user' => $user, 'return_path' => $claimed['return_path']];
         });
         $this->notifyOperator($result['client'], $result['user']);
 

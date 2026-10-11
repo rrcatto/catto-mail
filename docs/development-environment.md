@@ -633,6 +633,20 @@ scenario A passed 4/4 on its re-run. Every
 screenshot was retaken at 0.2.3. The installer test was not run (the engine host has only 65,536
 subordinate IDs).
 
+Latest runs (v0.2.6, application connect, the sending-domains API and the acceptable use policy
+page, on the local Podman 4.9.3 engine): `test phase2` 374 tests and 6,586 assertions; `test
+phase3` 298 pytest tests and the 10,000-address run; `test phase4` the Go units and 34 integration
+tests; `test phase8` 29/29 (81 unit tests); `check-contracts` 2,922; `verify` 175/176 (T06, §1),
+after `build` and `recreate`. The connect flow was also run by hand against the pod, through nginx,
+with the public pages and API only: a visitor's connect page, a refused webhook address, sign-in
+from the connect page and the return to it, the approval, a wrong code verifier, the exchange, a
+second exchange of the same code, the new key on `GET /v1/sending-domains`, a second connection
+that disconnected itself, the client's Connected applications page and a declined request. The
+development client was at its API-key limit at first (ten keys from earlier bootstrap runs), and
+the page refused it as designed. The e2e suites against the pod, the rehearsal and the installer
+test were not run. The four new pages were photographed with headless Firefox
+(`docs/screenshots/`); the other screenshots were not retaken.
+
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender
 `bounce@<bounce domain>`, while the header From stays `editor@smarthost-dev.test`, so the DKIM

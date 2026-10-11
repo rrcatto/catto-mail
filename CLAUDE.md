@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.11) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.12) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -121,8 +121,9 @@ points span components and need several files to see:
   webhook worker is `smarthost:webhook:work` (`app/src/Webhook/`, `WebhookWorkCommand`), with client
   and operator webhook dashboard pages. `infra/bin/smarthostctl test phase7-e2e` proves the client
   workflow through the API and signed webhooks only, with the external receiver fixture in
-  `tests/webhook-receiver/`. Integrating the real first client application (its own repository) is
-  outstanding.
+  `tests/webhook-receiver/`. The first client application, ctnlist, implements its side in its own
+  repository; the two have not been run together end to end (see *ctnlist, the first client
+  application*).
 - **Phase 8** (controlled production launch, spec 2.9): repository side implemented (v0.1.8).
   - Production topology: `infra/podman/smarthost-production.sh.in`, standalone containers on
     internal and egress networks.
@@ -171,7 +172,71 @@ points span components and need several files to see:
   (`PublicSignUpController`, `App\Client\PublicSignUp`, `PublicSignUpTest`); a client's unfinished domain is a preflight WARN, never blocking (only
   the `APP_MAIL_FROM` domain must have its key); `prod dkim activate` reloads OpenDKIM (SIGUSR1,
   confirmed by `smarthost_preflight.py --dkim-probe`) and restarts it only as the fallback.
+- **Application connect** (v0.2.6, owner instruction, spec 2.12 `api.connect`): an application is
+  connected by one approval of a client admin, in an authorisation-code flow with PKCE.
+  `App\Connect\` (`ConnectRequest`, `ConnectService`), the connect page `/dashboard/connect`
+  (`Dashboard\ConnectController`, `templates/dashboard/connect/`), `POST /v1/connect/exchange` and
+  `DELETE /v1/connection` (`Api\ConnectController`), Settings › Connected applications
+  (`ClientConnectionController`), `GET /v1/sending-domains` (`Api\SendingDomainController`,
+  `App\Sending\SendingDomainRule`), table `application_connections`; tests `ConnectTest`,
+  `ConnectRequestTest`, `SendingDomainApiTest`. The acceptable use policy is `/acceptable-use-policy`
+  (`PolicyController`, `App\Util\Markdown`, built from `docs/AUP.md`; `PolicyPageTest`). No
+  application uses the flow yet: ctnlist's side is outstanding (`docs/integration/ctnlist.md`).
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
+
+## ctnlist, the first client application
+ctnlist (`github.com/rrcatto/ctnlist`, a separate public repository) is the mailing-list application
+that sends its campaigns through catto-mail. `docs/integration/ctnlist.md` is this repository's
+record of the integration: what each side owns, what ctnlist does, and the ctnlist work that is
+outstanding. Keep it current when either side changes.
+- **The seam is the public contract only:** `/v1` (`docs/api/openapi.v1.yaml`) and the signed
+  webhooks. ctnlist never reads this database, and catto-mail never calls ctnlist except to
+  deliver a webhook. Never add a ctnlist-specific endpoint, field, table or shortcut: what ctnlist
+  needs, every client gets, through the specification and the contract.
+- **ctnlist is changed from here only when the owner asks for it in that task.** Its checkout is
+  usually beside this one (`../ctnlist`). It has its own `CLAUDE.md` files (read them first; its
+  rules differ from this repository's), its own gate (`bin/dev check`) and its own commits and
+  versions. Without that instruction, specify the ctnlist work in `docs/integration/ctnlist.md`.
+- **A contract change has a second half in ctnlist.** Its tests never reach a real catto-mail:
+  they run against `tests/Support/FakeCattoMail.php`, a hand-written fake of `/v1`, and
+  `src/CattoMail/CattoMailClient.php` is its only HTTP caller. A green suite here says nothing
+  about ctnlist. After changing the OpenAPI document, the vocabulary, a limit, a problem type or
+  a webhook payload, name the ctnlist files that must follow, or change them when asked.
+- **What ctnlist relies on beyond the schemas** (keep these, or change both sides together):
+  - A resource that does not exist answers `404` only to an authenticated request, and a refused
+    key answers `401`: ctnlist's connection check reads a send job that cannot exist
+    (`GET /v1/send-jobs/00000000-0000-7000-8000-000000000000`), because the API has no health
+    endpoint.
+  - It retries `408`, `425`, `429`, `5xx` and a `409` whose problem type ends in
+    `idempotency-in-progress`, with the same `Idempotency-Key` and body, and reads `Retry-After`
+    as whole seconds. Every other `4xx` is a final refusal of that job, batch or opt-out.
+  - It tells an administrator that the From domain is not registered from an `errors` pointer
+    that starts with `/sender_identity`.
+  - It assumes the contract ceilings as constants (500 recipients per batch, 10,000 per send job
+    and per validation job, 10 MiB per request) and cuts its own batches at 8 MiB.
+  - It matches results by reference only: messages by `external_recipient_reference`, validation
+    results by `external_address_reference`.
+  - Its webhook endpoint verifies `Smarthost-Signature` before parsing, de-duplicates on
+    `Smarthost-Event-Id`, refuses bodies over 1 MiB, and records and ignores event types it does
+    not know.
+- **Where ctnlist is behind the contract** (ctnlist 6.0.9, written against OpenAPI
+  1.0.0-draft.7; the contract is 1.0.0-draft.10):
+  - It does not use the connect flow, `DELETE /v1/connection` or `GET /v1/sending-domains` yet: its
+    key and webhook secret are copied into its `.env` by hand.
+  - `repermission.responded` is recorded and ignored. The handling is specified in
+    `docs/integration/ctnlist.md` (*Outstanding ctnlist work*).
+  - `429 quota-exceeded` is handled like `rate-limited`: retried in place, then by ctnlist's
+    worker on every pass until the quota resets. The quota appears only in the text of its last
+    API error.
+  - A limit set below a contract ceiling (a client's `max_recipients_per_send_job`, the
+    installation's `APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH`) is not known to ctnlist: the batch
+    that passes it is refused with `422`, and ctnlist marks the whole job refused.
+- **Development route.** The two development stacks are separate. ctnlist's `bin/dev
+  cattomail-link` creates an internal Podman network, `cattomail-dev`, and expects this pod on it
+  with the alias `catto-mail`, `ctnlist-web` in `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, and a client
+  with a sending domain, an API key and a webhook endpoint `http://ctnlist-web/cattomail/webhook`
+  (ctnlist README, *catto-mail development route*). This repository has no command for its half
+  yet: the development pod joins only `smarthost-internal`.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -343,6 +408,26 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - Reputation alerts never act on a client.
   - `client_notes`, `client_reputation_metrics` and `client_alerts` are operator-only: never
     show them to clients (the tenant filter denies them).
+- **Application connect (spec 2.12).**
+  - The API key and the webhook endpoint of a connection are created by the exchange
+    (`ConnectService::exchange`), never by the approval: an API key is stored only as a hash, so
+    its raw value exists only in the response that hands it over. Never store a raw key, code or
+    code verifier, and never put a key or secret in a redirect, a log or the audit log.
+  - Approval is POST + CSRF by a client admin (a `client_memberships` admin, not a platform
+    permission) of an `active` client, within `max_api_keys` and `max_webhook_endpoints`. The
+    connect page's GET stores nothing and never redirects to an address it did not accept.
+  - A code is single use (row lock in the exchange) and lives 10 minutes. Every reason it is not
+    accepted is the same `400 invalid-connect-code`: keep it one answer.
+  - `POST /v1/connect/exchange` is the only `/v1` operation without an API key
+    (`ApiKeyAuthenticator::PUBLIC_OPERATION` and the `access_control` rule in `security.yaml`:
+    change both together). Do not add another.
+  - The connect page is `PUBLIC_ACCESS`; sign-in and sign-up accept `return_to` only when it is a
+    connect path (`ConnectRequest::returnPath`, which also makes it canonical). Never widen it.
+  - Ending a connection revokes its key and sets its endpoint to `removed` (terminal:
+    `WebhookEndpointService::remove`, called only from `ConnectService`). A removed endpoint is
+    never listed, changed or counted against a limit; its row stays for the delivery history.
+  - Connecting never grants `clients.can_submit_global_suppressions`: only an operator does.
+  - An existing `/v1` operation must not change for the sake of a client application.
 - **Suppressions (D-30).** Automatic suppressions and recipient global opt-outs are global
   (`client_id` NULL); the opt-out reporter is `source_client_id`. Only Go creates `hard_bounce`,
   `complaint` and `repeated_soft_bounce`, through the one policy in `delivery/internal/store/policy.go`;

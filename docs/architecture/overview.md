@@ -1,6 +1,6 @@
 # Smarthost Architecture Overview
 
-**Status:** summary of specification 2.11. The authoritative sources are
+**Status:** summary of specification 2.12. The authoritative sources are
 `docs/20260908-1644-smarthost-llm-spec.yaml` and its human-readable companion
 `docs/20260908-1644-smarthost-human-specification.md`. If this page disagrees with them, they win.
 It adds no architecture of its own. It maps the specification onto the contract files and shows
@@ -18,6 +18,7 @@ the main flows on one page.
 | Global suppression policy, recipient global opt-out (D-30) | `suppression_and_reputation.global_suppression_policy`, `api.authentication.capabilities` | `docs/contracts/status-vocabulary.yaml`, `docs/api/openapi.v1.yaml`, `docs/schema/schema.md` |
 | Client lifecycle, limits and quotas, usage and billing statements, reputation alerts (Phase 9) | `saas_operations` | `docs/contracts/status-vocabulary.yaml`, `docs/schema/schema.md`, `docs/contracts/environment.md`, `docs/production/onboarding.md` |
 | Installer, host agent, setup wizard, diagnostics, emergency stop, backups, certificates, help, address batches, re-permission (Phase 10) | `operator_self_service` | `docs/production/VPS-INSTALL.md`, `docs/production/components.md`, `docs/production/architecture.md`, `docs/contracts/status-vocabulary.yaml` (`operator_address_states`), `docs/schema/schema.md`, `docs/integration/ctnlist.md` |
+| Application connect: the connect page, approval, code exchange, disconnection; the sending-domains endpoint (2.12) | `api.connect` | `docs/api/openapi.v1.yaml`, `docs/api/integration-guide.md`, `docs/schema/schema.md` (`application_connections`), `docs/integration/ctnlist.md` |
 | Cross-language conventions | `instruction_for_llm.implementation_style` | `docs/architecture/conventions.md` |
 | Decision history (log only, not authority) | `revision_history` | `docs/architecture/open-decisions.md` |
 

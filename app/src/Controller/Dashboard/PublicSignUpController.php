@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller\Dashboard;
 
 use App\Client\PublicSignUp;
+use App\Connect\ConnectRequest;
 use App\Domain\DomainRuleViolation;
 use App\Security\LoginLinkAuthenticator;
 use App\Security\LoginLinkService;
@@ -35,6 +36,10 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * The verification page and its confirmation share 20 attempts an hour per client IP; the
  * confirmation also 5 an hour per address. Nothing secret (the token) is logged.
+ *
+ * Someone who came from the connect page (specification 2.12) carries `return_to`, a connect
+ * path and nothing else (ConnectRequest::returnPath): it travels with the form into the emailed
+ * link, and confirming leads back to the connect step instead of the client's overview.
  */
 #[Route('/dashboard/sign-up')]
 final class PublicSignUpController extends AbstractController
@@ -54,24 +59,27 @@ final class PublicSignUpController extends AbstractController
     }
 
     #[Route('', name: 'dashboard_sign_up', methods: ['GET'])]
-    public function form(): Response
+    public function form(Request $request): Response
     {
         $this->assertOpen();
+        $returnTo = ConnectRequest::returnPath($request->query->getString('return_to'));
         if (null !== $this->getUser()) {
-            return $this->redirectToRoute('dashboard_home');
+            return null !== $returnTo ? new RedirectResponse($returnTo) : $this->redirectToRoute('dashboard_home');
         }
 
-        return $this->render('dashboard/sign_up/form.html.twig', ['organisation' => '', 'email' => '', 'error' => null]);
+        return $this->render('dashboard/sign_up/form.html.twig', ['organisation' => '', 'email' => '', 'error' => null, 'return_to' => $returnTo]);
     }
 
     #[Route('', name: 'dashboard_sign_up_request', methods: ['POST'])]
     public function request(Request $request): Response
     {
         $this->assertOpen();
+        $returnTo = ConnectRequest::returnPath($request->request->getString('return_to'));
+        $back = null === $returnTo ? [] : ['return_to' => $returnTo];
         if (!$this->isCsrfTokenValid(self::CSRF_FORM, $request->request->getString('_csrf_token'))) {
             $this->addFlash('error', 'The form expired. Please try again.');
 
-            return $this->redirectToRoute('dashboard_sign_up');
+            return $this->redirectToRoute('dashboard_sign_up', $back);
         }
         if (!$this->publicSignUpLimiter->create($this->ipKey($request))->consume()->isAccepted()) {
             return $this->tooMany();
@@ -84,14 +92,14 @@ final class PublicSignUpController extends AbstractController
         $organisation = $request->request->getString('organisation');
         $email = $request->request->getString('email');
         try {
-            $this->signUp->request($organisation, $email, $request->getClientIp());
+            $this->signUp->request($organisation, $email, $request->getClientIp(), $returnTo);
         } catch (DomainRuleViolation $e) {
             return $this->render('dashboard/sign_up/form.html.twig', ['organisation' => mb_substr($organisation, 0, 200),
-                'email' => mb_substr($email, 0, 320), 'error' => $e->getMessage()], new Response('', Response::HTTP_UNPROCESSABLE_ENTITY));
+                'email' => mb_substr($email, 0, 320), 'error' => $e->getMessage(), 'return_to' => $returnTo], new Response('', Response::HTTP_UNPROCESSABLE_ENTITY));
         } catch (\RuntimeException $e) {
             $this->addFlash('error', $e->getMessage());
 
-            return $this->redirectToRoute('dashboard_sign_up');
+            return $this->redirectToRoute('dashboard_sign_up', $back);
         }
 
         return $this->redirectToRoute('dashboard_sign_up_sent');
@@ -144,6 +152,12 @@ final class PublicSignUpController extends AbstractController
         }
         $security->login($opened['user'], LoginLinkAuthenticator::class, 'dashboard');
         $request->getSession()->getFlashBag()->clear();
+        $returnTo = ConnectRequest::returnPath($opened['return_path']);
+        if (null !== $returnTo) {   // signed up from the connect page: back to the connect step
+            $this->addFlash('success', \sprintf('Welcome to Catto Mail. The account of %s is open.', $opened['client']->getCompanyName()));
+
+            return new RedirectResponse($returnTo);
+        }
         $this->addFlash('success', \sprintf('Welcome to Catto Mail. The account of %s is open; the steps below get you sending.', $opened['client']->getCompanyName()));
 
         return new RedirectResponse($this->generateUrl('dashboard_client_overview', ['clientId' => $opened['client']->getId()->toRfc4122()]));

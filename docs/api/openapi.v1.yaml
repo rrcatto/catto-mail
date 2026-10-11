@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.9
-  summary: Email validation and tracked delivery API (specification 2.11 contract).
+  version: 1.0.0-draft.10
+  summary: Email validation and tracked delivery API (specification 2.12 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.10), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.12), which wins on
     any conflict. A client-facing integration guide is `docs/api/integration-guide.md`
     (served by an installation at `/docs/api`). Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
@@ -13,6 +13,9 @@ info:
     ## Conventions
     * The client (tenant) is always derived from the API key. No request carries
       or overrides a `client_id`. Resources owned by another client return `404`.
+      One operation takes no API key: `POST /connect/exchange`, with which an
+      application that is being connected collects its key (see *Connecting an
+      application*).
     * Only `active` and `throttled` clients may create or add work. The
       work-creating operations (create validation job, create send job, add
       recipients, submit) return `403` for `pending_approval` and `suspended`
@@ -38,6 +41,51 @@ info:
       and reset time. Idempotent replays never count again. A per-client limit on
       recipients per send job may be lower than the contract ceiling of 10000; above
       it a batch is refused with `422` `recipient-limit-exceeded`.
+
+    ## Connecting an application (specification 2.12)
+    An application can be connected with one approval instead of a copied API key
+    and webhook secret: an authorisation-code flow with PKCE (RFC 7636, `S256`).
+
+    1. The application creates a random `state` and a code verifier (43 to 128
+       characters of `A-Z a-z 0-9 - . _ ~`), keeps both, and sends the person's
+       browser to the connect page of the installation, which is not part of `/v1`:
+
+       `GET https://<host>/dashboard/connect?application_name=…&redirect_uri=…&webhook_url=…&state=…&code_challenge=…&code_challenge_method=S256`
+
+       | Parameter | Value |
+       |---|---|
+       | `application_name` | 1 to 100 characters; shown to the person and used as the name of the API key. |
+       | `redirect_uri` | Absolute `https` URL of the application (at most 2000 characters, no credentials, no fragment): where the person is sent back to. |
+       | `webhook_url` | Absolute `https` URL (at most 2000 characters) that receives the application's webhooks. It must resolve to public addresses, like every webhook endpoint. |
+       | `state` | 1 to 512 printable ASCII characters without spaces; returned unchanged. |
+       | `code_challenge` | `BASE64URL(SHA-256(code verifier))` without padding (43 characters). |
+       | `code_challenge_method` | `S256`. |
+
+       Plain `http` URLs are accepted only by a development installation. A request
+       that is incomplete or refused is explained on the page; the person is never
+       redirected to a URL that was not accepted.
+    2. The person signs in (or, where the installation offers public sign-up, opens
+       an account there and then), chooses one of their client workspaces and
+       approves. Only a client admin can approve, and only for an `active` client
+       with room under its limits on usable API keys and webhook endpoints.
+    3. The person is sent back with `303 See Other` to
+       `redirect_uri?code=<code>&state=<state>`, or, after declining, to
+       `redirect_uri?error=access_denied&error_description=…&state=<state>`. The
+       code works once and expires 10 minutes after the approval. No key or secret
+       is ever in a redirect.
+    4. The application checks `state` and exchanges the code, server to server, with
+       `POST /connect/exchange`. The answer carries the API key and the webhook
+       signing secret, once. The key (named after the application) and the webhook
+       endpoint are created by that exchange, subscribed to `validation.completed`,
+       `validation.failed`, `send.completed`, `send.failed`, `message.hard_bounced`
+       and `message.complained`. An earlier connection of the same client to the
+       same `webhook_url` is ended at the same moment (its key revoked, its endpoint
+       removed), so connecting again replaces it.
+    5. The application ends its own connection with `DELETE /connection`; a client
+       admin can end it in the dashboard (Settings › Connected applications). Either
+       way the key is revoked and the endpoint removed.
+
+    Connecting never grants the global-opt-out capability: only an operator does.
 
     ## Send-job lifecycle (staged recipient upload)
     1. `POST /send-jobs` creates the job in `collecting` state with job-level
@@ -105,6 +153,12 @@ tags:
     description: >-
       Recipient global opt-outs reported by trusted clients (D-30). Requires the
       operator-granted global-opt-out capability.
+  - name: Connect
+    description: >-
+      Connecting an application with one approval (specification 2.12): the code
+      exchange and the application's own disconnection.
+  - name: Sending domains
+    description: The client's sending domains and whether they can send (read-only).
 
 paths:
   /validation-jobs:
@@ -349,7 +403,8 @@ paths:
       summary: Record a `webhook.test` event for one of the client's webhook endpoints.
       description: >-
         Endpoints are registered per client through the client dashboard (or the
-        audited console); endpoint management is not part of the public API. The
+        audited console), or created by the approval of an application connection;
+        endpoint management is not part of the public API. The
         request names exactly one endpoint (`webhook_endpoint_id`, required). The
         test event is written to the transactional outbox and delivered
         asynchronously by the Symfony webhook worker to that endpoint only; the
@@ -476,6 +531,97 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/GlobalSuppressionForbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /connect/exchange:
+    post:
+      tags: [Connect]
+      operationId: exchangeConnectCode
+      summary: Exchange the single-use code of an approved connection for its credentials.
+      description: >-
+        The one operation without an API key: the application presents the code from
+        its redirect, the PKCE code verifier whose `S256` challenge it gave to the
+        connect page, and the same redirect URI. On success the connection becomes
+        active: its API key and webhook endpoint are created in this request, and
+        the raw key and the signing secret are returned here and never again (store
+        them at once; the response is `Cache-Control: no-store`). An earlier
+        connection of the client to the same webhook URL is ended in the same
+        transaction. A code works once: after a successful exchange it answers 400
+        like an unknown one. Every reason a code is not accepted - unknown, used,
+        expired (10 minutes after the approval), its connection revoked, a wrong
+        code verifier or a different redirect URI - is the same 400
+        `invalid-connect-code`. 409 `connect-refused` means the code is good but the
+        connection cannot be made now (the client is no longer active, or its API-key
+        or webhook-endpoint limit was reached since the approval): nothing was
+        created, and the code stays usable until it expires. Requests are limited
+        per client address (429 `rate-limited`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConnectExchangeRequest'}
+      responses:
+        '200':
+          description: The connection is active; its credentials, shown once.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConnectCredentials'}
+        '400':
+          description: >-
+            Malformed request, or the code is not accepted (`invalid-connect-code`):
+            unknown, used, expired or revoked, or the code verifier or redirect URI
+            does not match.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: >-
+            The connection cannot be made now (`connect-refused`); nothing was created.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /connection:
+    delete:
+      tags: [Connect]
+      operationId: deleteConnection
+      summary: End the connection that issued this API key.
+      description: >-
+        For a connected application to disconnect itself: authenticated with the API
+        key its connection issued, it revokes that key and removes the connection's
+        webhook endpoint (no further events are delivered to it). Later requests with
+        the key fail with 401. Accepted in every client status that authenticates.
+        404 when the API key was not issued by a connection (a key created in the
+        dashboard belongs to none).
+      responses:
+        '204':
+          description: The connection is ended; the key is revoked and the endpoint removed.
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /sending-domains:
+    get:
+      tags: [Sending domains]
+      operationId: listSendingDomains
+      summary: The client's sending domains and whether each can send now.
+      description: >-
+        Read-only; domains are added and verified in the dashboard. Lets an
+        application warn before it sends from a domain that cannot send yet:
+        `can_send` is the submit rule of a send job applied to the domain as it is
+        now. A client has at most its sending-domain limit of domains, so the list
+        is not paginated; it is ordered by domain.
+      responses:
+        '200':
+          description: The domains.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendingDomainList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
 
 webhooks:
@@ -783,6 +929,12 @@ components:
         - open_recorded
         - click_recorded
         - dsn_unmatched
+    SendingDomainStatus:
+      type: string
+      enum: [pending, verified, disabled]
+    DkimStatus:
+      type: string
+      enum: [not_configured, pending_dns, active, disabled]
     WebhookEventType:
       type: string
       enum:
@@ -1210,6 +1362,106 @@ components:
         created_at: {$ref: '#/components/schemas/Timestamp'}
         lifted_at:
           oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+
+    # ---- sending domains and connect (specification 2.12) -----------------
+    SendingDomain:
+      type: object
+      additionalProperties: false
+      required: [id, domain, status, dkim_status, verified_at, can_send]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        domain: {type: string, description: Lower-case domain name.}
+        status:
+          $ref: '#/components/schemas/SendingDomainStatus'
+          description: >-
+            `pending` until the DNS TXT challenge matched, then `verified`; `disabled`
+            domains are never usable.
+        dkim_status:
+          $ref: '#/components/schemas/DkimStatus'
+          description: '`active` when the installation signs mail of this domain.'
+        verified_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+        can_send:
+          type: boolean
+          description: >-
+            Whether a send job whose sender is in this domain can be submitted now:
+            the domain is verified and not disabled and, on a production installation,
+            its DKIM status is `active`. False does not stop a job from being created
+            or filled; its submit answers 422 `submit-rejected` until this is true.
+
+    SendingDomainList:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/SendingDomain'}
+
+    ConnectExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, code_verifier, redirect_uri]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: The `code` of the redirect back from the connect page.
+        code_verifier:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: >-
+            The PKCE code verifier (RFC 7636: 43 to 128 characters of
+            `A-Z a-z 0-9 - . _ ~`) whose `S256` challenge was given to the connect page.
+        redirect_uri:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Exactly the `redirect_uri` given to the connect page.
+
+    ConnectCredentials:
+      type: object
+      additionalProperties: false
+      required: [connection_id, application_name, client_name, api_base_url, api_key, webhook, sending_domains]
+      description: >-
+        Everything a connected application needs, returned once. The API key and the
+        signing secret cannot be retrieved again: Smarthost stores the key only as a
+        hash. Global opt-out reporting is not part of a connection.
+      properties:
+        connection_id: {$ref: '#/components/schemas/Uuid'}
+        application_name: {type: string, maxLength: 100, description: As given to the connect page; the name of the API key.}
+        client_name: {type: string, description: The client workspace the person connected.}
+        api_base_url:
+          type: string
+          format: uri
+          description: The base URL of this API, ending in `/v1`.
+        api_key:
+          type: string
+          pattern: '^shk_[A-Za-z0-9_-]{43}$'
+          description: The `Authorization` bearer key of this connection.
+        webhook:
+          type: object
+          additionalProperties: false
+          required: [endpoint_id, url, signing_secret, events]
+          properties:
+            endpoint_id:
+              $ref: '#/components/schemas/Uuid'
+              description: The `webhook_endpoint_id` for `POST /webhooks/test`.
+            url: {type: string, description: The `webhook_url` given to the connect page.}
+            signing_secret:
+              type: string
+              pattern: '^whsec_[A-Za-z0-9_-]{43}$'
+              description: The secret of `Smarthost-Signature` for this endpoint.
+            events:
+              type: array
+              description: The event types the endpoint is subscribed to.
+              items: {$ref: '#/components/schemas/WebhookEventType'}
+        sending_domains:
+          type: array
+          description: The client's sending domains at this moment (as `GET /sending-domains`).
+          items: {$ref: '#/components/schemas/SendingDomain'}
 
     # ---- webhooks ---------------------------------------------------------
     WebhookTestRequest:

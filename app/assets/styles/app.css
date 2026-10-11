@@ -336,6 +336,7 @@ dl.facts dt { font-size: 13px; color: var(--muted); }
 dl.facts dd { margin: 2px 0 0; font-weight: 600; font-size: 1.05rem; overflow-wrap: anywhere; }
 dl.facts dd.lg { font-size: 26px; letter-spacing: -.02em; }
 dl.facts-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+dl.facts-1 { grid-template-columns: minmax(0, 1fr); }
 dl.rows { grid-template-columns: max-content minmax(0, 1fr); gap: 0 24px; margin: 6px 0; }
 dl.rows dt, dl.rows dd { padding: 10px 0; border-bottom: 1px solid var(--line-2); }
 dl.rows > dt:last-of-type, dl.rows > dd:last-of-type { border-bottom: 0; }
@@ -376,6 +377,9 @@ dl.rows > dt:last-of-type, dl.rows > dd:last-of-type { border-bottom: 0; }
 .readable { max-width: 52rem; }
 .readable p, .readable li { line-height: 1.65; }
 .readable h2 { margin-top: 1.8rem; }
+/* The acceptable use policy (/acceptable-use-policy): one readable column, centred in the grid. */
+.policy { justify-self: center; width: 100%; }
+.policy h1 { margin-top: 0; }
 .entity { display: flex; align-items: center; gap: 14px; }
 .entity .avatar { width: 52px; height: 52px; font-size: 16px; }
 

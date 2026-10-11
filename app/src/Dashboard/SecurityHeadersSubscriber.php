@@ -20,6 +20,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
 final class SecurityHeadersSubscriber
 {
     private const ATTRIBUTE = '_smarthost_csp_nonce';
+    private const FORM_ACTION = '_smarthost_csp_form_action';
 
     public function __construct(private readonly RequestStack $requests)
     {
@@ -38,6 +39,19 @@ final class SecurityHeadersSubscriber
         return $nonce;
     }
 
+    /**
+     * Lets the forms of this response also end at one other origin. The connect approval page
+     * needs it: its POST is answered with a redirect to the application, and browsers apply
+     * form-action to the redirects of a form submission.
+     */
+    public static function allowFormAction(Request $request, string $origin): void
+    {
+        if (1 !== preg_match('#^https?://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(:\d{1,5})?$#', $origin)) {
+            throw new \InvalidArgumentException('Not an origin.');
+        }
+        $request->attributes->set(self::FORM_ACTION, $origin);
+    }
+
     public static function isDashboard(Request $request): bool
     {
         return 1 === preg_match('#^/dashboard(/|$)#', $request->getPathInfo());
@@ -51,9 +65,11 @@ final class SecurityHeadersSubscriber
         }
         $nonce = $event->getRequest()->attributes->get(self::ATTRIBUTE);
         $script = "'self'".(\is_string($nonce) ? " 'nonce-$nonce'" : '');
+        $extra = $event->getRequest()->attributes->get(self::FORM_ACTION);
+        $formAction = "'self'".(\is_string($extra) ? ' '.$extra : '');
         $headers = $event->getResponse()->headers;
         $headers->set('Content-Security-Policy', "default-src 'none'; script-src $script; style-src 'self'; img-src 'self' data:; "
-            ."connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+            ."connect-src 'self'; font-src 'self'; form-action $formAction; frame-ancestors 'none'; base-uri 'none'");
         $headers->set('X-Frame-Options', 'DENY');
         $headers->set('X-Content-Type-Options', 'nosniff');
         $headers->set('Referrer-Policy', 'same-origin');

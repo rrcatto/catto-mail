@@ -69,7 +69,7 @@ the sign-in page included, shows it in the footer as the contact for the service
 
 ## 2. Install
 
-catto-mail is installed from an exact **release**: a Git tag such as `v0.2.5`, which always
+catto-mail is installed from an exact **release**: a Git tag such as `v0.2.6`, which always
 names the same code (unlike the `main` branch, which moves). List the releases:
 
 ```sh
@@ -80,7 +80,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.5`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.6`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -529,6 +529,9 @@ Start with your seed addresses, then a controlled sample — never a whole list.
 - **From 0.2.4 or earlier to 0.2.5 or later**, `env-migrate` adds the group *Public sign-up*
   to `infra/.env` (`APP_PUBLIC_ONBOARDING_ENABLED=false` and the starter limits): public
   sign-up stays off until you turn it on (onboarding guide, *Public sign-up*).
+- **From 0.2.5 or earlier to 0.2.6 or later**, nothing changes in `infra/.env`. The upgrade adds
+  one table (application connections) and the acceptable use policy page, built from
+  `docs/AUP.md`: replace that file with your own policy before `prod upgrade` builds the images.
 - **Rollback:**
   ```sh
   git checkout v<previous>

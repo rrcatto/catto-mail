@@ -1,7 +1,7 @@
 project:
   name: Smarthost
-  specification_version: "2.11"
-  specification_date: "2026-10-07"
+  specification_version: "2.12"
+  specification_date: "2026-10-11"
   original_specification_date: "2026-09-08"
   version_note: >-
     The specification version is a documentation/specification revision number. It is not a
@@ -71,6 +71,10 @@ integration_context:
       - segmentation
       - unsubscribe state
       - per-recipient unsubscribe URLs and the one-click unsubscribe endpoint
+      - >-
+        obtaining its API key and webhook signing secret either from a client admin (copied from
+        the dashboard) or by the connect flow (api.connect, specification 2.12), and keeping them
+        secret
       - >-
         reporting an explicit recipient global opt-out to Smarthost (D-30), only when the
         recipient asked not to receive email from any source using the Smarthost installation;
@@ -385,6 +389,7 @@ project_boundaries:
       - address_batches
       - address_batch_entries
       - address_batch_sends
+      - application_connections
     client_application_owns:
       - mailing_lists
       - subscribers
@@ -766,6 +771,89 @@ api:
     - method: POST
       path: /global-suppressions/{id}/lift
       purpose: report that the recipient withdrew a global opt-out this client reported (D-30)
+    - method: POST
+      path: /connect/exchange
+      purpose: >-
+        exchange the single-use code of an approved application connection, with the PKCE code
+        verifier and the redirect URI, for the connection's credentials (specification 2.12); the
+        one operation without an API key
+    - method: DELETE
+      path: /connection
+      purpose: a connected application ends its own connection (its API key is revoked, its webhook endpoint removed)
+    - method: GET
+      path: /sending-domains
+      purpose: the authenticated client's sending domains, their status and whether each can send now (read-only)
+  connect:
+    # Specification 2.12 (owner instruction 2026-10-11): an application is connected with one
+    # approval instead of someone copying an API key and a webhook secret by hand.
+    model: authorisation-code flow with PKCE (RFC 7636, S256 only); the application is not registered in advance
+    connect_page:
+      path: /dashboard/connect (dashboard firewall, not part of /v1)
+      parameters:
+        application_name: 1-100 characters; shown to the person and used as the API key's name
+        redirect_uri: absolute https URL, at most 2000 characters, no credentials, no fragment
+        webhook_url: absolute https URL, at most 2000 characters; must pass the webhook endpoint rule and the webhook target guard (webhooks.delivery_contract.destinations)
+        state: 1-512 printable ASCII characters without spaces; returned unchanged
+        code_challenge: BASE64URL(SHA-256(code verifier)), 43 characters
+        code_challenge_method: S256
+      rules:
+        - plain http for redirect_uri and webhook_url only when SMARTHOST_ENV is development or test
+        - GET never changes state and stores nothing; the request travels in the page's address
+        - an incomplete or refused request is explained on the page and never redirected anywhere
+        - >-
+          a visitor is shown what is asked and offered sign-in and, only while
+          APP_PUBLIC_ONBOARDING_ENABLED is true, account creation through the public sign-up
+          (saas_operations.public_sign_up); both carry the connect path as the return path of
+          their emailed link (auth_login_tokens.return_path), so the person returns to the
+          connect step, also from another browser
+        - a signed-in person chooses one of their client workspaces
+    approval:
+      - POST with CSRF; only a client admin (client_memberships role admin) of the chosen client, and only while the client is active
+      - >-
+        refused, with the reason on the page and nothing created, when the client's effective
+        limit on usable API keys (max_api_keys) or webhook endpoints (max_webhook_endpoints)
+        leaves no room; an active connection of the client to the same webhook_url does not
+        count, because the new connection replaces it
+      - >-
+        stores the connection as pending with the SHA-256 of a single-use code (256 random bits)
+        that expires after 10 minutes, and the code challenge; nothing secret is stored
+      - >-
+        answers 303 to redirect_uri with code and state; declining answers 303 with
+        error=access_denied, error_description and state; a key or secret is never in a redirect
+      - audited as application_connection.approved by the approving user
+    exchange:
+      - POST /v1/connect/exchange {code, code_verifier, redirect_uri}, server to server, without an API key; limited per client address
+      - >-
+        in one transaction, under a lock on the code's row: the connection becomes active, an
+        earlier active connection of the client to the same webhook_url is ended, and the API key
+        (named after the application) and the webhook endpoint (subscribed to
+        validation.completed, validation.failed, send.completed, send.failed,
+        message.hard_bounced, message.complained) are created through the ordinary audited
+        services, within the client's limits
+      - >-
+        the key and the endpoint are created here and not at the approval, because an API key is
+        stored only as a hash (authentication.storage): it can exist in the clear only in the
+        response that hands it over
+      - >-
+        the response carries the API key, the webhook signing secret, the API base URL, the
+        endpoint id and its events, the client's name and its sending domains, once
+        (Cache-Control no-store)
+      - >-
+        a code is single use; unknown, used, expired or revoked codes, a wrong code verifier and
+        a different redirect URI are one answer (400 invalid-connect-code); a good code whose
+        client is no longer active or has no room left answers 409 connect-refused, creates
+        nothing and stays usable until it expires
+      - audited as application_connection.connected (actor system application-connect, naming the approving user)
+    disconnection:
+      - DELETE /v1/connection with the connection's own API key (204; 404 for a key that no connection issued); accepted in every client status that authenticates
+      - a client admin (or PLATFORM.CLIENT.MANAGE) ends a connection in the client dashboard, Settings > Connected applications (POST, CSRF)
+      - either way the API key is revoked and the webhook endpoint becomes removed (terminal; no deliveries, no limit, history kept)
+      - audited as application_connection.revoked with the reason (application, client, replaced)
+    never:
+      - grants clients.can_submit_global_suppressions (operator only, authentication.capabilities)
+      - logs or audits a code, code verifier, API key or signing secret
+      - changes an existing /v1 operation
+    cleanup: approvals whose code was never exchanged are deleted a day after the code expired
   webhooks:
     delivery: signed_https
     retry: exponential_backoff_with_limit
@@ -846,7 +934,10 @@ api:
         commands; a raw secret is shown once with Cache-Control no-store. Decision
         (specification 2.8): there is no public /v1 endpoint-management (CRUD) API; endpoint
         setup is administration (dashboard or audited console), while runtime integration uses
-        the public API and the received webhooks.
+        the public API and the received webhooks. An application connection (api.connect,
+        specification 2.12) is such administration too: its endpoint exists by a client admin's
+        approval and is removed with the connection, and the API still neither lists nor edits
+        endpoints.
       retention: >-
         APP_RETENTION_WEBHOOK_DELIVERIES_DAYS; empty means no automatic deletion. Delivery history
         stays durable until a production retention policy sets a period (compliance.retention).
@@ -1970,7 +2061,9 @@ schema:
         - reference_id
         - occurred_at
     webhook_endpoints:
-      purpose: client webhook registration
+      purpose: >-
+        client webhook registration; status enabled or disabled, or removed (terminal, specification
+        2.12) when the endpoint's application connection ended
       key_fields:
         - id
         - client_id
@@ -2270,6 +2363,27 @@ schema:
         - subject
         - created_by_user_id
         - created_at
+    application_connections:
+      purpose: >-
+        applications connected from the connect page (api.connect, specification 2.12): the
+        approval (pending, with the hash of its single-use code and the PKCE code challenge),
+        the active connection with its API key and webhook endpoint, and its end (revoked)
+      key_fields:
+        - id
+        - client_id
+        - application_name
+        - redirect_uri
+        - webhook_url
+        - status
+        - approved_by_user_id
+        - code_hash
+        - code_challenge
+        - code_expires_at
+        - exchanged_at
+        - api_key_id_nullable
+        - webhook_endpoint_id_nullable
+        - revoked_at
+        - created_at
   indexes_required:
     - validation_addresses.job_id
     - validation_addresses.normalized_address
@@ -2347,6 +2461,13 @@ security:
     - allow clients to rotate webhook secrets
     - deliver only to public destinations with the resolved address pinned and redirects refused (specification 2.8)
     - store signing secrets encrypted at rest with application-managed keys
+  application_connect:
+    # specification 2.12 (api.connect)
+    - authorisation code of 256 random bits, single use, 10 minutes, stored only as SHA-256; PKCE S256 binds it to the application that started the flow
+    - secrets only in the server-to-server exchange response, never in a redirect URL, a log or the audit log
+    - approval is a CSRF-protected POST by a signed-in client admin; the page's form-action allows only the installation and the approved redirect origin
+    - redirect and webhook URLs are https (plain http in development and test only); the webhook URL passes the webhook target guard before the page is shown and again at approval
+    - the unauthenticated exchange is rate limited per client address and gives one answer for every reason a code is not accepted
   dashboard_authentication:
     - human users authenticate as users through Symfony Security, never with API keys
     - authentication is passwordless (specification 2.7) - a single-use sign-in link emailed to the user's address; only its SHA-256 is stored; it expires after APP_LOGIN_LINK_TTL_SECONDS; requests are limited per address and per client address; the answer never reveals whether an account exists
@@ -2429,6 +2550,7 @@ saas_operations:
     of the starter tier, no billing.
   policy_acceptance:
     - APP_ACCEPTABLE_USE_POLICY_VERSION names the service-policy version in force (empty = none); Smarthost stores versions and acceptances, never policy text
+    - the policy's text is the repository document docs/AUP.md, published at /acceptable-use-policy and linked from every page's footer and from the sign-up confirmation (owner decision 2026-10-11)
     - clients.policy_acceptance_required (true for new clients; operator-created active clients and pre-Phase 9 clients are exempt) blocks approval until the version in force is accepted
     - client admins accept in the dashboard (source client_dashboard, the version in force only); operators record an acceptance obtained elsewhere with a reference (source operator_recorded); one row per client and version; audited as client.policy_accepted
   client_metadata: >-
@@ -2897,6 +3019,7 @@ user_interfaces:
     - usage view
     - sending-domain verification and DKIM status
     - webhook endpoint management
+    - connected applications (api.connect) with disconnection by a client admin
   operator_dashboard:
     - client approval queue
     - account suspension/throttling
@@ -2972,7 +3095,11 @@ user_interfaces:
     dashboard signed in and out, the error page, the API documentation and the re-permission
     page) carries <meta name="application-name" content="catto-mail v<version>"> in its head and
     the same footer: the software name and version, what the application is, the administrator's
-    address (APP_ADMIN_EMAIL) as the contact, and the time zone the times are in.
+    address (APP_ADMIN_EMAIL) as the contact, the time zone the times are in, and a link to the
+    acceptable use policy (owner decision, 2026-10-11): /acceptable-use-policy, a static public
+    page built from docs/AUP.md (copied into the image; its Markdown is rendered with all text
+    escaped). The connect page (/dashboard/connect, api.connect, specification 2.12) and the
+    client's Connected applications page belong to the dashboard and follow the same layout.
   phase_6_implementation:
     # Specification 2.6: what the Phase 6 dashboards provide and how.
     authentication: >-
@@ -3512,5 +3639,23 @@ revision_history:
       system_checks, system_check_runs, system_state, setup_steps, delivery_controls,
       address_batches, address_batch_entries, address_batch_sends. OpenAPI 1.0.0-draft.9;
       status vocabulary 2.6.0. Production host target: Ubuntu Server 26.04 LTS.
+    decisions_incorporated: []
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.12"
+    date: "2026-10-11"
+    summary: >-
+      Application connect (owner instruction): api.connect. An application is connected with one
+      approval in an authorisation-code flow with PKCE (S256) instead of a copied API key and
+      webhook secret: the connect page /dashboard/connect (sign-in, or account creation while
+      APP_PUBLIC_ONBOARDING_ENABLED is true, returning to the connect step), approval by a client
+      admin of an active client within its key and endpoint limits, a single-use code of 10
+      minutes, and the server-to-server exchange POST /v1/connect/exchange that creates the API
+      key and the webhook endpoint and returns the credentials once. DELETE /v1/connection lets
+      the application disconnect itself; the client dashboard lists and ends connections. GET
+      /v1/sending-domains lists the client's sending domains with can_send. Schema:
+      application_connections; webhook_endpoints.status gains the terminal value removed. The
+      global-opt-out capability stays operator-only. The acceptable use policy is published at
+      /acceptable-use-policy from docs/AUP.md and linked from every footer. OpenAPI
+      1.0.0-draft.10; status vocabulary 2.7.0. No existing /v1 operation changes.
     decisions_incorporated: []
     decision_log: docs/architecture/open-decisions.md

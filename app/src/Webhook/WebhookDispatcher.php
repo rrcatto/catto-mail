@@ -164,7 +164,7 @@ final class WebhookDispatcher
             ++$this->stats['attempts'];
             $endpoint = $this->em->find(WebhookEndpoint::class, Uuid::fromString($claim['endpoint_id']));
             if (null === $endpoint || !$endpoint->isEnabled()) {
-                $this->finish($workerId, $claim, 'failed', null, 'The endpoint was disabled before delivery.', null);
+                $this->finish($workerId, $claim, 'failed', null, 'The endpoint was disabled or removed before delivery.', null);
                 continue;
             }
             if (!hash_equals($claim['payload_hash'], hash('sha256', $claim['body']))) {

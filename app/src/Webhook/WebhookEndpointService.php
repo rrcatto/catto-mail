@@ -31,6 +31,11 @@ use Symfony\Component\Uid\Uuid;
  * (App\Client\ClientLimitPolicy::maxWebhookEndpoints, enabled or disabled); creations
  * serialise on the client row. Subscriptions are a non-empty subset of the event
  * vocabulary (webhook.test excluded), so their number is bounded by it.
+ *
+ * Specification 2.12: an endpoint that belongs to an application connection is removed when
+ * the connection ends (remove(), called only by App\Connect\ConnectService). Removed is
+ * terminal: the endpoint receives nothing, cannot be changed and counts against no limit;
+ * its row stays, because its delivery history refers to it.
  */
 final class WebhookEndpointService
 {
@@ -74,7 +79,7 @@ final class WebhookEndpointService
 
     private function assertBelowLimit(Client $client): void
     {
-        $count = (int) $this->em->getConnection()->fetchOne('SELECT count(*) FROM webhook_endpoints WHERE client_id = ?', [$client->getId()->toRfc4122()]);
+        $count = (int) $this->em->getConnection()->fetchOne("SELECT count(*) FROM webhook_endpoints WHERE client_id = ? AND status <> 'removed'", [$client->getId()->toRfc4122()]);
         if ($count >= $this->limits->maxWebhookEndpoints($client)) {
             throw new DomainRuleViolation(\sprintf('The client already has %d webhook endpoints; its limit is %d. Reuse or edit an existing endpoint.',
                 $count, $this->limits->maxWebhookEndpoints($client)));
@@ -84,6 +89,7 @@ final class WebhookEndpointService
     /** @param list<string> $eventTypes */
     public function update(WebhookEndpoint $endpoint, string $url, array $eventTypes, AuditActor $actor): void
     {
+        self::assertNotRemoved($endpoint);
         $this->assertUrl($url);
         $types = $this->eventTypes($eventTypes);
         $this->change($endpoint, $actor, 'webhook_endpoint.updated', static fn () => $endpoint->update($url, $types),
@@ -93,6 +99,7 @@ final class WebhookEndpointService
     /** @return string the new raw secret (shown once) */
     public function rotateSecret(WebhookEndpoint $endpoint, AuditActor $actor): string
     {
+        self::assertNotRemoved($endpoint);
         $secret = self::newSecret();
         $sealed = $this->keyring->encrypt($secret, self::purpose($endpoint->getId()));
         $expires = Clock::now()->modify(\sprintf('+%d hours', max(0, $this->secretOverlapHours)));
@@ -108,7 +115,44 @@ final class WebhookEndpointService
         if ($endpoint->getStatus() === $status) {
             return;
         }
+        self::assertNotRemoved($endpoint);
+        if (WebhookEndpointStatus::Removed === $status) {
+            throw new DomainRuleViolation('An endpoint is removed only by ending its application connection; disable it instead.');
+        }
         $this->change($endpoint, $actor, 'webhook_endpoint.'.$status->value, static fn () => $endpoint->setStatus($status));
+    }
+
+    /**
+     * Ends the endpoint of an application connection (specification 2.12). Terminal; the row and
+     * its delivery history stay. Called only by App\Connect\ConnectService.
+     */
+    public function remove(WebhookEndpoint $endpoint, AuditActor $actor): void
+    {
+        if ($endpoint->isRemoved()) {
+            return;
+        }
+        $this->change($endpoint, $actor, 'webhook_endpoint.removed', static fn () => $endpoint->setStatus(WebhookEndpointStatus::Removed),
+            ['url' => $endpoint->getUrl()]);
+    }
+
+    /** The URL rule of an endpoint (https; plain http only in development and test). */
+    public function assertUrl(string $url): void
+    {
+        $parts = parse_url($url);
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $httpAllowed = \in_array($this->smarthostEnv, ['development', 'test'], true);
+        if (false === $parts || !isset($parts['host']) || 1 === preg_match('/[\x00-\x20\x7F]/', $url) || isset($parts['user'])
+            || !('https' === $scheme || ('http' === $scheme && $httpAllowed))) {
+            throw new DomainRuleViolation($httpAllowed ? 'The webhook URL must be an absolute http(s) URL without credentials.'
+                : 'The webhook URL must be an absolute https URL without credentials.');
+        }
+    }
+
+    private static function assertNotRemoved(WebhookEndpoint $endpoint): void
+    {
+        if ($endpoint->isRemoved()) {
+            throw new DomainRuleViolation('This webhook endpoint was removed with its application connection and cannot be changed.');
+        }
     }
 
     /** @return list<string> the secrets the worker signs with at $at (WebhookSecrets) */
@@ -125,18 +169,6 @@ final class WebhookEndpointService
     private static function purpose(Uuid $endpointId): string
     {
         return WebhookSecrets::purpose($endpointId);
-    }
-
-    private function assertUrl(string $url): void
-    {
-        $parts = parse_url($url);
-        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        $httpAllowed = \in_array($this->smarthostEnv, ['development', 'test'], true);
-        if (false === $parts || !isset($parts['host']) || 1 === preg_match('/[\x00-\x20\x7F]/', $url) || isset($parts['user'])
-            || !('https' === $scheme || ('http' === $scheme && $httpAllowed))) {
-            throw new DomainRuleViolation($httpAllowed ? 'The webhook URL must be an absolute http(s) URL without credentials.'
-                : 'The webhook URL must be an absolute https URL without credentials.');
-        }
     }
 
     /**

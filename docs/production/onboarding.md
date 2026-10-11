@@ -25,6 +25,9 @@ Before approval:
   - Operational contact (`--contact-email`), billing contact and abuse contact.
   - The abuse contact must answer complaints quickly.
 - [ ] **Service policy.**
+  - The policy text is `docs/AUP.md`, published at `/acceptable-use-policy` and linked from every
+    page's footer. Replace the file with your own policy before you build the images, and set
+    `APP_ACCEPTABLE_USE_POLICY_VERSION` to its version.
   - When `APP_ACCEPTABLE_USE_POLICY_VERSION` is set, a client admin accepts that version in the
     dashboard.
   - Or you record an acceptance obtained elsewhere, with a reference
@@ -135,6 +138,30 @@ smarthost:api-key:revoke <key-id>
   `PLATFORM.CLIENT_KEY.MANAGE` manage any client's keys.
 - The secret is shown once, never stored, and cannot be recovered.
 - Rotation: create a new key, deploy it, confirm its *last used* time, then revoke the old one.
+
+### Connected applications
+
+An application that supports it gets its key and its webhook endpoint without anyone copying
+them (specification 2.12; integration guide, section 15):
+
+1. The application sends a client admin to `/dashboard/connect`. The page shows the
+   application's name, the site it returns to and the address its webhooks go to.
+2. The admin signs in (or, while public sign-up is on, opens an account there and then),
+   chooses the workspace and presses *Connect*. Only a client admin can, and only for an active
+   client with room under its limits on usable API keys and webhook endpoints.
+3. The application collects its credentials with a single-use code, valid for 10 minutes. The API
+   key (named after the application) and the webhook endpoint appear at that moment, not at the
+   approval.
+
+- The client workspace lists them under Settings › Connected applications. A client admin, or
+  an operator with `PLATFORM.CLIENT.MANAGE`, disconnects one there: its key is revoked and its
+  endpoint removed. The application can do the same for itself (`DELETE /v1/connection`).
+- Connecting the same application again (the same webhook address) replaces its earlier
+  connection.
+- Connecting never grants global opt-out reporting: that stays your decision
+  (`smarthost:client:global-suppressions`).
+- The audit log records `application_connection.approved` (the admin), `.connected` and
+  `.revoked` (with the reason: `application`, `client` or `replaced`).
 
 ## 5. Reputation alerts
 

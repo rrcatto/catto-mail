@@ -29,6 +29,10 @@ it, by signing up at `https://<your Smarthost host>/dashboard/sign-up` (a new ac
 low limits that the operator can raise). Your client admin then manages keys, sending domains and
 webhook endpoints in the dashboard.
 
+An application can also get its API key and webhook endpoint without anyone copying them: it
+sends your client admin to Smarthost to approve the connection, and collects its credentials
+itself (section 15).
+
 Send your API key as a bearer token on every request:
 
 ```http
@@ -43,6 +47,8 @@ Authorization: Bearer shk_...
   dashboard that its *last used* time appears, then revoke the old key.
 - Your client identity always comes from the key. Requests never carry a `client_id`, and
   another client's resources answer `404`, exactly like missing ones.
+- One operation takes no key: `POST /v1/connect/exchange`, with which an application that is
+  being connected collects its key (section 15).
 
 ## 3. Account status
 
@@ -85,7 +91,8 @@ Act on `status` and the last segment of `type` (the problem slug). Common slugs:
 `unauthorized` (401), `forbidden` (403), `not-found` (404), `job-not-collecting` (409),
 `idempotency-in-progress` (409), `payload-too-large` (413), `validation-error` (422),
 `recipient-limit-exceeded` (422), `idempotency-key-reused` (422), `rate-limited` (429),
-`quota-exceeded` (429).
+`quota-exceeded` (429), and for connecting an application `invalid-connect-code` (400) and
+`connect-refused` (409).
 
 ## 6. Limits, rate limits and quotas
 
@@ -187,6 +194,20 @@ a job can be submitted only from a domain whose DKIM key is active. Until then, 
 answers `422 submit-rejected` with the error "The sending domain has no active DKIM
 configuration."; nothing is sent unsigned.
 
+**Check before you send:** `GET /v1/sending-domains` lists your domains, so that your
+application can warn its user before it sends from one that cannot send yet:
+
+```json
+{"data": [{"id": "0199…", "domain": "example.com", "status": "verified", "dkim_status": "active",
+           "verified_at": "2026-10-07T10:00:00.000000+02:00", "can_send": true}]}
+```
+
+- `status` is `pending` (the TXT record was not found yet), `verified` or `disabled`.
+- `dkim_status` is `not_configured`, `pending_dns`, `active` or `disabled`.
+- `can_send` is the submit rule applied to the domain as it is now. While it is `false` you can
+  still create a job and add recipients; only the submit is refused.
+- The list is read-only and not paginated (an account has few domains), ordered by domain.
+
 ## 11. Webhooks
 
 Endpoints are managed by your client admin in the dashboard (**Webhooks**): URL (HTTPS),
@@ -222,7 +243,11 @@ many failed since the last success.
 `webhook.test` event for that endpoint (`202`); it is never sent synchronously.
 
 Events: `validation.completed`, `validation.failed`, `send.completed`, `send.failed`,
-`message.hard_bounced`, `message.complained`.
+`message.hard_bounced`, `message.complained`. Two more exist: `webhook.test` (the test above;
+it needs no subscription) and `repermission.responded` (a recipient's answer to a
+re-permission message that the operator sent for you from an address batch; its `data` is the
+contract's `RepermissionWebhookData`). An endpoint created by connecting an application
+(section 15) is subscribed to the first six.
 
 ## 12. Polling and reconciliation
 
@@ -249,13 +274,112 @@ HTTP(S) links in HTML parts. Plain text, `mailto:`, fragment-only and unsubscrib
 never rewritten. Recorded opens and clicks appear as `open_recorded` / `click_recorded`
 events. Opens are unreliable signals (section 1).
 
-## 15. Integration checklist
+## 15. Connecting an application with one approval
 
-1. Receive your API key from your client admin; store it in your secret store.
+Instead of a client admin copying an API key and a webhook secret into your application, your
+application can ask for them: an authorisation-code flow with PKCE (as in OAuth 2, RFC 7636,
+`S256` only). Your application needs no registration beforehand. It needs to know the
+installation's address (`https://<your Smarthost host>`), which its user types in once.
+
+**1. Send the person's browser to the connect page.** Create a random `state` and a random
+code verifier (43 to 128 characters of `A-Z a-z 0-9 - . _ ~`), keep both on your server (in
+the person's session), and redirect to:
+
+```text
+https://<your Smarthost host>/dashboard/connect
+    ?application_name=Example%20Lists
+    &redirect_uri=https%3A%2F%2Flists.example.com%2Fcattomail%2Fcallback
+    &webhook_url=https%3A%2F%2Flists.example.com%2Fcattomail%2Fwebhook
+    &state=6f1c0b…
+    &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+    &code_challenge_method=S256
+```
+
+| Parameter | Value |
+|---|---|
+| `application_name` | 1 to 100 characters. The person sees it, and the API key is named after it. |
+| `redirect_uri` | Where the person is sent back to: an absolute `https` URL of your application, at most 2000 characters, without credentials or a fragment. |
+| `webhook_url` | Where your application receives its webhooks: an absolute `https` URL, at most 2000 characters, that resolves to public addresses (as for every endpoint, section 11). |
+| `state` | 1 to 512 printable ASCII characters without spaces. It comes back unchanged; check it. |
+| `code_challenge` | `BASE64URL(SHA-256(code verifier))` without `=` padding: 43 characters. |
+| `code_challenge_method` | `S256`. |
+
+Plain `http` URLs are accepted only by a development installation. If a parameter is missing or
+refused, the page says which one and the person is **not** sent back to you.
+
+**2. The person signs in and approves.** They sign in to Smarthost, or, where the installation
+offers sign-up, open an account there and then; either way they return to the connect step.
+They choose the workspace (client) to connect and press *Connect*. Only a client admin can
+approve, and only for an active account. If the account has no room for another API key or
+webhook endpoint, the page says so and nothing happens.
+
+**3. The person comes back to your `redirect_uri`** with `303 See Other`:
+
+```text
+https://lists.example.com/cattomail/callback?code=<single-use code>&state=6f1c0b…
+https://lists.example.com/cattomail/callback?error=access_denied&error_description=…&state=6f1c0b…   (declined)
+```
+
+Compare `state` with the one you kept; refuse anything else. The code works once and expires
+10 minutes after the approval. It is the only thing in the address: no key and no secret.
+
+**4. Exchange the code, from your server.** This is the one request without an API key:
+
+```http
+POST /v1/connect/exchange
+Content-Type: application/json
+
+{"code": "<the code>", "code_verifier": "<your code verifier>",
+ "redirect_uri": "https://lists.example.com/cattomail/callback"}
+```
+
+```json
+{"connection_id": "0199…", "application_name": "Example Lists", "client_name": "Example Ltd",
+ "api_base_url": "https://<your Smarthost host>/v1",
+ "api_key": "shk_…",
+ "webhook": {"endpoint_id": "0199…", "url": "https://lists.example.com/cattomail/webhook",
+             "signing_secret": "whsec_…",
+             "events": ["message.complained", "message.hard_bounced", "send.completed",
+                        "send.failed", "validation.completed", "validation.failed"]},
+ "sending_domains": [{"id": "0199…", "domain": "example.com", "status": "verified",
+                      "dkim_status": "active", "verified_at": "2026-10-07T10:00:00.000000+02:00",
+                      "can_send": true}]}
+```
+
+- **Store `api_key` and `webhook.signing_secret` at once.** They are shown this one time:
+  Smarthost keeps only a hash of the key. If the answer is lost, start again from step 1.
+- The API key and the webhook endpoint are created by this request, within the account's limits.
+  `webhook.endpoint_id` is the `webhook_endpoint_id` for `POST /v1/webhooks/test`.
+- `400 invalid-connect-code`: the code is unknown, already used, expired or revoked, or the code
+  verifier or `redirect_uri` does not match. The answer is the same for all of these.
+- `409 connect-refused`: the code is good, but the account is no longer active or a limit was
+  reached since the approval. Nothing was created; the same code works once that is put right,
+  until it expires.
+- `429 rate-limited`: the exchange is limited per client address; honour `Retry-After`.
+- Connecting again with the same `webhook_url` replaces the earlier connection: at this
+  exchange its key is revoked and its endpoint removed. Until then the earlier key keeps working.
+- A connection never includes global opt-out reporting (section 13); only the operator grants it.
+
+**5. Disconnect.** Your application ends its own connection with the key it received:
+
+```http
+DELETE /v1/connection
+Authorization: Bearer shk_…
+```
+
+`204`: the key is revoked (it now answers `401`) and the webhook endpoint is removed. `404` when
+the key was not issued by a connection (a key created in the dashboard belongs to none). The
+client admin can also end a connection in the dashboard (**Settings › Connected applications**);
+your application then gets `401` and should offer to connect again.
+
+## 16. Integration checklist
+
+1. Get your API key and webhook signing secret: by connecting your application (section 15), or
+   from your client admin (**API keys** and **Webhooks**). Store them in your secret store.
 2. Add and verify your sending domain (TXT record) and publish its DKIM record; wait until the
-   dashboard shows it as active.
-3. Configure a webhook endpoint, store its secret, and implement signature verification
-   and de-duplication. Send a test event and check that your receiver accepts it.
+   dashboard, or `GET /v1/sending-domains`, shows that it can send.
+3. Implement webhook signature verification and de-duplication. Send a test event and check that
+   your receiver accepts it.
 4. Run a small validation job and read its results.
 5. Run a small send job to addresses you own, and follow it to `completed`.
 6. Implement polling-based reconciliation and `429` back-off.

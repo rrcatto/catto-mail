@@ -14,7 +14,8 @@ use Symfony\Component\DomCrawler\Crawler;
  * stylesheet before the application's, and the same footer: what the application is, the
  * administrator's address (APP_ADMIN_EMAIL) and the time zone (owner decisions, 2026-10-10): the
  * front page, the dashboard pages signed in and out, the error page, the API documentation and the
- * re-permission page. The front page and the dashboard pages lay their content out in Bootstrap's
+ * re-permission page - and, since the policy page exists (owner decision 2026-10-11), a link to the
+ * acceptable use policy. The front page and the dashboard pages lay their content out in Bootstrap's
  * four-column grid, where every child names its span.
  */
 final class PageFrameTest extends DashboardTestCase
@@ -40,11 +41,12 @@ final class PageFrameTest extends DashboardTestCase
         self::assertSame('mailto:'.self::ADMIN, $foot->filter('a')->attr('href'), $uri);
         self::assertSame(self::ADMIN, $foot->filter('a')->text(), $uri);
         self::assertStringContainsString('Times are shown in SAST (Africa/Johannesburg).', $foot->text(), $uri);
+        self::assertSame('Acceptable use policy', $foot->filter('a[href="/acceptable-use-policy"]')->text(), "$uri: the footer links to the policy");
     }
 
     public function testEveryKindOfPageHasTheVersionAndTheFooter(): void
     {
-        foreach (['/', '/dashboard/login', '/dashboard/login/sent', '/docs/api', '/p/seed-test'] as $uri) {
+        foreach (['/', '/dashboard/login', '/dashboard/login/sent', '/docs/api', '/acceptable-use-policy', '/p/seed-test'] as $uri) {
             $this->frame($uri);
         }
         $this->frame('/p/'.str_repeat('x', 43), 404);   // re-permission page: unknown link
@@ -70,7 +72,7 @@ final class PageFrameTest extends DashboardTestCase
             '/dashboard/operator/audit', '/dashboard/operator/users', '/dashboard/operator/roles', '/dashboard/operator/help',
             '/dashboard/operator/help/dns', '/dashboard/search?q=grid', "/dashboard/c/$cid", "/dashboard/c/$cid/send-jobs",
             "/dashboard/c/$cid/validation-jobs", "/dashboard/c/$cid/suppressions", "/dashboard/c/$cid/sending-domains",
-            "/dashboard/c/$cid/api-keys", "/dashboard/c/$cid/webhooks", "/dashboard/c/$cid/usage"];
+            "/dashboard/c/$cid/api-keys", "/dashboard/c/$cid/webhooks", "/dashboard/c/$cid/connections", "/dashboard/c/$cid/usage", '/acceptable-use-policy'];
         $grids = 0;
         foreach ($pages as $uri) {
             foreach ($this->crawler($uri)->filter('main .grid > *') as $child) {

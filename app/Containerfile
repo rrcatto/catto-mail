@@ -1,6 +1,7 @@
 # Smarthost Symfony application image (PHP-FPM only; nginx is the HTTP entry
 # via FastCGI). Build context: the repository root, so the normative OpenAPI
-# contract can be copied in as the single source for request validation.
+# contract can be copied in as the single source for request validation, and the
+# public documents (integration guide, acceptable use policy) from docs/.
 #
 # Stages:
 #   base     PHP 8.5 FPM + extensions
@@ -37,6 +38,8 @@ COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
 COPY docs/api/integration-guide.md /srv/app/config/contracts/integration-guide.md
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
 COPY docs/contracts/settings.json /srv/app/config/contracts/settings.json
+# The acceptable use policy page (/acceptable-use-policy) is rendered from this file.
+COPY docs/AUP.md /srv/app/config/contracts/AUP.md
 # Test-only copies of the schema contracts (structural-equivalence and grant tests).
 COPY docs/schema/reference-schema.sql docs/schema/schema.md docs/contracts/address-normalization-vectors.json /srv/app/tests/contracts/
 RUN composer dump-autoload --optimize && mkdir -p var && chown -R www-data:www-data var
@@ -54,6 +57,8 @@ COPY docs/api/openapi.v1.yaml /srv/app/config/contracts/openapi.v1.yaml
 COPY docs/api/integration-guide.md /srv/app/config/contracts/integration-guide.md
 COPY docs/contracts/status-vocabulary.yaml /srv/app/config/contracts/status-vocabulary.yaml
 COPY docs/contracts/settings.json /srv/app/config/contracts/settings.json
+# The acceptable use policy page (/acceptable-use-policy) is rendered from this file.
+COPY docs/AUP.md /srv/app/config/contracts/AUP.md
 # Phase 1 infrastructure probes still used by the verification suite.
 COPY app/phase1-probe/ /srv/probe/
 RUN rm -rf /srv/app/tests /srv/app/phpunit.dist.xml && chmod -R a+rX /srv/probe \

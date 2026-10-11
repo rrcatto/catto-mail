@@ -24,6 +24,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON auth_login_tokens TO :"app";
 GRANT SELECT, INSERT, UPDATE ON sending_domains TO :"app";
 GRANT SELECT ON sending_domains TO :"delivery";
 GRANT SELECT, INSERT, UPDATE ON api_keys TO :"app";
+-- Application connections (specification 2.12): approvals whose code was never exchanged are
+-- deleted a day after the code expired.
+GRANT SELECT, INSERT, UPDATE, DELETE ON application_connections TO :"app";
 -- Client lifecycle, limits and quotas, notes and policy acceptances (Phase 9, specification 2.10).
 GRANT SELECT, INSERT, UPDATE ON client_limits, client_quota_usage TO :"app";
 GRANT SELECT, INSERT ON client_notes, client_policy_acceptances TO :"app";

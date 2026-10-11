@@ -6,6 +6,7 @@ namespace App\Api;
 
 use App\Entity\Message;
 use App\Entity\MessageEvent;
+use App\Entity\SendingDomain;
 use App\Entity\SendJob;
 use App\Entity\Suppression;
 use App\Entity\ValidationAddress;
@@ -54,6 +55,23 @@ final class Presenter
             'diagnostic_code' => $a->getDiagnosticCode(),
             'diagnostic_text' => $a->getDiagnosticText(),
             'checked_at' => Clock::rfc3339($a->getCheckedAt()),
+        ];
+    }
+
+    /**
+     * @param bool $canSend the submit rule on the domain as it is now (App\Sending\SendingDomainRule)
+     *
+     * @return array<string, mixed> OpenAPI SendingDomain
+     */
+    public static function sendingDomain(SendingDomain $domain, bool $canSend): array
+    {
+        return [
+            'id' => $domain->getId()->toRfc4122(),
+            'domain' => $domain->getDomain(),
+            'status' => $domain->getStatus()->value,
+            'dkim_status' => $domain->getDkimStatus()->value,
+            'verified_at' => Clock::rfc3339($domain->getVerifiedAt()),
+            'can_send' => $canSend,
         ];
     }
 

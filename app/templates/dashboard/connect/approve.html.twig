@@ -1,0 +1,49 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Connect {{ connect.applicationName }}{% endblock %}
+{% block body %}
+<div class="pagehead">
+    <div>
+        <h1>Connect {{ connect.applicationName }}</h1>
+        <p class="sub"><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through Catto Mail for one of your workspaces. Nothing is connected until you choose Connect.</p>
+    </div>
+</div>
+<div class="grid">
+    <section class="card g-col-4 lg:g-col-2" aria-labelledby="choose-h">
+        <h2 id="choose-h">Choose the workspace</h2>
+        {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+        {% include 'dashboard/connect/_request.html.twig' %}
+        <form method="post" action="{{ path('dashboard_connect_decide') }}" class="stack">
+            {% for name, value in connect.fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+            <input type="hidden" name="_token" value="{{ csrf_token('connect') }}">
+            {% if workspaces is empty %}
+                <p class="empty">Your account is not a member of any client, so there is no workspace to connect.</p>
+            {% else %}
+            <fieldset class="perms">
+                <legend>Workspace</legend>
+                {% for w in workspaces %}
+                    {% set cid = w.client.id.toRfc4122 %}
+                    {% if w.obstacle is null %}
+                    <label class="checkline"><input type="radio" name="client_id" value="{{ cid }}" required{% if chosen == cid or (chosen == '' and eligible == 1) %} checked{% endif %}> <strong>{{ w.client.companyName }}</strong></label>
+                    {% if w.replaces %}<p class="muted small">Replaces the connection of {{ w.replaces.application_name }} to the same webhook address, made {{ w.replaces.created_at|ts }}: its API key stops working when the new one is collected.</p>{% endif %}
+                    {% else %}
+                    <p class="muted small"><strong>{{ w.client.companyName }}</strong> cannot be chosen. {{ w.obstacle }}</p>
+                    {% endif %}
+                {% endfor %}
+            </fieldset>
+            {% endif %}
+            <p class="form-actions">{% if eligible > 0 %}<button type="submit" name="decision" value="approve">Connect</button> {% endif %}<button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Cancel</button></p>
+        </form>
+    </section>
+    <section class="card g-col-4 lg:g-col-2" aria-labelledby="what-h">
+        <h2 id="what-h">What connecting does</h2>
+        <ul>
+            <li>You are sent back to <span class="url">{{ connect.redirectOrigin }}</span> with a code that works once, for {{ minutes }} minutes. No key or secret is in that address.</li>
+            <li>When {{ connect.applicationName }} collects its credentials with the code, the workspace gets an <strong>API key</strong> named “{{ connect.applicationName }}” and a <strong>webhook endpoint</strong> for the address above, within the workspace's limits.</li>
+            <li>The endpoint is subscribed to: {% for e in events %}<code>{{ e }}</code>{{ loop.last ? '.' : ', ' }}{% endfor %}</li>
+            <li>The application sends from the workspace's sending domains and within its limits. It is not allowed to report recipients' global opt-outs: only the operator of this installation grants that.</li>
+            <li>You can end the connection at any time under Settings › Connected applications; that revokes the key and removes the endpoint.</li>
+        </ul>
+        <p class="caveat">Only a client admin can connect an application, and only to an active client. If you did not start this from {{ connect.applicationName }}, choose Cancel.</p>
+    </section>
+</div>
+{% endblock %}

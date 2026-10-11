@@ -14,7 +14,6 @@ use App\Entity\Client;
 use App\Entity\SendingDomain;
 use App\Entity\SendJob;
 use App\Entity\SendJobRecipientBatch;
-use App\Enum\DkimStatus;
 use App\Enum\MessageClass;
 use App\Enum\QuotaMetric;
 use App\Enum\SendJobStatus;
@@ -55,10 +54,9 @@ final class SendJobService
         private readonly Connection $connection,
         private readonly IdempotencyLock $lock,
         private readonly Limits $limits,
-        private readonly string $smarthostEnv,
-        private readonly bool $allowUnverifiedSendingDomains,
         private readonly QuotaEnforcer $quotas,
         private readonly ClientLimitPolicy $clientLimits,
+        private readonly SendingDomainRule $domainRule,
     ) {
     }
 
@@ -232,31 +230,15 @@ final class SendJobService
     }
 
     /**
-     * Submit-time sending-domain rule (spec sending_domains.live_sending_rule):
-     * verified, and in production also DKIM active - unless the explicitly
-     * controlled local/test mode SMARTHOST_ALLOW_UNVERIFIED_SENDING_DOMAINS is on
-     * (never in production; App\Config\SafetyGuard). A disabled domain is never usable.
+     * Submit-time sending-domain rule (App\Sending\SendingDomainRule), on the domain as it is now.
      *
      * @return list<array{pointer: string, message: string}>
      */
     private function sendingDomainErrors(SendingDomain $domain): array
     {
         $this->em->refresh($domain);
-        if ($domain->isDisabled()) {
-            return [['pointer' => '/', 'message' => 'The sending domain is disabled.']];
-        }
-        if ($this->allowUnverifiedSendingDomains && 'production' !== $this->smarthostEnv) {
-            return [];
-        }
-        $errors = [];
-        if (!$domain->isVerified()) {
-            $errors[] = ['pointer' => '/', 'message' => 'The sending domain has not passed DNS TXT verification.'];
-        }
-        if ('production' === $this->smarthostEnv && DkimStatus::Active !== $domain->getDkimStatus()) {
-            $errors[] = ['pointer' => '/', 'message' => 'The sending domain has no active DKIM configuration.'];
-        }
 
-        return $errors;
+        return array_map(static fn (string $message): array => ['pointer' => '/', 'message' => $message], $this->domainRule->problems($domain));
     }
 
     /**

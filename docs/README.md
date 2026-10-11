@@ -2,8 +2,8 @@
 
 | Document | Purpose |
 |---|---|
-| `20260908-1644-smarthost-llm-spec.yaml` | **Authoritative** specification (version 2.11, 2026-10-07) |
-| `20260908-1644-smarthost-human-specification.md` | Human-readable companion to the spec (version 2.11) |
+| `20260908-1644-smarthost-llm-spec.yaml` | **Authoritative** specification (version 2.12, 2026-10-11) |
+| `20260908-1644-smarthost-human-specification.md` | Human-readable companion to the spec (version 2.12) |
 | `PROJECT.md` | Directory structure, purpose of every file, workflow diagrams |
 | `development-environment.md` | Rootless Podman environment: usage, pod topology, ports, volumes, mail safety, established facts, the Phase 1 verification suite (including the persistent pod lifecycle), the Phase 2 application and test suite, the Phase 3 validator test suite and the Phase 4 delivery suites |
 | `production/README.md` | Production topology (Phase 8): network matrix, the socket-activated ingress (client addresses), the low-port host setting, launch decisions, delivery states, where state lives |
@@ -11,9 +11,10 @@
 | `production/VPS-INSTALL.md` | **Installing on an Ubuntu VPS** (start here): requirements, the installer, first sign-in, DNS, certificates, DKIM, the setup wizard, firewall, backups, going live, upgrades, the acceptance checklist |
 | `production/components.md` | Every component with its container, unit, purpose, inputs, outputs, network and data |
 | `production/architecture.md` | What happens to an address and a message, step by step |
-| `integration/ctnlist.md` | The ctnlist integration and its outstanding re-permission work |
+| `integration/ctnlist.md` | The ctnlist integration, and what is outstanding on the ctnlist side |
+| `AUP.md` | The acceptable use policy, published by the application at `/acceptable-use-policy` |
 | `production/onboarding.md` | Client onboarding and SaaS operations (Phase 9): checklist, lifecycle, limits, API keys, reputation alerts, usage and billing statements, the public-onboarding decision |
-| `api/integration-guide.md` | Client integration guide (public at `/docs/api`): authentication, limits, jobs, webhooks, the meaning of statuses |
+| `api/integration-guide.md` | Client integration guide (public at `/docs/api`): authentication, limits, jobs, webhooks, connecting an application with one approval, the meaning of statuses |
 | `screenshots/README.md` | Screenshots of every dashboard page (operator console, client workspace, public pages, phone width) |
 | `architecture/overview.md` | One-page map of contracts, services, flows and state machines (summary only) |
 | `architecture/conventions.md` | Cross-language development conventions |

@@ -131,7 +131,12 @@ final class ClientWebhookController extends AbstractController
         $endpoint = ClientReadModel::isUuid($id)
             ? $this->em->getRepository(WebhookEndpoint::class)->findOneBy(['id' => Uuid::fromString($id), 'client' => $client]) : null;
 
-        return [$client, $endpoint ?? throw new NotFoundHttpException('Not found.')];
+        // A removed endpoint (of an ended application connection) is gone for the dashboard.
+        if (null === $endpoint || $endpoint->isRemoved()) {
+            throw new NotFoundHttpException('Not found.');
+        }
+
+        return [$client, $endpoint];
     }
 
     private function actor(): AuditActor

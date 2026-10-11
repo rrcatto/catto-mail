@@ -1,0 +1,9 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}{{ title }}{% endblock %}
+{% block body %}
+<section class="narrow" aria-labelledby="connect-h">
+    <h1 id="connect-h">{{ title }}</h1>
+    <p class="flash flash-error" role="alert">{{ error }}</p>
+    <p class="muted small">Nothing was connected, and you were not sent anywhere. Go back to the application and start again; if this keeps happening, its developer needs the message above (see the <a href="{{ path('docs_api') }}">API documentation</a>).</p>
+</section>
+{% endblock %}

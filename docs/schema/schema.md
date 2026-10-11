@@ -1,6 +1,6 @@
 # Smarthost Database Schema
 
-**Status:** normative contract for specification 2.11 · **Target:** PostgreSQL 16.x
+**Status:** normative contract for specification 2.12 · **Target:** PostgreSQL 16.x
 
 [`reference-schema.sql`](reference-schema.sql) holds the exact column types, constraints and
 indexes. It is a **reference, not a migration**:
@@ -20,6 +20,7 @@ Enum values come from [`../contracts/status-vocabulary.yaml`](../contracts/statu
 | `message_events` and `validation_evidence` are append-only. | `schema.integrity_rules` |
 | `send_job_recipients` is immutable once its job leaves `collecting`, except for purging rendered content. | `schema.integrity_rules` |
 | Webhook signing secrets are encrypted at rest. | `api.webhooks` |
+| An application connection stores no secret: the single-use code only as its SHA-256, and the application's PKCE code challenge. Its API key and webhook endpoint are created when the code is exchanged, and ended with the connection (key revoked, endpoint `removed`). | `api.connect` |
 | Address normalisation (D-18): trim whitespace, preserve the local part, lower-case the domain. It is used for duplicate detection and suppression matching. | `suppression_and_reputation.address_matching` |
 | Automatic suppressions and recipient global opt-outs are global (`suppressions.client_id` NULL, D-30). `client_id` only scopes a row; the client that reported an opt-out is `source_client_id`. Suppressions are lifted (`lifted_at`), never deleted, except by configured retention. | `suppression_and_reputation.global_suppression_policy` |
 | `users.email` is unique case-insensitively. This is a login rule only. | `schema.integrity_rules` |
@@ -44,6 +45,9 @@ erDiagram
     clients ||--o{ send_jobs : "owns"
     clients ||--o{ usage_records : "metered"
     clients ||--o{ webhook_endpoints : "registers"
+    clients ||--o{ application_connections : "connects"
+    application_connections |o--o| api_keys : "key (from the exchange)"
+    application_connections |o--o| webhook_endpoints : "endpoint (from the exchange)"
     clients ||--o{ webhook_events : "outbox"
     clients |o--o{ suppressions : "client-scoped (NULL = global)"
     clients |o--o{ suppressions : "reported opt-out (source_client_id)"
@@ -234,6 +238,15 @@ erDiagram
         text status
         text signing_secret_ciphertext
     }
+    application_connections {
+        uuid id PK
+        uuid client_id FK
+        text application_name
+        text status
+        text code_hash "SHA-256 of the single-use code"
+        uuid api_key_id FK
+        uuid webhook_endpoint_id FK
+    }
     webhook_events {
         uuid id PK "Smarthost-Event-Id"
         uuid client_id FK
@@ -262,6 +275,7 @@ erDiagram
 | `global_suppression_requests` | tenant | `client_id` (the reporting client; D-38) |
 | `client_memberships`, `sending_domains`, `api_keys`, `validation_jobs`, `send_jobs`, `usage_records`, `webhook_endpoints`, `webhook_events`, `webhook_deliveries` | tenant | `client_id` |
 | `client_limits`, `client_quota_usage`, `client_policy_acceptances`, `billing_statements` | tenant (Phase 9) | `client_id` |
+| `application_connections` | tenant (2.12) | `client_id`. Client members see the connected applications; client admins revoke them. The code hash and the code challenge are never shown. |
 | `billing_statement_lines` | tenant (Phase 9) | via `billing_statements.client_id` |
 | `client_notes`, `client_reputation_metrics`, `client_alerts` | operator only (Phase 9) | `client_id`, but never shown to the client (private notes, inferred risk) |
 | `validation_addresses`, `validation_evidence` | tenant | via `validation_jobs.client_id` |
@@ -342,7 +356,11 @@ Other indexes:
   the alert lists (`client_alerts_observed_idx`, `client_alerts_client_idx`) and the reputation
   evaluation's time window over bounce, complaint, deferral, outcome-unknown and suppression events
   (`message_events_reputation_idx`, partial), and the dashboard's submissions per minute
-  (`message_events_submitted_idx`, partial on `submitted_to_postfix`).
+  (`message_events_submitted_idx`, partial on `submitted_to_postfix`);
+* application connections (2.12): the code lookup of the exchange (`application_connections_code_hash_uq`), the client's
+  list (`application_connections_client_idx`), the connection of an API key (`application_connections_api_key_uq`, partial),
+  one active connection per client and webhook URL (`application_connections_active_webhook_uq`, partial) and the
+  clean-up of approvals never exchanged (`application_connections_pending_expiry_idx`, partial).
 
 ## 5. Key table-level rules (enforced by CHECK)
 
@@ -361,6 +379,8 @@ Other indexes:
 | `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. `dkim_public_key`, when set, is base64 (at most 2000 characters): the public half of the key the host agent generated for the client dashboard, never a private key. |
 | `clients` | `closed` requires `closed_at`; `origin` is `operator` or `public_application`. |
 | `api_keys` | `expires_at`, when set, is after `created_at`. |
+| `webhook_endpoints` | `status` is `enabled`, `disabled` or `removed`. `removed` (2.12) is terminal and set only when an application connection ends: the endpoint receives nothing, counts against no limit and keeps its delivery history. |
+| `application_connections` | `status` from the vocabulary (`pending`, `active`, `revoked`). `exchanged_at`, `api_key_id` and `webhook_endpoint_id` are set together, at the exchange: `pending` has none of them and `active` all of them. `revoked` has `revoked_at`, and only it. The code is stored as its SHA-256, the code challenge as 43 base64url characters (PKCE S256); `code_expires_at` is after `created_at`. Both URLs are `http(s)` and at most 2000 characters. |
 | `client_limits` | Every limit is non-negative (API rate ≥ 1; recipients per send job 1–10000). |
 | `client_quota_usage` | `metric` and `period` from the vocabulary; a month period starts on day 1. |
 | `client_policy_acceptances` | One row per client and policy version; the version is a short token; `source` is `client_dashboard` or `operator_recorded`. |
@@ -385,6 +405,7 @@ grants below. No runtime role has DDL rights.
 | auth_login_tokens | S I U D | – | – | – |
 | sending_domains | S I U | – | – | S |
 | api_keys | S I U | – | – | – |
+| application_connections | S I U D⁶ | – | – | – |
 | client_limits, client_quota_usage | S I U | – | – | – |
 | client_notes, client_policy_acceptances | S I | – | – | – |
 | validation_jobs | S I U | S | S U | – |
@@ -434,6 +455,9 @@ is set.
 ⁵ `DELETE` only removes host-agent checks that a complete agent report (host checks and every
 preflight section) no longer contains, e.g. after a host name changed; their history stays in
 `system_check_runs` (2.11).
+
+⁶ `DELETE` only removes approvals whose single-use code was never exchanged, a day after the code
+expired (2.12). An exchanged or revoked connection is never deleted.
 
 Suppressions (D-30): Symfony creates only client-reported `recipient_global_opt_out` rows (API)
 and operator blocks (console), and lifts by setting `lifted_at`. Go creates the system
