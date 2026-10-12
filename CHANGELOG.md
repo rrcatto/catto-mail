@@ -19,6 +19,19 @@ the two settings with their defaults (`Catto Mail`, and no organisation). An exi
 the shipped policy in force.
 
 ### Added
+- **`upgrade-catto-mail`** (owner instruction): one command, run as root, moves an installed
+  server to a newer release.
+  `curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/vX.Y.Z/upgrade-catto-mail`,
+  then `bash upgrade-catto-mail --version vX.Y.Z` (without `--version`: the newest release).
+  - It names the installed and the new release and asks before it restarts anything.
+  - In 12 PASS/WARN/FAIL steps it checks out the tag, runs `prod env-migrate`, `prod check` and
+    `prod upgrade` (backup, images, containers, migrations), waits for health, checks that the
+    new release answers on 443, sets the server's time zone, refreshes the firewall rules
+    (applied only where the installer applied them) and runs the host checks.
+  - Live delivery is never changed. A file changed on the server stops it before anything is
+    touched (`--discard-local-changes` keeps a copy and takes the release's). A second run
+    continues an interrupted upgrade. At the end it prints the rollback command with the backup.
+  - `smarthostctl test installer --with-upgrade` runs it in the stand-in server.
 - **The installation's name** (owner decision): `APP_SITE_NAME` (default `Catto Mail`) is the name
   in the top bar, in every page title, in the sign-in and sign-up emails (subject, text and the
   sender's display name) and in the connect and sign-up pages. `APP_ORGANISATION_NAME` names who
@@ -31,7 +44,7 @@ the shipped policy in force.
   `smarthost-internal`, a network that is not internal is refused, and `smarthostctl verify`
   accepts the pod on both networks. `docs/development-environment.md`, section 3.
 - `scripts/check-contracts.py` checks the policy document: it names no product, domain or
-  repository, uses only the four placeholders, states its version, and that version is the
+  repository, uses only the three placeholders, states its version, and that version is the
   `APP_ACCEPTABLE_USE_POLICY_VERSION` of the development example and the production profile.
 
 ### Changed

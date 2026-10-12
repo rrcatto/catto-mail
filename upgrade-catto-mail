@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+# upgrade-catto-mail — move an installed catto-mail to a newer release.
+#
+# Run as root on a server that install-catto-mail set up. It finds the installation, shows the
+# installed and the new release, and then does what the guide's upgrade procedure says: it
+# checks out the release (a Git tag), brings infra/.env to that release's layout (the old file
+# is kept beside it), checks the configuration and runs `smarthostctl prod upgrade` (a backup,
+# the image build, the containers recreated with the migrations and grants, the runtime
+# checks). Then it waits for every component to be healthy, sets the server's time zone to the
+# installation's, refreshes the generated firewall rules and prints how to go back.
+#
+#   curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/vX.Y.Z/upgrade-catto-mail
+#   sudo bash upgrade-catto-mail --version vX.Y.Z
+#
+# Without --version it takes the newest release. Live delivery stays as it is: HELD stays HELD,
+# live stays live (and then the activation checks must pass before the services are recreated).
+# Re-running it is safe: it reads the checked-out release, the configured one and the running
+# one, and continues an upgrade that was interrupted. Guide: docs/production/VPS-INSTALL.md §12.
+set -uo pipefail
+
+TOTAL=12
+SERVICE_USER="cattomail"
+VERSION="" REPO_URL=""
+ASSUME_YES=false DISCARD=false
+LOG="/var/log/catto-mail-upgrade.log"
+ARGS="$*"
+
+usage() {
+  cat <<'USAGE'
+usage: sudo ./upgrade-catto-mail [options]
+
+  --version vX.Y.Z          the release to upgrade to (default: the newest release)
+  --yes                     do not ask before the services are stopped and started
+  --discard-local-changes   files of the installation that were changed on this server are
+                            copied to a directory beside it and then replaced by the release's
+                            (without this option the upgrade stops and names them)
+  --user NAME               the service user (default: cattomail)
+  --repo URL                where to fetch the release (default: the installation's origin)
+  -h, --help
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --version) VERSION="${2:-}"; shift 2 ;;
+    --yes|--non-interactive) ASSUME_YES=true; shift ;;
+    --discard-local-changes) DISCARD=true; shift ;;
+    --user) SERVICE_USER="${2:-}"; shift 2 ;;
+    --repo) REPO_URL="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option $1 (--help)" >&2; exit 64 ;;
+  esac
+done
+
+# ------------------------------------------------------------------------- output
+STEP=0
+step() {  # step "Description": announce; the caller ends it with pass/warn
+  STEP=$((STEP + 1)); CURRENT="$1"
+  printf '[%02d/%02d] %s ' "$STEP" "$TOTAL" "$1"
+  local pad=$((62 - ${#1})); ((pad < 2)) && pad=2
+  printf '%.*s' "$pad" '..............................................................'
+  echo "== [$STEP/$TOTAL] $1" >>"$LOG"
+}
+pass() { echo " PASS${1:+  ($1)}"; }
+warn() { echo " WARN  $1"; }
+# fail <why> <how to fix> [what is running now]
+fail() {
+  echo " FAIL"
+  echo
+  echo "What failed:  step $STEP, $CURRENT"
+  echo "Why:          $1"
+  echo "How to fix:   $2"
+  echo "Running now:  ${3:-the installed release, unchanged. Fix the cause, then run this again.}"
+  echo "Full log:     $LOG (the last lines:)"
+  tail -n 15 "$LOG" | sed 's/^/    /'
+  exit 1
+}
+run() { "$@" >>"$LOG" 2>&1; }
+
+# Commands as the service user, in its own systemd session environment and in its home
+# directory (see install-catto-mail: rootless Podman cannot start from a directory the service
+# user cannot enter).
+as_user() {
+  local uid; uid="$(id -u "$SERVICE_USER")"
+  (cd "/home/$SERVICE_USER" && runuser -u "$SERVICE_USER" -- env -i HOME="/home/$SERVICE_USER" USER="$SERVICE_USER" \
+    LOGNAME="$SERVICE_USER" PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
+    XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+    bash -c "$1")
+}
+APP_DIR() { echo "/home/$SERVICE_USER/catto-mail"; }
+prod() { as_user "cd $(APP_DIR) && infra/bin/smarthostctl prod $*"; }
+envtag() { sed -n 's/^SMARTHOST_IMAGE_TAG=//p' "$(APP_DIR)/infra/.env" | tail -n1; }
+# The release the running catto-mail containers were built from ("" when none runs or they differ).
+running_tag() {
+  as_user "podman ps --filter label=smarthost.topology=production --format '{{.Image}}'" 2>/dev/null \
+    | sed -n 's#^localhost/smarthost-[a-z]*:##p' | sort -u | awk 'NR == 1 {t = $0} END {if (NR == 1) print t}'
+}
+newer() { [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" == "$1" ]]; }  # newer A B: A > B
+newest_backup() { as_user "ls -1dt $(APP_DIR)/infra/.generated/backups/*/ 2>/dev/null" | head -n1 | sed 's#/$##'; }
+
+main() {
+  echo "catto-mail upgrade — log: $LOG"
+  : >>"$LOG" 2>/dev/null || { echo "Run the upgrade as root (sudo)." >&2; exit 1; }
+  echo "==== $(date +%FT%T%:z) upgrade-catto-mail $ARGS" >>"$LOG"
+
+  step "Checking that this is root and finding the installation"
+  [[ $EUID -eq 0 ]] || fail "the upgrade is not running as root" "run it with sudo, or as root"
+  id "$SERVICE_USER" >/dev/null 2>&1 || fail "there is no user $SERVICE_USER on this server" \
+    "catto-mail is not installed here (install-catto-mail), or it runs as another user: pass --user"
+  ENV_FILE="$(APP_DIR)/infra/.env"
+  [[ -d "$(APP_DIR)/.git" && -f "$ENV_FILE" ]] || fail "no catto-mail installation in $(APP_DIR)" \
+    "install it first (install-catto-mail); this script only upgrades an installation"
+  grep -q '^SMARTHOST_ENV=production' "$ENV_FILE" || fail "$ENV_FILE is not a production configuration" \
+    "this script upgrades a production installation; a development checkout is updated with git and smarthostctl"
+  [[ -S "/run/user/$(id -u "$SERVICE_USER")/bus" ]] || fail "the systemd of $SERVICE_USER is not running" \
+    "loginctl enable-linger $SERVICE_USER; loginctl user-status $SERVICE_USER"
+  for tool in git podman python3 curl; do
+    command -v "$tool" >/dev/null || fail "$tool is not installed" "apt-get install $tool"
+  done
+  pass "$(APP_DIR)"
+
+  step "Finding the installed and the new release"
+  CHECKOUT="$(as_user "git -C $(APP_DIR) describe --tags --exact-match 2>/dev/null" || true)"
+  CONFIGURED="$(envtag)"
+  RUNNING="$(running_tag)"
+  HAVE="${RUNNING:-$CONFIGURED}"
+  [[ "$HAVE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "the installed release is not known (SMARTHOST_IMAGE_TAG='$CONFIGURED')" \
+    "check $ENV_FILE and: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status"
+  [[ -n "$REPO_URL" ]] || REPO_URL="$(as_user "git -C $(APP_DIR) remote get-url origin" 2>>"$LOG")"
+  [[ -n "$REPO_URL" ]] || fail "the installation has no origin to fetch releases from" "pass --repo URL"
+  if [[ -z "$VERSION" ]]; then
+    VERSION="$(as_user "git ls-remote --tags --refs '$REPO_URL' 'v[0-9]*'" 2>>"$LOG" | sed 's#.*refs/tags/##' \
+      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+    [[ -n "$VERSION" ]] || fail "no release was found at $REPO_URL" "check the server's network and DNS, or pass --version vX.Y.Z"
+  fi
+  [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$VERSION is not a release tag (vX.Y.Z)" "upgrade to a release tag, never a branch"
+  NEW="${VERSION#v}"
+  if [[ "$RUNNING" == "$NEW" && "$CONFIGURED" == "$NEW" && "$CHECKOUT" == "$VERSION" ]]; then
+    pass "$VERSION"
+    echo
+    echo "catto-mail $VERSION is installed and running: there is nothing to upgrade."
+    exit 0
+  fi
+  if newer "$HAVE" "$NEW"; then
+    fail "the installed release v$HAVE is newer than $VERSION" \
+      "going back is a rollback, with the backup the upgrade made (docs/production/VPS-INSTALL.md §12)"
+  fi
+  pass "v$HAVE installed, $VERSION to install"
+
+  step "Checking the installation for files changed on this server"
+  CHANGED="$(as_user "git -C $(APP_DIR) status --porcelain --untracked-files=no" 2>>"$LOG" | sed 's/^...//')"
+  if [[ "$CHECKOUT" == "$VERSION" || -z "$CHANGED" ]]; then
+    pass "${CHANGED:+already on $VERSION}"
+  elif [[ "$DISCARD" == true ]]; then
+    SAVED="/home/$SERVICE_USER/catto-mail-local-changes-$(date +%Y%m%dT%H%M%S)"
+    as_user "mkdir -p '$SAVED' && cd $(APP_DIR) && git status --porcelain --untracked-files=no | sed 's/^...//' \
+      | while IFS= read -r f; do [[ -f \"\$f\" ]] && cp --parents -p \"\$f\" '$SAVED/'; done; git checkout --quiet -- ." >>"$LOG" 2>&1 \
+      || fail "the changed files could not be saved to $SAVED" "see the log"
+    pass "saved to $SAVED, then replaced by the release's"
+  else
+    fail "these files of the installation were changed on this server: $(tr '\n' ' ' <<<"$CHANGED")" \
+      "keep what you need of them, then run this again with --discard-local-changes (it copies them to a directory beside the installation first). A policy of your own (docs/AUP.md) is put back before a later build."
+  fi
+
+  echo
+  echo "  catto-mail will be upgraded from v$HAVE to $VERSION."
+  echo "  A backup is taken first. The new images are built while the services keep running;"
+  echo "  then every service is stopped and started again (the dashboard and the API are away"
+  echo "  for a minute or two, and mail waits in the queue)."
+  if [[ "$ASSUME_YES" != true ]]; then
+    read -r -p "  Continue? [y/N] " answer </dev/tty || answer=""
+    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { echo "Nothing was changed."; exit 0; }
+  fi
+  echo
+
+  step "Fetching release $VERSION"
+  if [[ "$CHECKOUT" == "$VERSION" ]]; then
+    pass "already checked out"
+  else
+    depth=""; [[ "$(as_user "git -C $(APP_DIR) rev-parse --is-shallow-repository" 2>/dev/null)" == true ]] && depth="--depth 1"
+    as_user "cd $(APP_DIR) && git fetch --quiet $depth '$REPO_URL' 'refs/tags/$VERSION:refs/tags/$VERSION'" >>"$LOG" 2>&1 \
+      || fail "release $VERSION could not be fetched from $REPO_URL" "check that the tag exists: git ls-remote --tags $REPO_URL"
+    as_user "cd $(APP_DIR) && git checkout --quiet '$VERSION'" >>"$LOG" 2>&1 \
+      || fail "release $VERSION could not be checked out" "see the log (git status in $(APP_DIR))"
+    [[ "$(as_user "git -C $(APP_DIR) describe --tags --exact-match" 2>/dev/null)" == "$VERSION" ]] \
+      || fail "the installation is not on $VERSION after the checkout" "see the log"
+    pass "$(APP_DIR) is on $VERSION"
+  fi
+  STILL_OLD="v$HAVE is still running, with the new release's files in $(APP_DIR). Fix the cause, then run this again."
+
+  step "Bringing infra/.env to the release's layout"
+  MIGRATED="$(prod env-migrate 2>&1)" || { echo "$MIGRATED" >>"$LOG"; fail "infra/.env could not be rewritten" "see the log; the file itself is unchanged" "$STILL_OLD"; }
+  echo "$MIGRATED" >>"$LOG"
+  KEPT_ENV="$(sed -n 's/^kept the previous file as //p' <<<"$MIGRATED")"
+  ENV_NOTES="$(grep -E '^ *(added|renamed|dropped) ' <<<"$MIGRATED" | sed 's/^ *//' || true)"
+  if [[ -n "$KEPT_ENV" ]]; then pass "the previous file is kept as $(basename "$KEPT_ENV")"; else pass "already in the release's layout"; fi
+
+  step "Checking the configuration"
+  prod check >>"$LOG" 2>&1 || fail "the configuration does not satisfy the release's rules" \
+    "run: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod check   (it names each problem); edit $ENV_FILE" "$STILL_OLD"
+  pass
+
+  step "Backing up, building the images, recreating the services"
+  LIVE="$(sed -n 's/^SMARTHOST_LIVE_DELIVERY_ENABLED=//p' "$ENV_FILE" | tail -n1)"
+  if [[ "$(envtag)" == "$NEW" ]]; then
+    # An earlier run got as far as the build or the restart: its backup is the one to go back to.
+    BACKUP="$(newest_backup)"
+    OUT="$(prod build 2>&1 && prod recreate 2>&1 && prod "preflight --section runtime" 2>&1)"; rc=$?
+  else
+    OUT="$(prod "upgrade $NEW" 2>&1)"; rc=$?
+    BACKUP="$(sed -n 's/^smarthostctl prod: backup written to \([^ ]*\) .*/\1/p' <<<"$OUT")"
+  fi
+  echo "$OUT" >>"$LOG"
+  ROLLBACK="sudo -iu $SERVICE_USER bash -c 'cd $(APP_DIR) && git checkout v$HAVE && infra/bin/smarthostctl prod rollback $HAVE ${BACKUP:-<backup directory>}'"
+  if ((rc != 0)); then
+    if [[ "$(running_tag)" == "$HAVE" ]]; then
+      fail "the upgrade stopped before the services were replaced" \
+        "see the log (a failed check names itself; a failed build is usually the network or the disk)" "$STILL_OLD"
+    fi
+    fail "the upgrade stopped while the services were being replaced" \
+      "see: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status, then prod logs <component>. Run this again to finish, or go back: $ROLLBACK" \
+      "not every service; live delivery is ${LIVE:-unknown}"
+  fi
+  pass "${BACKUP:+backup $BACKUP}"
+  UPGRADED="$VERSION is installed. To go back to v$HAVE: $ROLLBACK"
+
+  step "Checking the health of every component"
+  as_user "cd $(APP_DIR) && infra/.generated/podman/smarthost-production.sh wait-healthy 300" >>"$LOG" 2>&1 \
+    || fail "not every container became healthy" \
+      "sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status, then prod logs <component>" "$UPGRADED"
+  pass "$(as_user "podman ps --filter label=smarthost.topology=production --format '{{.Names}}'" | wc -l) containers healthy"
+
+  step "Checking that $VERSION is running"
+  WEB="$(sed -n 's/^PROXY_SERVER_NAME=//p' "$ENV_FILE" | tail -n1)"
+  code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 60 --resolve "$WEB:443:127.0.0.1" "https://$WEB/healthz" 2>>"$LOG" || true)"
+  [[ "$(running_tag)" == "$NEW" ]] || fail "the running containers are not all from $VERSION" \
+    "sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod status" "$UPGRADED"
+  [[ "$code" == 200 ]] || fail "the web application does not answer on port 443 (HTTP ${code:-none})" \
+    "sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod logs nginx; prod logs app" "$UPGRADED"
+  pass "https://$WEB/ answers"
+
+  step "Setting the server's time zone to the installation's"
+  zone="$(python3 "$(APP_DIR)/infra/lib/smarthost_render.py" get SMARTHOST_TIMEZONE --env "$ENV_FILE" 2>>"$LOG")"
+  if [[ -z "$zone" ]]; then warn "the installation's time zone could not be read"
+  elif [[ "$(timedatectl show -p Timezone --value 2>/dev/null)" == "$zone" ]]; then pass "$zone"
+  elif run timedatectl set-timezone "$zone"; then pass "set to $zone"
+  else warn "run: timedatectl set-timezone $zone"; fi
+
+  step "Refreshing the firewall rules"
+  FW="/home/$SERVICE_USER/catto-mail-firewall.nft"
+  SSH_PORT="$(python3 "$(APP_DIR)/infra/lib/smarthost_render.py" get SMARTHOST_SSH_PORT --env "$ENV_FILE" 2>>"$LOG")"
+  if ! prod firewall >"$FW.new" 2>>"$LOG"; then
+    rm -f "$FW.new"; warn "the rules could not be generated: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod firewall"
+  elif [[ -f "$FW" ]] && cmp -s "$FW" "$FW.new"; then
+    rm -f "$FW.new"; pass "unchanged"
+  else
+    mv "$FW.new" "$FW"; chown "$SERVICE_USER": "$FW"
+    if grep -qF "$FW" /etc/nftables.conf 2>/dev/null; then
+      # The installer applied the rules (--apply-firewall), so the release's rules replace them.
+      if grep -q "tcp dport { $SSH_PORT, " "$FW" && run nft -f "$FW"; then pass "changed by the release, applied; SSH port $SSH_PORT stays open"
+      else warn "changed by the release but not applied: review $FW, then nft -f $FW"; fi
+    else
+      warn "changed by the release: if you applied the earlier rules, review $FW, then nft -f $FW"
+    fi
+  fi
+
+  step "Running the host checks"
+  if prod "preflight --section host --section runtime --section exposure --quiet" >>"$LOG" 2>&1; then pass; else
+    warn "some host checks failed: see System setup › Diagnostics in the dashboard"; fi
+
+  # Plain variables only below: a quote inside ${...} breaks a here-document.
+  if [[ "$LIVE" == true ]]; then live_now="LIVE, as before"; else live_now="HELD, as before"; fi
+  backup_now="${BACKUP:-none found, see $(APP_DIR)/infra/.generated/backups}"
+  kept_now="${KEPT_ENV:-none: infra/.env was already in the layout of this release}"
+  cat <<DONE
+
+Catto-mail upgrade completed.
+
+Web application:    https://$WEB/
+Release:            $VERSION (was v$HAVE)
+Live bulk delivery: $live_now
+Backup:             $backup_now
+Previous settings:  $kept_now
+DONE
+  if [[ -n "$ENV_NOTES" ]]; then
+    echo
+    echo "Changes to infra/.env (to set a value: edit the file, then smarthostctl prod check and prod recreate):"
+    sed 's/^/  /' <<<"$ENV_NOTES"
+  fi
+  cat <<DONE
+
+What the release changed, and anything to do by hand: $(APP_DIR)/CHANGELOG.md
+
+To go back to v$HAVE (pause first: everything recorded after the upgrade is lost):
+  $ROLLBACK
+DONE
+}
+
+main

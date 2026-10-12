@@ -2002,6 +2002,21 @@ the service user's systemd units. **BIND is not required**: catto-mail only quer
   everything in **HELD** mode.
 - It then checks health, takes a first backup, generates the firewall rules (applied only on
   request), verifies automatic start, and prints a single-use sign-in link.
+
+**Upgrade script** (owner instruction, 2026-10-12).
+- `upgrade-catto-mail`, run as root on an installed server, moves it to a newer release tag: the
+  newest when none is named, never a branch and never an older release.
+- It names the installed and the new release and asks before it restarts anything. A file of the
+  installation that was changed on the server stops it first, unless the operator has it copied
+  aside (`--discard-local-changes`).
+- It checks out the tag, runs `prod env-migrate`, `prod check` and `prod upgrade` (backup, image
+  build, containers recreated, migrations and grants), waits for health and checks that the new
+  release answers on port 443.
+- It sets the server's time zone to the installation's, regenerates the firewall rules (applied
+  only where the installer had applied them, and only while they keep the SSH port open) and
+  runs the host checks.
+- It never changes live delivery, continues an interrupted upgrade when run again, and ends
+  with the rollback command and the backup it made.
 - Every step prints PASS, WARN or FAIL. A FAIL says what failed, why, how to fix it and whether
   re-running is safe; re-running skips finished steps.
 

@@ -144,7 +144,9 @@ points span components and need several files to see:
     `Phase9QueryPlanTest`; the rehearsal has a Phase 9 section.
 - **Phase 10** (operator self-service, spec 2.11, `operator_self_service`): repository side
   implemented (v0.1.9, the first GitHub Release).
-  - The installer `install-catto-mail`; the host agent `infra/lib/smarthost_agent.py`
+  - The installer `install-catto-mail` and, for an installed server, `upgrade-catto-mail` (both
+    at the repository root, both tested by `smarthostctl test installer`, the second with
+    `--with-upgrade`); the host agent `infra/lib/smarthost_agent.py`
     (`<instance>-host-agent.service`).
   - `app/src/System/`: diagnostics, requests, the setup wizard, the emergency stop.
   - `app/src/AddressBatch/`: batches and re-permission; `app/src/Help/` with

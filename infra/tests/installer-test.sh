@@ -17,7 +17,9 @@
 #      the host agent's checks (the boot target, the ingress, client addresses), and the web
 #      emergency stop (the delivery daemon pauses, the agent holds Postfix, typed resume)
 #   B  a container restart standing in for a reboot: everything back, still HELD
-#   U  (--with-upgrade) `prod upgrade` to a second tag, then `prod rollback` to its backup
+#   U  (--with-upgrade) upgrade-catto-mail as root to a second tag: a file changed on the server
+#      stops it, then the upgrade itself, a second run that finds nothing to do, and
+#      `prod rollback` to the backup the upgrade made
 #
 # The image builds inside the VPS take most of the time (about half an hour on a laptop).
 # The VPS container is removed at the end unless --keep is given. The development pod is
@@ -190,11 +192,29 @@ healthy="$(as_svc 'podman ps --filter health=healthy --format "{{.Names}}"' | wc
 
 if [[ $UPGRADE == true ]]; then
   echo "== U upgrade and rollback"
+  upgrade() { podman exec -w /root "$VPS" /root/catto-mail-installer/upgrade-catto-mail --yes "$@"; }
+  running() { as_svc "podman ps --filter label=smarthost.topology=production --format '{{.Image}}'" | sed -n 's#^localhost/smarthost-[a-z]*:##p' | sort -u | tr '\n' ' '; }
   as_svc 'cd ~/catto-mail && infra/bin/smarthostctl prod console smarthost:client:create --company "Before upgrade" --contact-email ops@example.org' >/dev/null
   snapshot v0.0.2
-  out="$(as_svc 'cd ~/catto-mail && git fetch -q --tags origin && git checkout -q v0.0.2 && infra/bin/smarthostctl prod upgrade 0.0.2' 2>&1)" || true
-  backup="$(sed -n 's/^smarthostctl prod: backup written to \([^ ]*\) .*/\1/p' <<<"$out")"
-  [[ "$out" == *"upgraded 0.0.1 -> 0.0.2"* && -n "$backup" ]] && pass "prod upgrade: backup, new images, migrations, grants, runtime preflight" || fail "upgrade: ${out: -400}"
+  as_svc 'echo "changed on the server" >> ~/catto-mail/docs/AUP.md'
+  if upgrade > "$GEN/upgrade-0.log" 2>&1; then fail "the upgrade went ahead over a file changed on the server"; else
+    grep -q "changed on this server: docs/AUP.md" "$GEN/upgrade-0.log" && [[ "$(as_svc 'git -C ~/catto-mail describe --tags')" == v0.0.1 && "$(running)" == "0.0.1 " ]] \
+      && pass "a file changed on the server stops the upgrade and is named; nothing was changed" || fail "local change: $(tail -n 12 "$GEN/upgrade-0.log")"
+  fi
+  if upgrade --discard-local-changes > "$GEN/upgrade-1.log" 2>&1; then pass "upgrade-catto-mail finished (exit 0)"; else fail "upgrade exit: $(tail -n 20 "$GEN/upgrade-1.log")"; fi
+  steps="$(grep -cE '^\[[0-9]{2}/12\] .* (PASS|WARN)' "$GEN/upgrade-1.log" || true)"
+  [[ "$steps" == 12 ]] && pass "12 numbered steps, each PASS or WARN" || fail "steps: $(grep -E '^\[[0-9]{2}/12\]' "$GEN/upgrade-1.log" | grep -v PASS)"
+  backup="$(sed -n 's/^Backup: *//p' "$GEN/upgrade-1.log")"
+  grep -q "^Release: *v0.0.2 (was v0.0.1)" "$GEN/upgrade-1.log" && [[ -n "$backup" && "$(running)" == "0.0.2 " \
+     && "$(as_svc 'git -C ~/catto-mail describe --tags')" == v0.0.2 && "$(as_svc 'grep ^SMARTHOST_IMAGE_TAG= ~/catto-mail/infra/.env')" == *=0.0.2 ]] \
+    && pass "the new release is checked out, configured and running; a backup was taken first" || fail "upgrade: running $(running), backup '$backup'"
+  grep -q "^Live bulk delivery: HELD, as before" "$GEN/upgrade-1.log" && [[ "$(as_svc 'grep ^SMARTHOST_LIVE_DELIVERY_ENABLED= ~/catto-mail/infra/.env')" == *=false \
+     && "$(https_get /healthz | cut -d' ' -f1)" == 200 ]] \
+    && pass "still HELD, and the web application answers on 443" || fail "after upgrade: $(https_get /healthz)"
+  [[ "$(as_svc 'tail -n 1 ~/catto-mail-local-changes-*/docs/AUP.md')" == "changed on the server" && -z "$(as_svc 'git -C ~/catto-mail status --porcelain --untracked-files=no')" ]] \
+    && pass "the changed file was copied beside the installation and replaced by the release's" || fail "the saved copy"
+  upgrade > "$GEN/upgrade-2.log" 2>&1 && grep -q "there is nothing to upgrade" "$GEN/upgrade-2.log" \
+    && pass "a second run finds the release installed and changes nothing" || fail "second run: $(tail -n 8 "$GEN/upgrade-2.log")"
   as_svc 'cd ~/catto-mail && infra/bin/smarthostctl prod console smarthost:client:create --company "After upgrade" --contact-email ops@example.org' >/dev/null
   out="$(as_svc "cd ~/catto-mail && git checkout -q v0.0.1 && infra/bin/smarthostctl prod rollback 0.0.1 $backup" 2>&1)" || true
   [[ "$out" == *"rolled back to 0.0.1"* && "$(sql "SELECT count(*) FROM clients WHERE company_name = 'After upgrade'")" == 0 \

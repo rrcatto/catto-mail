@@ -2684,6 +2684,27 @@ operator_self_service:
       Every step prints PASS/WARN/FAIL; a FAIL names what, why, how to fix and whether re-running
       is safe. Idempotent: finished steps are detected and skipped; existing configuration and data
       are kept. It never enables live delivery and never changes the firewall unless asked.
+  upgrade_script:
+    command: upgrade-catto-mail (repository root), run as root on an installed server (owner instruction 2026-10-12)
+    release: >-
+      an exact Git tag vX.Y.Z, the newest one when none is named; never a branch, never an older
+      release than the installed one (going back is prod rollback with the upgrade's backup).
+    steps: >-
+      the installation and its service user; the installed release (running containers, else
+      SMARTHOST_IMAGE_TAG) and the new one; files of the installation changed on the server; a
+      question before anything is restarted; the tag fetched and checked out; prod env-migrate;
+      prod check; prod upgrade (backup, image build, containers recreated, migrations and
+      grants, runtime preflight); health of every component; the new release answering on 443;
+      the server's time zone set to SMARTHOST_TIMEZONE; the firewall rules regenerated, applied
+      only where the installer had applied them and only while they keep the SSH port open; the
+      host checks.
+    properties: >-
+      Every step prints PASS/WARN/FAIL; a FAIL names what, why, how to fix and what is running
+      now. It never enables or disables live delivery. A file changed on the server stops it
+      before anything is touched, unless --discard-local-changes (a copy is kept beside the
+      installation). Run again, it continues an interrupted upgrade from the checked-out, the
+      configured and the running release, and reports an installed release as nothing to do.
+      It ends with the rollback command and the backup directory.
   bootstrap_sign_in: >-
     `smarthostctl prod admin-link` prints a single-use sign-in link for an administrator
     (APP_ADMIN_EMAIL or a user with ADMIN): at most 15 minutes, used once, only its hash stored,

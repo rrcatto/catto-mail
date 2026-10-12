@@ -44,7 +44,9 @@ Contents (see `docs/PROJECT.md` for every file):
   ruleset; `lib/smarthost_seedtest.py` is the operator's seed test; `lib/smarthost_agent.py` is
   the host agent (host checks and dashboard requests, specification 2.11).
 - The installer `install-catto-mail` (repository root) prepares an Ubuntu Server 26.04 LTS host
-  and runs these commands (`docs/production/VPS-INSTALL.md`).
+  and runs these commands (`docs/production/VPS-INSTALL.md`). `upgrade-catto-mail` beside it
+  moves an installed server to a newer release with `prod env-migrate`, `prod check` and
+  `prod upgrade` (§12 of the same guide).
 - `production.env.example` is the production template.
 - Tests: `tests/phase8-test.sh` and `tests/phase8/` (no network), and `tests/phase8-rehearsal.sh`
   (the production topology locally, no Internet egress).

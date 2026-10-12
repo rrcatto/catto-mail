@@ -188,7 +188,8 @@ usage: smarthostctl <command>        (development; production: smarthostctl prod
   test installer [--keep] [--with-upgrade]   runs install-catto-mail as root in an Ubuntu 26.04
                     VPS stand-in (systemd container 'smarthost-installer-test', rootless Podman
                     inside) from this working tree as a test tag: the 21 steps, a second run, sign-in
-                    on 443, host agent, web emergency stop, a restart; optionally upgrade/rollback
+                    on 443, host agent, web emergency stop, a restart; optionally upgrade-catto-mail
+                    to a second tag and rollback
   console <args>    run a Symfony console command in the running app container (as www-data),
                     e.g. console smarthost:dev:bootstrap
   migrate           re-run Doctrine migrations and then the infrastructure grants

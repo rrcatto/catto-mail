@@ -490,6 +490,11 @@ systemd user timer or cron.
 
 ## 18. Upgrades
 
+One command as root does all of it, from the new release's own script (`VPS-INSTALL.md` §12):
+`bash upgrade-catto-mail --version v<new>`. It asks first, runs the steps below, waits for
+health, keeps the server's time zone and the firewall rules in step with the release and prints
+the rollback command with the backup it made. By hand, as the service user:
+
 ```sh
 git fetch && git checkout v<new>
 prod env-migrate                # infra/.env in the new layout; the old file stays as infra/.env.v<old>-<timestamp>

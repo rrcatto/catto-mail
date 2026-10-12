@@ -502,8 +502,27 @@ Start with your seed addresses, then a controlled sample — never a whole list.
 - **Available releases:** `git ls-remote --tags https://github.com/rrcatto/catto-mail.git`, or in
   the installation `git fetch --tags && git tag --sort=-v:refname`.
 - **Installed release:** `git -C ~/catto-mail describe --tags` (also in System setup › Host).
-- **Upgrade** (read the CHANGELOG first). Log in as `ubuntu`, then `sudo -i` and
-  `sudo -iu cattomail`:
+- **Upgrade** (read the CHANGELOG first). Log in as `ubuntu`, become root with `sudo -i`, and run
+  the new release's upgrade script:
+  ```sh
+  curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/vX.Y.Z/upgrade-catto-mail
+  bash upgrade-catto-mail --version vX.Y.Z
+  ```
+  It names the installed and the new release and asks before it restarts anything (`--yes` does
+  not ask; without `--version` it takes the newest release). Then, in 12 numbered steps that
+  each say PASS, WARN or FAIL, it does the procedure below, waits until every component is
+  healthy, checks that the new release answers on port 443, sets the server's time zone to the
+  installation's, refreshes the generated firewall rules (and applies them only where the
+  installer had applied them) and prints the command that goes back, with the backup it made.
+  - Live delivery stays as it was: HELD stays HELD.
+  - A file of the installation that was changed on the server (a policy of your own in
+    `docs/AUP.md`, for one) stops it before anything is touched. `--discard-local-changes`
+    copies such files to a directory beside the installation and takes the release's.
+  - Running it again is safe: it continues an upgrade that was interrupted, and says so when
+    the release is already installed and running.
+  - The script is part of every release after 0.2.6 and upgrades from any earlier one. Its log
+    is `/var/log/catto-mail-upgrade.log`.
+- **The same by hand**, as the service user (`sudo -iu cattomail` from root):
   ```sh
   cd ~/catto-mail
   git fetch --tags && git checkout vX.Y.Z
@@ -515,13 +534,15 @@ Start with your seed addresses, then a controlled sample — never a whole list.
   as `infra/.env.v<old version>-<date and time>`; `prod upgrade` runs it too, and a rollback to
   the old version puts that file back.
 - **From 0.2.2 or earlier to 0.2.3 or later**, set the server's time zone once, as root (the
-  installer does this on new servers; Diagnostics › Host warns until it is done):
+  installer does this on new servers and the upgrade script on existing ones; Diagnostics › Host
+  warns until it is done):
   ```sh
   timedatectl set-timezone Africa/Johannesburg
   ```
 - **From 0.2.3 or earlier to 0.2.4 or later**, port 80 joins the ingress (it redirects to
-  HTTPS). If you applied the firewall rules (§8), generate and apply them again, and allow
-  inbound TCP 80 in the provider's firewall too:
+  HTTPS). If you applied the firewall rules (§8), generate and apply them again (the upgrade
+  script does, where the installer had applied them), and allow inbound TCP 80 in the provider's
+  firewall too:
   ```sh
   infra/bin/smarthostctl prod firewall > /home/cattomail/catto-mail-firewall.nft   # as cattomail
   nft -f /home/cattomail/catto-mail-firewall.nft                                     # as root

@@ -617,7 +617,9 @@ rehearsal configuration). It checks:
   - the web emergency stop: the delivery daemon pauses and the agent holds Postfix; resuming
     needs RESUME SENDING;
   - a container restart standing in for a reboot.
-- `--with-upgrade` also runs `prod upgrade` to a second tag and `prod rollback` to its backup.
+- `--with-upgrade` also runs `upgrade-catto-mail` as root to a second tag (first with a file
+  changed on the server, which must stop it; then the upgrade, and a second run that finds
+  nothing to do) and `prod rollback` to the backup the upgrade made.
 - `--keep` leaves the VPS container for inspection
   (`podman exec -it smarthost-installer-test bash`).
 
