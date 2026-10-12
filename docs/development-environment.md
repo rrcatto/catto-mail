@@ -592,7 +592,18 @@ rehearsal configuration). It checks:
 - The stand-in must map the service user's subordinate IDs (from 165,536 up, after the image's
   own `ubuntu` user), so the engine host needs more than the common 65,536 subordinate IDs
   (`/etc/subuid` and `/etc/subgid`); otherwise step 8 fails with
-  `newuidmap: write to uid_map failed`. It installs with the installer's test option
+  `newuidmap: write to uid_map failed`. About 270,000 are enough
+  (`sudo usermod --add-subuids 165536-524287 --add-subgids 165536-524287 "$USER"`, then
+  `podman system migrate` with every container stopped: it restarts the engine's user
+  namespace).
+- The stand-in's `/home` is a directory under `infra/.generated/installer-test/`, not part of
+  the container's own file system, so that the service user's container storage sits on a plain
+  file system: on an engine whose storage is fuse-overlayfs (an encrypted home directory) the
+  image builds of step 12 otherwise fail to unpack layers. Its files belong to subordinate IDs;
+  the test removes them with `podman unshare`.
+- On Podman 4.9 the test switches the `cpu`, `memory` and `pids` cgroup controllers on at the
+  stand-in's root after it has booted: systemd inside does not do it there, and step 15 then
+  fails with ``controller `pids` is not available``. It installs with the installer's test option
   `--no-egress` (`SMARTHOST_EGRESS_ENABLED=false`: no container has an Internet route, and the
   production rules then accept the `.test` host names it uses), so nothing resolves and nothing
   is sent. The installer refuses private and documentation addresses as the public IPv4, so the
@@ -683,9 +694,12 @@ phase3` 298 pytest tests and the 10,000-address run; `test phase4` the Go units 
 integration tests; `test phase8` 29/29 (81 unit tests); against the running pod `test phase4-e2e`
 21/21, `test phase5-e2e` 50/50, `test phase6-e2e` 75/75 and `test phase7-e2e` 38/38; `verify`
 175/176 (T06, §1), with T05 accepting the second internal network; `test phase8-rehearsal` 69/69.
-`test installer` was started and stopped at step 8 of 21 (`newuidmap: write to uid_map failed`):
-the engine host still has only 65,536 subordinate IDs (the requirement is described with the installer test above), so the
-installer remains unproven on this workstation. ctnlist's development stack was connected to
+`test installer` first stopped at step 8 of 21 (`newuidmap: write to uid_map failed`: 65,536
+subordinate IDs). With the range raised to 424,288 it stopped at step 12 (nested storage on the
+encrypted home's fuse-overlayfs) and then at step 15 (cgroup controllers on Podman 4.9); with the
+two changes to the test described with the installer test above it passes on this workstation:
+15/15 (the installation's 21 steps, the second run, services and sign-in, the host agent, the
+emergency stop, the restart), without `--with-upgrade`. ctnlist's development stack was connected to
 the pod through the connect flow with its own button, and its `bin/dev test-cattomail` passed: a
 proof, a validation job, the signed `send.completed` and `validation.completed` webhooks, then a
 declined request, a disconnect (key revoked, endpoint removed) and a reconnect. Every screenshot

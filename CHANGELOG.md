@@ -54,6 +54,11 @@ the shipped policy in force.
   application, so the connect page judges a webhook address as the webhook worker will. Until
   now a development client application on a private network passed the worker and was refused
   by the connect page.
+- `smarthostctl test installer` also runs on a Podman 4.9 engine whose storage is on an
+  encrypted home directory: the stand-in server's `/home` is a plain directory under
+  `infra/.generated/installer-test/`, and the test switches the cgroup controllers on at the
+  stand-in's root. The engine host still needs more than 65,536 subordinate IDs
+  (`docs/development-environment.md`, section 8).
 - The production rehearsal creates its SaaS client exempt from policy acceptance: the profile
   now has a version in force and the rehearsal has no person to accept it.
 

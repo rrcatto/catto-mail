@@ -73,25 +73,35 @@ r = c.getresponse()
 print(r.status, r.getheader("Location") or "")
 PY
 }
+# The VPS's /home is a directory under $GEN (see the podman run below): its files belong to the
+# VPS's users, which are subordinate IDs here, so only `podman unshare` can remove them.
 cleanup() {
   [[ $KEEP == true ]] && { echo "installer-test: kept $VPS (podman rm -f $VPS when done)"; return; }
   podman rm -f --time 30 "$VPS" >/dev/null 2>&1 || true
-  rm -rf "$GEN"
+  podman unshare rm -rf "$GEN"
 }
 
 DEV_BEFORE="$(dev_snapshot)"
 podman rm -f --time 30 "$VPS" >/dev/null 2>&1 || true
-rm -rf "$GEN"; mkdir -p "$GEN"
+podman unshare rm -rf "$GEN"; mkdir -p "$GEN" "$GEN/vps-home"
 trap cleanup EXIT
 podman build -q --label project=smarthost -t "$IMAGE" "$REPO/infra/tests/installer" >/dev/null
 snapshot v0.0.1
 # Rootless Podman inside a container needs /dev/fuse, /dev/net/tun and an unconfined profile;
 # the low-port sysctl starts at the Linux default so the installer's own setting is tested.
+# /home is a plain directory of this checkout's file system, not part of the container's own
+# file system: the service user's container storage lives there, and on an engine whose storage
+# is fuse-overlayfs (an encrypted home directory, for one) storage inside storage cannot unpack
+# image layers ("open .../.wh.…: invalid argument").
 podman run -d --name "$VPS" --label project=smarthost --hostname vps-test --systemd=always \
   --device /dev/fuse --device /dev/net/tun --security-opt label=disable --security-opt unmask=ALL \
   --security-opt seccomp=unconfined --cap-add SYS_ADMIN,NET_ADMIN --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
-  -v "$RELEASE:/src/catto-mail.git:ro" "$IMAGE" >/dev/null
+  -v "$RELEASE:/src/catto-mail.git:ro" -v "$GEN/vps-home:/home" "$IMAGE" >/dev/null
 podman exec "$VPS" systemctl is-system-running --wait >/dev/null 2>&1 || true
+# Podman 4.9 with crun puts the VPS in a sub-cgroup whose controllers systemd inside does not
+# switch on, and the service user's containers then cannot start ("controller `pids` is not
+# available"). Switching them on at the VPS's root is harmless where they already are.
+podman exec "$VPS" sh -c 'echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control' 2>/dev/null || true
 podman exec "$VPS" git clone -q --branch v0.0.1 --depth 1 file:///src/catto-mail.git /root/catto-mail-installer
 
 echo "== I installation"
