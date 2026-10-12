@@ -1807,12 +1807,12 @@ static like the front page. An installation with its own policy replaces that fi
 The software can be installed by anyone on any domain, so what a person reads names the
 installation, not the software (owner decision, 2026-10-12). `APP_SITE_NAME` (default "Catto Mail")
 is the name in the top bar, the page titles and the sign-in and sign-up emails. The policy document
-names no product, domain or repository: it holds the placeholders `{{site_name}}`, `{{domain}}`,
-`{{organisation}}` and `{{contact}}`, and the page fills them with the installation's name, the host of
-its public address, `APP_ORGANISATION_NAME` (without one, "the operator of" the name) and
-`APP_ADMIN_EMAIL`. Abuse reports and complaints are directed to `abuse@` the installation's domain
-(`abuse@{{domain}}`), never to the administrator's address, which is named only for questions about
-the policy; the operator provides that mailbox. The policy version in force (`APP_ACCEPTABLE_USE_POLICY_VERSION`) is, in the
+names no product, domain or repository: it holds the placeholders `{{site_name}}`, `{{domain}}` and
+`{{organisation}}`, and the page fills them with the installation's name, the host of its public
+address and `APP_ORGANISATION_NAME` (without one, "the operator of" the name). Abuse reports and
+complaints are directed to `abuse@` the installation's domain (`abuse@{{domain}}`); the operator
+provides that mailbox. It is the only address on the policy page: the administrator's address is
+not in the policy, and that page's footer leaves it out. The policy version in force (`APP_ACCEPTABLE_USE_POLICY_VERSION`) is, in the
 development example and the production profile, the version the document states; the contract
 check compares them. Only the footer and the page head name the software and its version.
 

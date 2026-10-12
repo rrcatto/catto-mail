@@ -16,9 +16,11 @@ use Twig\Environment;
  * The acceptable use policy (/acceptable-use-policy), linked from the footer of every page: the
  * page is built from docs/AUP.md, copied into the image at build time, so the repository is the
  * source of the text. The document names no product and no domain: its placeholders
- * ({{site_name}}, {{domain}}, {{organisation}}, {{contact}}) are filled from this installation's
+ * ({{site_name}}, {{domain}}, {{organisation}}) are filled from this installation's
  * configuration (App\Config\Installation), after rendering and escaped, so a configured value
- * is always shown as it is written. Public, static, no session, no cookies, no script.
+ * is always shown as it is written. The page shows one address only, abuse@<domain>, from the
+ * document; the administrator's address is not on it, not even in the footer. Public, static,
+ * no session, no cookies, no script.
  */
 final class PolicyController
 {

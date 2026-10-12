@@ -179,8 +179,8 @@ of a client admin, in an authorisation-code flow with PKCE (`App\Connect\Connect
 - `/acceptable-use-policy` (`PolicyController`, `App\Util\Markdown`): the policy page, built from
   `docs/AUP.md`; every footer links to it. The document names no product: its placeholders are
   filled from `App\Config\Installation` (`APP_SITE_NAME`, `APP_ORGANISATION_NAME`, the public
-  address's host, `APP_ADMIN_EMAIL`; abuse reports go to `abuse@` that host, never to the
-  administrator), which also names the installation in the top bar, the page
+  address's host; abuse reports go to `abuse@` that host, the only address on the page, whose
+  footer leaves the administrator's address out), which also names the installation in the top bar, the page
   titles and the sign-in and sign-up emails (Twig `site_name()`).
 - Rate limits `connect_page` and `connect_exchange` in framework.yaml. Migration
   `Version20261015000100` (`application_connections`; `webhook_endpoints.status` `removed`).

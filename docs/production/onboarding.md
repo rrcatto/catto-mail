@@ -30,9 +30,9 @@ Before approval:
     `APP_ORGANISATION_NAME` in `infra/.env` (group *Installation*); the page also shows the
     domain of the public address.
   - The policy sends abuse reports and complaints to `abuse@` that domain (for
-    `https://mail.example.com`, `abuse@mail.example.com`), never to the administrator. Create
-    that mailbox, or forward it, and read it every day. `APP_ADMIN_EMAIL` is named only for
-    questions about the policy.
+    `https://mail.example.com`, `abuse@mail.example.com`). Create that mailbox, or forward it,
+    and read it every day. It is the only address on the policy page: `APP_ADMIN_EMAIL` is
+    never shown there.
   - The production profile puts the shipped policy's version in force
     (`APP_ACCEPTABLE_USE_POLICY_VERSION=2026-10`). If you replace the file with your own policy
     before you build the images, keep its placeholders or write your names in, and set the

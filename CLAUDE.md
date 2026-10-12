@@ -426,11 +426,14 @@ This is a public repository. Documentation, comments, examples, tests, configura
     `Installation::siteName()`, never "Catto Mail". Only `application_meta()` and the footer's
     software line name the software and its version; operator documentation and help pages may
     name the software and its commands.
-  - `docs/AUP.md` names no product, domain or repository: only `{{site_name}}`, `{{domain}}`,
-    `{{organisation}}` and `{{contact}}` (`Installation::placeholders()`, filled after rendering,
-    escaped). Abuse reports and complaints go to `abuse@{{domain}}`, never to `{{contact}}` (the
-    administrator, named only for questions about the policy). `check-contracts.py` and
-    `PolicyPageTest` enforce both. When its rules change, change
+  - `docs/AUP.md` names no product, domain or repository: only `{{site_name}}`, `{{domain}}` and
+    `{{organisation}}` (`Installation::placeholders()`, filled after rendering, escaped).
+  - **One address on the policy page: `abuse@{{domain}}`** (owner, 2026-10-12, stated three
+    times). Abuse reports and complaints go there. The administrator's address
+    (`APP_ADMIN_EMAIL`) must never appear in the policy or anywhere on its page: no "questions
+    about this policy" line, no `{{contact}}` placeholder, and the page's footer is rendered
+    without the administrator's line (`site.footer(false)`). `check-contracts.py`,
+    `PolicyPageTest` and `PageFrameTest` enforce it. When its rules change, change
     the version it states and `APP_ACCEPTABLE_USE_POLICY_VERSION` in the contract (example and
     production profile) together, then `env-example`.
 - **Application connect (spec 2.12).**

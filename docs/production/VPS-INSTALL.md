@@ -536,7 +536,8 @@ Start with your seed addresses, then a controlled sample — never a whole list.
   to the group *Installation* of `infra/.env`. Set them: the pages, the sign-in emails and the
   acceptable use policy name your installation with them. The policy sends abuse reports and
   complaints to `abuse@` your domain (the host of `SMARTHOST_PUBLIC_BASE_URL`): make that
-  mailbox exist and read it. `APP_ADMIN_EMAIL` is named only for questions about the policy. To
+  mailbox exist and read it. It is the only address on the policy page (`APP_ADMIN_EMAIL` is
+  never shown there). To
   put the shipped policy in force for new
   clients, set `APP_ACCEPTABLE_USE_POLICY_VERSION=2026-10` (a new installation has it already).
 - **Rollback:**

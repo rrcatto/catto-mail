@@ -36,15 +36,15 @@ the shipped policy in force.
 
 ### Changed
 - **The acceptable use policy names the installation** (owner decision): `docs/AUP.md` no longer
-  says "catto-mail" or "cattomail.com". It holds the placeholders `{{site_name}}`, `{{domain}}`,
-  `{{organisation}}` and `{{contact}}`; the page fills them with `APP_SITE_NAME`, the host of the
-  public address, `APP_ORGANISATION_NAME` (without one, "the operator of" the name) and
-  `APP_ADMIN_EMAIL` (without one, "the administrator of this installation"), escaped. The rules
-  are unchanged. The author's byline is gone: the policy is the installation's.
+  says "catto-mail" or "cattomail.com". It holds the placeholders `{{site_name}}`, `{{domain}}`
+  and `{{organisation}}`; the page fills them with `APP_SITE_NAME`, the host of the public
+  address and `APP_ORGANISATION_NAME` (without one, "the operator of" the name), escaped. The
+  rules are unchanged. The author's byline is gone: the policy is the installation's.
 - **Abuse reports go to the abuse mailbox:** the policy sends abuse reports and complaints to
-  `abuse@` the installation's domain (`abuse@{{domain}}`), as the original did, and names the
-  administrator's address only for questions about the policy. The operator must make that
-  mailbox exist and read it. `check-contracts.py` and `PolicyPageTest` enforce it.
+  `abuse@` the installation's domain (`abuse@{{domain}}`), as the original did. That is the only
+  address on the policy page: the administrator's address is not in the policy and not in that
+  page's footer, which every other page keeps. The operator must make the abuse mailbox exist
+  and read it. `check-contracts.py`, `PolicyPageTest` and `PageFrameTest` enforce it.
 - **The shipped policy version is in force by default** (owner decision):
   `APP_ACCEPTABLE_USE_POLICY_VERSION` is `2026-10` in `infra/.env.example` and in the production
   profile (`infra/production.env.example`), the version `docs/AUP.md` states. A new client that

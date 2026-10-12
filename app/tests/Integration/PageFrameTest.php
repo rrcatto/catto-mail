@@ -38,8 +38,14 @@ final class PageFrameTest extends DashboardTestCase
         $foot = $page->filter('body > footer.sitefoot');
         self::assertSame(1, $foot->count(), "$uri: the footer follows the main content");
         self::assertStringContainsString('catto-mail v'.Version::VERSION.' · Self-hosted email validation', $foot->text(), $uri);
-        self::assertSame('mailto:'.self::ADMIN, $foot->filter('a')->attr('href'), $uri);
-        self::assertSame(self::ADMIN, $foot->filter('a')->text(), $uri);
+        if ('/acceptable-use-policy' === $uri) {
+            // The policy page names one address only, abuse@ the domain: never the administrator's (owner decision, 2026-10-12).
+            self::assertStringNotContainsString(self::ADMIN, (string) $response->getContent(), $uri);
+            self::assertSame(0, $page->filter('a[href^="mailto:"]')->count(), $uri);
+        } else {
+            self::assertSame('mailto:'.self::ADMIN, $foot->filter('a')->attr('href'), $uri);
+            self::assertSame(self::ADMIN, $foot->filter('a')->text(), $uri);
+        }
         self::assertStringContainsString('Times are shown in SAST (Africa/Johannesburg).', $foot->text(), $uri);
         self::assertSame('Acceptable use policy', $foot->filter('a[href="/acceptable-use-policy"]')->text(), "$uri: the footer links to the policy");
     }

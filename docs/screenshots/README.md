@@ -273,7 +273,7 @@ account* is offered beside it only while public sign-up is on. Nothing is connec
 
 ### Acceptable use policy
 
-`/acceptable-use-policy` · Built from `docs/AUP.md`; every page's footer links to it. The document names no product: the page fills in the installation's name, its domain (here `localhost`), who runs it and the contact address from the configuration, and abuse reports go to `abuse@` that domain.
+`/acceptable-use-policy` · Built from `docs/AUP.md`; every page's footer links to it. The document names no product: the page fills in the installation's name, its domain (here `localhost`) and who runs it from the configuration. Abuse reports go to `abuse@` that domain, the only address on the page: the footer here leaves the administrator's address out.
 
 ![Acceptable use policy](public-acceptable-use-policy.png)
 

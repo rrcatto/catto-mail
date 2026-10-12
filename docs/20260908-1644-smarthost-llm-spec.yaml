@@ -2551,8 +2551,8 @@ saas_operations:
   policy_acceptance:
     - APP_ACCEPTABLE_USE_POLICY_VERSION names the service-policy version in force (empty = none); Smarthost stores versions and acceptances, never policy text. Its value in the environment contract (the development example and the production profile) is the version that docs/AUP.md states; scripts/check-contracts.py compares them (owner decision 2026-10-12)
     - the policy's text is the repository document docs/AUP.md, published at /acceptable-use-policy and linked from every page's footer and from the sign-up confirmation (owner decision 2026-10-11)
-    - the document names no product, domain or repository (owner decision 2026-10-12): it holds the placeholders {{site_name}}, {{domain}}, {{organisation}} and {{contact}}, which the page fills with the installation's name (APP_SITE_NAME), its domain (the host of SMARTHOST_PUBLIC_BASE_URL), who runs it (APP_ORGANISATION_NAME; without one, "the operator of <name>") and its contact address (APP_ADMIN_EMAIL), escaped, after rendering
-    - the policy directs abuse reports and complaints to abuse@<the installation's domain> (written abuse@{{domain}}), never to the administrator's address, which it names only for questions about the policy; the operator provides that mailbox (owner decision 2026-10-12)
+    - the document names no product, domain or repository (owner decision 2026-10-12): it holds the placeholders {{site_name}}, {{domain}} and {{organisation}}, which the page fills with the installation's name (APP_SITE_NAME), its domain (the host of SMARTHOST_PUBLIC_BASE_URL) and who runs it (APP_ORGANISATION_NAME; without one, "the operator of <name>"), escaped, after rendering
+    - the policy directs abuse reports and complaints to abuse@<the installation's domain> (written abuse@{{domain}}); the operator provides that mailbox. It is the only address in the policy and on its page: the administrator's address (APP_ADMIN_EMAIL) never appears there, neither in the text nor in that page's footer (owner decision 2026-10-12)
     - clients.policy_acceptance_required (true for new clients; operator-created active clients and pre-Phase 9 clients are exempt) blocks approval until the version in force is accepted
     - client admins accept in the dashboard (source client_dashboard, the version in force only); operators record an acceptance obtained elsewhere with a reference (source operator_recorded); one row per client and version; audited as client.policy_accepted
   client_metadata: >-
@@ -3100,8 +3100,9 @@ user_interfaces:
     address (APP_ADMIN_EMAIL) as the contact, the time zone the times are in, and a link to the
     acceptable use policy (owner decision, 2026-10-11): /acceptable-use-policy, a static public
     page built from docs/AUP.md (copied into the image; its Markdown is rendered with all text
-    escaped, and its placeholders are filled with the installation's name, domain, operator and
-    contact address: saas_operations.policy_acceptance). What a person reads names the installation,
+    escaped, and its placeholders are filled with the installation's name, domain and operator:
+    saas_operations.policy_acceptance; on that one page the footer omits the administrator's
+    address, so that the policy's abuse address is the only address shown). What a person reads names the installation,
     never the software (owner decision, 2026-10-12): the top bar, the page titles, the sign-in and
     sign-up emails (subject, text and sender display name) and the policy use APP_SITE_NAME
     (App\Config\Installation; default "Catto Mail"); only the head's application-name and the

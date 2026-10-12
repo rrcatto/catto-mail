@@ -59,4 +59,3 @@ This policy sets the rules for every client that sends email through {{site_name
 3. This policy is governed by the law of South Africa.
 4. This policy may change. A new version gets a new version number, and you may be asked to accept it before you send again.
 5. Report abuse, and send complaints about mail sent through {{site_name}}, to abuse@{{domain}}.
-6. Questions about this policy go to {{contact}}.

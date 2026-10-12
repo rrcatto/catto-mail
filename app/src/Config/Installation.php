@@ -14,11 +14,11 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  *
  *   APP_SITE_NAME              the installation's name;
  *   APP_ORGANISATION_NAME      who operates it (empty: "the operator of <site name>");
- *   SMARTHOST_PUBLIC_BASE_URL  its domain (the host of the public address);
- *   APP_ADMIN_EMAIL            its contact address (may be empty).
+ *   SMARTHOST_PUBLIC_BASE_URL  its domain (the host of the public address).
  *
- * Abuse reports and complaints are not sent to the contact address: the policy document directs
- * them to abuse@<domain>, which it writes with the domain placeholder (abuse@{{domain}}).
+ * The acceptable use policy names one address only: abuse@<domain>, which the document writes
+ * with the domain placeholder (abuse@{{domain}}). The administrator's address (APP_ADMIN_EMAIL)
+ * is never part of the policy or of its page.
  */
 final class Installation
 {
@@ -27,20 +27,16 @@ final class Installation
     private readonly string $siteName;
     private readonly string $organisation;
     private readonly string $domain;
-    private readonly string $contactEmail;
 
     public function __construct(
         #[Autowire('%app.site_name%')] string $siteName,
         #[Autowire('%app.organisation_name%')] string $organisationName,
         #[Autowire('%app.public_base_url%')] string $publicBaseUrl,
-        #[Autowire('%app.admin_email%')] string $adminEmail,
     ) {
         $this->siteName = self::line($siteName) ?: self::DEFAULT_SITE_NAME;
         $this->organisation = self::line($organisationName);
         $host = parse_url(trim($publicBaseUrl), \PHP_URL_HOST);
         $this->domain = \is_string($host) ? strtolower($host) : '';
-        $email = trim($adminEmail);
-        $this->contactEmail = str_contains($email, '@') ? $email : '';
     }
 
     public function siteName(): string
@@ -71,7 +67,6 @@ final class Installation
             '{{site_name}}' => $this->siteName,
             '{{domain}}' => '' !== $this->domain ? $this->domain : 'this installation',
             '{{organisation}}' => $this->operator(),
-            '{{contact}}' => '' !== $this->contactEmail ? $this->contactEmail : 'the administrator of this installation',
         ];
     }
 
@@ -79,12 +74,6 @@ final class Installation
     public function domain(): string
     {
         return $this->domain;
-    }
-
-    /** The administrator's address, '' when none is set. */
-    public function contactEmail(): string
-    {
-        return $this->contactEmail;
     }
 
     /** One line without control characters: these values go into titles and mail headers. */
