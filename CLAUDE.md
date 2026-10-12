@@ -146,7 +146,8 @@ points span components and need several files to see:
   implemented (v0.1.9, the first GitHub Release).
   - The installer `install-catto-mail` and, for an installed server, `upgrade-catto-mail` (both
     at the repository root, both tested by `smarthostctl test installer`, the second with
-    `--with-upgrade`); the host agent `infra/lib/smarthost_agent.py`
+    `--with-upgrade`, and before a release with `--from <the last release>`); the host agent
+    `infra/lib/smarthost_agent.py`
     (`<instance>-host-agent.service`).
   - `app/src/System/`: diagnostics, requests, the setup wizard, the emergency stop.
   - `app/src/AddressBatch/`: batches and re-permission; `app/src/Help/` with
@@ -184,7 +185,7 @@ points span components and need several files to see:
   `ConnectRequestTest`, `SendingDomainApiTest`. The acceptable use policy is `/acceptable-use-policy`
   (`PolicyController`, `App\Util\Markdown`, built from `docs/AUP.md`; `PolicyPageTest`). ctnlist
   uses the flow (`docs/integration/ctnlist.md`).
-- **The installation's name** (unreleased, owner decision 2026-10-12): the software can be installed
+- **The installation's name** (v0.2.7, owner decision 2026-10-12): the software can be installed
   on any domain, so pages, emails and the policy name the installation (`App\Config\Installation`:
   `APP_SITE_NAME`, `APP_ORGANISATION_NAME`, the host of the public address, `APP_ADMIN_EMAIL`; Twig
   `site_name()`). `docs/AUP.md` holds placeholders only, and `APP_ACCEPTABLE_USE_POLICY_VERSION`
@@ -226,7 +227,7 @@ outstanding. Keep it current when either side changes.
   - Its webhook endpoint verifies `Smarthost-Signature` before parsing, de-duplicates on
     `Smarthost-Event-Id`, refuses bodies over 1 MiB, and records and ignores event types it does
     not know.
-- **How ctnlist connects** (ctnlist after 6.0.10): an administrator enters this installation's
+- **How ctnlist connects** (ctnlist 6.0.11 and later): an administrator enters this installation's
   address on ctnlist's Delivery page; ctnlist sends the browser to `/dashboard/connect`, exchanges
   the code (`POST /v1/connect/exchange`) and stores the key and the webhook secret encrypted. Its
   Disconnect calls `DELETE /v1/connection` with the connection's own key, and it reads

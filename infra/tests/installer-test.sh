@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installer test (specification 2.11) behind `smarthostctl test installer [--keep] [--with-upgrade]`.
+# Installer test (specification 2.11) behind `smarthostctl test installer [--keep] [--with-upgrade | --from vX.Y.Z]`.
 #
 # Runs install-catto-mail as root in a stand-in for a clean Ubuntu Server 26.04 LTS VPS: a
 # systemd container (infra/tests/installer/Containerfile) with its own rootless Podman inside.
@@ -21,6 +21,11 @@
 #      stops it, then the upgrade itself, a second run that finds nothing to do, and
 #      `prod rollback` to the backup the upgrade made
 #
+# With --from vX.Y.Z the first release is that released tag as it was tagged, installed by its
+# own installer, and U upgrades it to this working tree: the upgrade an existing server makes,
+# with that release's infra/.env layout and database. R, S and B are left out (they would test
+# the old release).
+#
 # The image builds inside the VPS take most of the time (about half an hour on a laptop).
 # The VPS container is removed at the end unless --keep is given. The development pod is
 # never touched.
@@ -32,14 +37,16 @@ VPS=smarthost-installer-test
 IMAGE=localhost/smarthost-installer-vps:26.04
 NAME=catto-installer.test
 IP=1.2.3.4
-KEEP=false UPGRADE=false
-for a in "$@"; do
-  case "$a" in
-    --keep) KEEP=true ;;
-    --with-upgrade) UPGRADE=true ;;
-    *) echo "usage: installer-test.sh [--keep] [--with-upgrade]" >&2; exit 64 ;;
+KEEP=false UPGRADE=false FROM=""
+while (($#)); do
+  case "$1" in
+    --keep) KEEP=true; shift ;;
+    --with-upgrade) UPGRADE=true; shift ;;
+    --from) FROM="${2:-}"; UPGRADE=true; shift 2 ;;
+    *) echo "usage: installer-test.sh [--keep] [--with-upgrade | --from vX.Y.Z]" >&2; exit 64 ;;
   esac
 done
+[[ -z "$FROM" ]] || git -C "$REPO" rev-parse -q --verify "refs/tags/$FROM" >/dev/null || { echo "installer-test: no tag $FROM" >&2; exit 64; }
 PASS=0 FAIL=0
 pass() { PASS=$((PASS+1)); echo "  PASS  $*"; }
 fail() { FAIL=$((FAIL+1)); echo "  FAIL  $*"; }
@@ -48,11 +55,14 @@ sql() { as_svc "podman exec -i smarthost-postgres sh -c 'psql -X -At -U \$POSTGR
 waitsql() { local _; for _ in $(seq 1 "${3:-60}"); do [[ "$(sql "$1" 2>/dev/null)" == "$2" ]] && return 0; sleep 5; done; return 1; }
 dev_snapshot() { podman ps -a --filter label=project=smarthost --format '{{.ID}} {{.Names}} {{.State}}' | grep -v " $VPS " | sort; }
 
-# snapshot <tag>: the working tree (tracked and new files, not ignored ones) as a release tag.
+# snapshot <tag> [git ref]: that ref (default: the working tree, tracked and new files, not ignored
+# ones) as a release tag.
 snapshot() {
   [[ -d "$RELEASE/.git" ]] || git init -q "$RELEASE"
-  (cd "$REPO" && git ls-files -co --exclude-standard -z | while IFS= read -r -d '' f; do [[ -f "$f" ]] && printf '%s\0' "$f"; done \
-    | tar --null -T - -cf -) | tar -C "$RELEASE" -xf -
+  find "$RELEASE" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+  if [[ -n "${2:-}" ]]; then git -C "$REPO" archive "$2" | tar -C "$RELEASE" -xf -
+  else (cd "$REPO" && git ls-files -co --exclude-standard -z | while IFS= read -r -d '' f; do [[ -f "$f" ]] && printf '%s\0' "$f"; done \
+    | tar --null -T - -cf -) | tar -C "$RELEASE" -xf -; fi
   git -C "$RELEASE" add -A
   git -C "$RELEASE" -c user.name=installer-test -c user.email=installer-test@example.invalid commit -q --allow-empty -m "installer test $1"
   git -C "$RELEASE" tag -f "$1" >/dev/null
@@ -88,7 +98,7 @@ podman rm -f --time 30 "$VPS" >/dev/null 2>&1 || true
 podman unshare rm -rf "$GEN"; mkdir -p "$GEN" "$GEN/vps-home"
 trap cleanup EXIT
 podman build -q --label project=smarthost -t "$IMAGE" "$REPO/infra/tests/installer" >/dev/null
-snapshot v0.0.1
+snapshot v0.0.1 "$FROM"
 # Rootless Podman inside a container needs /dev/fuse, /dev/net/tun and an unconfined profile;
 # the low-port sysctl starts at the Linux default so the installer's own setting is tested.
 # /home is a plain directory of this checkout's file system, not part of the container's own
@@ -105,6 +115,8 @@ podman exec "$VPS" systemctl is-system-running --wait >/dev/null 2>&1 || true
 # available"). Switching them on at the VPS's root is harmless where they already are.
 podman exec "$VPS" sh -c 'echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control' 2>/dev/null || true
 podman exec "$VPS" git clone -q --branch v0.0.1 --depth 1 file:///src/catto-mail.git /root/catto-mail-installer
+# The upgrade script is the new release's, fetched on its own as the guide says.
+podman cp "$REPO/upgrade-catto-mail" "$VPS:/root/upgrade-catto-mail"
 
 echo "== I installation"
 if install > "$GEN/install-1.log" 2>&1; then pass "the installer finished (exit 0)"; else fail "installer exit: $(tail -n 15 "$GEN/install-1.log")"; fi
@@ -120,6 +132,7 @@ grep -q "WARN  generated /home/cattomail/catto-mail-firewall.nft, not applied" "
   && pass "the firewall rules are generated, not applied" || fail "firewall step"
 if [[ $FAIL -gt 0 ]]; then echo "installer-test: the installation failed, nothing further to test: $PASS passed, $FAIL failed"; exit 1; fi
 
+if [[ -z "$FROM" ]]; then
 echo "== R second run"
 if install > "$GEN/install-2.log" 2>&1; then pass "a second run finishes (exit 0)"; else fail "second run: $(tail -n 15 "$GEN/install-2.log")"; fi
 grep -q "kept the existing configuration" "$GEN/install-2.log" && grep -q "already built" "$GEN/install-2.log" \
@@ -189,10 +202,11 @@ healthy="$(as_svc 'podman ps --filter health=healthy --format "{{.Names}}"' | wc
   && pass "after the restart all 8 containers are healthy behind the ingress socket" || fail "after restart: $healthy healthy"
 [[ "$(https_get /healthz | cut -d' ' -f1)" == 200 && "$(as_svc 'grep ^SMARTHOST_LIVE_DELIVERY_ENABLED= ~/catto-mail/infra/.env')" == *=false ]] \
   && pass "the web application answers on 443; still HELD" || fail "after restart: $(https_get /healthz)"
+fi
 
 if [[ $UPGRADE == true ]]; then
-  echo "== U upgrade and rollback"
-  upgrade() { podman exec -w /root "$VPS" /root/catto-mail-installer/upgrade-catto-mail --yes "$@"; }
+  echo "== U upgrade${FROM:+ from $FROM} and rollback"
+  upgrade() { podman exec -w /root "$VPS" bash /root/upgrade-catto-mail --yes "$@"; }
   running() { as_svc "podman ps --filter label=smarthost.topology=production --format '{{.Image}}'" | sed -n 's#^localhost/smarthost-[a-z]*:##p' | sort -u | tr '\n' ' '; }
   as_svc 'cd ~/catto-mail && infra/bin/smarthostctl prod console smarthost:client:create --company "Before upgrade" --contact-email ops@example.org' >/dev/null
   snapshot v0.0.2

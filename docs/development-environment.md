@@ -160,7 +160,7 @@ flowchart TD
 | `smarthostctl test phase6-e2e` | Phase 6 end to end against the **running** pod through nginx: tracking from a delivered message, open-redirect attempts, the dashboards as two client users and an operator, token-free logs (§7). It creates test clients and users and stops nothing. |
 | `smarthostctl test phase8` | Phase 8 production tooling without network (§8): configuration rules, the rendered production topology, the preflight logic with DNS/host/TLS fixtures, Postfix held/live/pause modes and sender ownership, the DKIM key tool, shellcheck. Throwaway containers only. |
 | `smarthostctl test phase8-rehearsal` | Deploys the **production** topology on this engine as the separate instance `smarthost-rehearsal` (no Internet egress, loopback ports 18443 and 12525) through `smarthostctl prod`, exercises it (§8) and removes it. It never touches the development pod. |
-| `smarthostctl test installer [--keep] [--with-upgrade]` | Runs `install-catto-mail` in a stand-in for a clean **Ubuntu Server 26.04 LTS** VPS (a systemd container `smarthost-installer-test` with rootless Podman inside), from this working tree committed as a test release tag. About half an hour. See below. |
+| `smarthostctl test installer [--keep] [--with-upgrade \| --from vX.Y.Z]` | Runs `install-catto-mail` in a stand-in for a clean **Ubuntu Server 26.04 LTS** VPS (a systemd container `smarthost-installer-test` with rootless Podman inside), from this working tree committed as a test release tag. About half an hour. See below. |
 | `smarthostctl prod <command>` | **Production only** (refuses this development `.env`): see `docs/production/runbook.md`. |
 | `smarthostctl test phase7-e2e` | Phase 7 end to end against the **running** pod: an external client using only the API and the signed webhooks verified by a local receiver container (`smarthost-test-webhook-receiver`, alias `webhook-receiver`, removed afterwards). It creates a test client, SIGKILLs and restarts the webhook-worker container once, and stops nothing else (§7). |
 | `smarthostctl console <command>` | Runs a Symfony console command in the running `smarthost-symfony-app` container as `www-data` (application database role). |
@@ -620,6 +620,10 @@ rehearsal configuration). It checks:
 - `--with-upgrade` also runs `upgrade-catto-mail` as root to a second tag (first with a file
   changed on the server, which must stop it; then the upgrade, and a second run that finds
   nothing to do) and `prod rollback` to the backup the upgrade made.
+- `--from vX.Y.Z` tests the upgrade an existing server makes: it installs that released tag as it
+  was tagged, with its own installer, and upgrades it to the working tree with
+  `upgrade-catto-mail` (that release's `infra/.env` layout and database, then the rollback to
+  it). The second run, the services stage and the restart are left out. Run it before a release.
 - `--keep` leaves the VPS container for inspection
   (`podman exec -it smarthost-installer-test bash`).
 
@@ -687,6 +691,18 @@ development client was at its API-key limit at first (ten keys from earlier boot
 the page refused it as designed. The e2e suites against the pod, the rehearsal and the installer
 test were not run. The four new pages were photographed with headless Firefox
 (`docs/screenshots/`); the other screenshots were not retaken.
+
+Latest runs (v0.2.7, 2026-10-12: the upgrade script; on the local Podman 4.9.3 engine):
+`check-contracts` 2,944; `test phase2` 376 tests and 6,626 assertions; `test phase8` 29/29, with
+`upgrade-catto-mail` in its shellcheck; `test installer --with-upgrade` 23/23 (the installation,
+the second run, services and sign-in, the host agent, the emergency stop, the restart, then
+`upgrade-catto-mail` to a second tag: a file changed on the server stops it, the 12 steps, HELD
+kept, a second run with nothing to do, and `prod rollback` to its backup). `test installer --from
+v0.2.6` (the released 0.2.6 installed by its own installer, then upgraded to this release and
+rolled back): 14 of 15, every installation and upgrade check passing. The one failure was the
+final comparison of the development pod's containers, because `test phase2` was run at the same
+time and its test pod ended in between; the development pod itself was untouched. The other
+suites were last run as recorded in the next paragraph. Not yet run on a real server.
 
 Latest runs (2026-10-12, after v0.2.6: the installation's name, the acceptable use policy naming
 the installation, the policy version in force, the client development route; on the local Podman

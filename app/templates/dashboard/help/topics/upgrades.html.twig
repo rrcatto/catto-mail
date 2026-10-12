@@ -1,19 +1,19 @@
 {% extends 'dashboard/help/_topic.html.twig' %}
 {% block content %}
-<p>catto-mail is installed from an exact <strong>release tag</strong> (for example <code>v0.2.6</code>), never from the moving <code>main</code> branch. Each release's notes and source downloads (zip and tar.gz with SHA-256 checksums) are on <a href="https://github.com/rrcatto/catto-mail/releases" rel="noopener noreferrer">the releases page</a>; the upgrade itself uses the Git tag, which is the same code.</p>
+<p>catto-mail is installed from an exact <strong>release tag</strong> (for example <code>v0.2.7</code>), never from the moving <code>main</code> branch. Each release's notes and source downloads (zip and tar.gz with SHA-256 checksums) are on <a href="https://github.com/rrcatto/catto-mail/releases" rel="noopener noreferrer">the releases page</a>; the upgrade itself uses the Git tag, which is the same code.</p>
 <p>Log in to the server with your own account (for example <code>ubuntu</code>), become root with <code>sudo -i</code>, then switch to the service user with <code>sudo -iu cattomail</code> (no password is asked from root; nobody logs in as <code>cattomail</code> directly).</p>
 <p>The quickest way is the new release's own upgrade script, run as root (not as <code>cattomail</code>). It names the installed and the new release, asks before it restarts anything, takes a backup, builds the new images, restarts the services, waits until they are healthy and prints the command that goes back. Live delivery stays as it was.</p>
 <pre class="cmd">curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/vX.Y.Z/upgrade-catto-mail
 bash upgrade-catto-mail --version vX.Y.Z</pre>
-<p>If a file of the installation was changed on the server (your own policy in <code>docs/AUP.md</code>, for example), the script stops before it touches anything and names the file. The script is part of every release after 0.2.6. The same steps by hand, as <code>cattomail</code>:</p>
+<p>If a file of the installation was changed on the server (your own policy in <code>docs/AUP.md</code>, for example), the script stops before it touches anything and names the file. The script is part of every release from 0.2.7 on, and upgrades from any earlier one. The same steps by hand, as <code>cattomail</code>:</p>
 <pre class="cmd">cd ~/catto-mail
 git fetch --tags
 git tag --sort=-v:refname | head        # available releases
 git describe --tags                     # the installed one
-git checkout v0.2.6                     # the new release (read its CHANGELOG first)
+git checkout v0.2.7                     # the new release (read its CHANGELOG first)
 infra/bin/smarthostctl prod env-migrate # infra/.env in the release's layout (the old file is kept)
 infra/bin/smarthostctl prod check       # names any setting that still needs a value
-infra/bin/smarthostctl prod upgrade 0.2.6</pre>
+infra/bin/smarthostctl prod upgrade 0.2.7</pre>
 <p><code>prod upgrade</code> rewrites <code>infra/.env</code> in the release's layout if needed (keeping the old file as <code>infra/.env.v&lt;old version&gt;-&lt;date and time&gt;</code>), checks the running system, takes a backup, builds the new images, recreates the containers (migrations and grants run at start), and checks again. Then run all diagnostics. Settings changed in the dashboard (System › Settings) stay in force across the upgrade.</p>
 <h2>Rollback</h2>
 <pre class="cmd">git checkout v0.2.4

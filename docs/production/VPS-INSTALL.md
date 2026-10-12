@@ -69,7 +69,7 @@ the sign-in page included, shows it in the footer as the contact for the service
 
 ## 2. Install
 
-catto-mail is installed from an exact **release**: a Git tag such as `v0.2.6`, which always
+catto-mail is installed from an exact **release**: a Git tag such as `v0.2.7`, which always
 names the same code (unlike the `main` branch, which moves). List the releases:
 
 ```sh
@@ -80,7 +80,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.6`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.7`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -520,7 +520,7 @@ Start with your seed addresses, then a controlled sample — never a whole list.
     copies such files to a directory beside the installation and takes the release's.
   - Running it again is safe: it continues an upgrade that was interrupted, and says so when
     the release is already installed and running.
-  - The script is part of every release after 0.2.6 and upgrades from any earlier one. Its log
+  - The script is part of every release from 0.2.7 on and upgrades from any earlier one. Its log
     is `/var/log/catto-mail-upgrade.log`.
 - **The same by hand**, as the service user (`sudo -iu cattomail` from root):
   ```sh
@@ -553,7 +553,7 @@ Start with your seed addresses, then a controlled sample — never a whole list.
 - **From 0.2.5 or earlier to 0.2.6 or later**, nothing changes in `infra/.env`. The upgrade adds
   one table (application connections) and the acceptable use policy page, built from
   `docs/AUP.md`: replace that file with your own policy before `prod upgrade` builds the images.
-- **To a version after 0.2.6**, `env-migrate` adds `APP_SITE_NAME` and `APP_ORGANISATION_NAME`
+- **From 0.2.6 or earlier to 0.2.7 or later**, `env-migrate` adds `APP_SITE_NAME` and `APP_ORGANISATION_NAME`
   to the group *Installation* of `infra/.env`. Set them: the pages, the sign-in emails and the
   acceptable use policy name your installation with them. The policy sends abuse reports and
   complaints to `abuse@` your domain (the host of `SMARTHOST_PUBLIC_BASE_URL`): make that

@@ -185,11 +185,12 @@ usage: smarthostctl <command>        (development; production: smarthostctl prod
   test phase8-rehearsal   deploys the PRODUCTION topology locally as instance
                     'smarthost-rehearsal' (no Internet egress, loopback ports): install, health,
                     preflight, pause, live-enable refusal, backup/restore, upgrade, D-35; removes it
-  test installer [--keep] [--with-upgrade]   runs install-catto-mail as root in an Ubuntu 26.04
+  test installer [--keep] [--with-upgrade | --from vX.Y.Z]   runs install-catto-mail as root in an Ubuntu 26.04
                     VPS stand-in (systemd container 'smarthost-installer-test', rootless Podman
                     inside) from this working tree as a test tag: the 21 steps, a second run, sign-in
                     on 443, host agent, web emergency stop, a restart; optionally upgrade-catto-mail
-                    to a second tag and rollback
+                    to a second tag and rollback. --from installs that released tag instead and
+                    upgrades it to this working tree (an existing server's upgrade)
   console <args>    run a Symfony console command in the running app container (as www-data),
                     e.g. console smarthost:dev:bootstrap
   migrate           re-run Doctrine migrations and then the infrastructure grants

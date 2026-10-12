@@ -19,7 +19,7 @@ catto-mail  = validation, sending, suppression, delivery events, bounces, compla
 They never share a database. ctnlist uses catto-mail only through the authenticated API
 (`/v1`, an API key of the ctnlist client) and receives signed webhooks.
 
-## What ctnlist already does (read from its repository, after release 6.0.10)
+## What ctnlist already does (read from its repository, release 6.0.11)
 
 | Concern | catto-mail API / event | ctnlist |
 |---|---|---|

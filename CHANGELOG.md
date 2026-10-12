@@ -4,16 +4,22 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.12.
 
-## [Unreleased]
+## [0.2.7] - 2026-10-12
 
-What a person reads names the installation instead of the software, the acceptable use policy
-with it; the policy version in force is the shipped policy's; and the development pod can be
-reached by a client application's development stack. No migration, no contract change: OpenAPI
+One command upgrades an installed server (`upgrade-catto-mail`). What a person reads names the
+installation instead of the software, the acceptable use policy with it, and that policy sends
+abuse reports to `abuse@` the installation's domain; the policy version in force is the shipped
+policy's; and the development pod can be reached by a client application's development stack. No migration, no contract change: OpenAPI
 stays 1.0.0-draft.10 and the specification 2.12.
 
-Upgrading: `infra/.env` gains `APP_SITE_NAME` and `APP_ORGANISATION_NAME` in the group
-*Installation*. Run `prod env-migrate` before `prod check` (in development
-`smarthostctl env-migrate`); `prod upgrade` runs it too. It keeps the old file beside it and adds
+Upgrading from any earlier release, as root on the server:
+`curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/v0.2.7/upgrade-catto-mail`, then
+`bash upgrade-catto-mail --version v0.2.7`. By hand, as the service user: `git fetch --tags`,
+`git checkout v0.2.7`, `prod env-migrate`, `prod check`, `prod upgrade 0.2.7`.
+
+`infra/.env` gains `APP_SITE_NAME` and `APP_ORGANISATION_NAME` in the group *Installation*:
+`prod env-migrate` adds them (the upgrade script and `prod upgrade` run it; in development
+`smarthostctl env-migrate`). It keeps the old file beside it and adds
 the two settings with their defaults (`Catto Mail`, and no organisation). An existing
 `APP_ACCEPTABLE_USE_POLICY_VERSION` keeps its value, empty included: set it to `2026-10` to put
 the shipped policy in force.
