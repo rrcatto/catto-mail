@@ -428,7 +428,9 @@ This is a public repository. Documentation, comments, examples, tests, configura
     name the software and its commands.
   - `docs/AUP.md` names no product, domain or repository: only `{{site_name}}`, `{{domain}}`,
     `{{organisation}}` and `{{contact}}` (`Installation::placeholders()`, filled after rendering,
-    escaped). `check-contracts.py` and `PolicyPageTest` enforce it. When its rules change, change
+    escaped). Abuse reports and complaints go to `abuse@{{domain}}`, never to `{{contact}}` (the
+    administrator, named only for questions about the policy). `check-contracts.py` and
+    `PolicyPageTest` enforce both. When its rules change, change
     the version it states and `APP_ACCEPTABLE_USE_POLICY_VERSION` in the contract (example and
     production profile) together, then `env-example`.
 - **Application connect (spec 2.12).**

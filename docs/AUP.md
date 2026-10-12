@@ -58,4 +58,5 @@ This policy sets the rules for every client that sends email through {{site_name
 2. You must also obey the direct-marketing rules of POPIA section 69, the Electronic Communications and Transactions Act and the Consumer Protection Act, and the laws of every country you send to.
 3. This policy is governed by the law of South Africa.
 4. This policy may change. A new version gets a new version number, and you may be asked to accept it before you send again.
-5. Report abuse, and send questions about this policy, to {{contact}}.
+5. Report abuse, and send complaints about mail sent through {{site_name}}, to abuse@{{domain}}.
+6. Questions about this policy go to {{contact}}.

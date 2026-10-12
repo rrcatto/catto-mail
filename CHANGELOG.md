@@ -41,6 +41,10 @@ the shipped policy in force.
   public address, `APP_ORGANISATION_NAME` (without one, "the operator of" the name) and
   `APP_ADMIN_EMAIL` (without one, "the administrator of this installation"), escaped. The rules
   are unchanged. The author's byline is gone: the policy is the installation's.
+- **Abuse reports go to the abuse mailbox:** the policy sends abuse reports and complaints to
+  `abuse@` the installation's domain (`abuse@{{domain}}`), as the original did, and names the
+  administrator's address only for questions about the policy. The operator must make that
+  mailbox exist and read it. `check-contracts.py` and `PolicyPageTest` enforce it.
 - **The shipped policy version is in force by default** (owner decision):
   `APP_ACCEPTABLE_USE_POLICY_VERSION` is `2026-10` in `infra/.env.example` and in the production
   profile (`infra/production.env.example`), the version `docs/AUP.md` states. A new client that

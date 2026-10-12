@@ -60,9 +60,10 @@ final class PolicyPageTest extends DashboardTestCase
             self::assertStringContainsString($placeholder, $source);
         }
         self::assertSame(1, preg_match('/^Version ([A-Za-z0-9][A-Za-z0-9._-]*)/m', $source), 'the document states its version');
+        self::assertStringContainsString('to abuse@{{domain}}.', $source, 'abuse reports go to the abuse mailbox of the installation\'s domain');
 
         $this->withEnv(['APP_SITE_NAME' => 'Example Post', 'APP_ORGANISATION_NAME' => 'Example & Sons (Pty) Ltd',
-            'SMARTHOST_PUBLIC_BASE_URL' => 'https://post.example.org', 'APP_ADMIN_EMAIL' => 'abuse_desk@example.org'], function (): void {
+            'SMARTHOST_PUBLIC_BASE_URL' => 'https://post.example.org', 'APP_ADMIN_EMAIL' => 'front_desk@example.org'], function (): void {
                 $response = $this->page('/acceptable-use-policy');
                 self::assertSame(200, $response->getStatusCode());
                 $page = new Crawler((string) $response->getContent());
@@ -70,7 +71,10 @@ final class PolicyPageTest extends DashboardTestCase
                 self::assertSame('Example Post Acceptable Use Policy', $page->filter('article.policy h1')->text());
                 self::assertStringContainsString('through Example Post (post.example.org), a service run by Example & Sons (Pty) Ltd.', $policy);
                 self::assertStringContainsString('You may not use Example Post to send:', $policy);
-                self::assertStringContainsString('to abuse_desk@example.org.', $policy);
+                // Abuse reports and complaints go to the installation's abuse mailbox, not to the administrator.
+                self::assertStringContainsString('Report abuse, and send complaints about mail sent through Example Post, to abuse@post.example.org.', $policy);
+                self::assertStringContainsString('Questions about this policy go to front_desk@example.org.', $policy);
+                self::assertSame(1, substr_count($policy, 'front_desk@example.org'), 'the administrator is named for questions only');
                 self::assertStringContainsString('Example &amp; Sons (Pty) Ltd', (string) $response->getContent(), 'a configured value is escaped');
                 self::assertStringNotContainsString('{{', $policy);
                 self::assertStringNotContainsStringIgnoringCase('catto', $policy);
@@ -83,7 +87,8 @@ final class PolicyPageTest extends DashboardTestCase
         $this->withEnv(['APP_SITE_NAME' => 'Example Post', 'APP_ORGANISATION_NAME' => '', 'APP_ADMIN_EMAIL' => ''], function (): void {
             $policy = (new Crawler((string) $this->page('/acceptable-use-policy')->getContent()))->filter('article.policy')->text();
             self::assertStringContainsString('a service run by the operator of Example Post.', $policy);
-            self::assertStringContainsString('to the administrator of this installation.', $policy);
+            self::assertStringContainsString('Questions about this policy go to the administrator of this installation.', $policy);
+            self::assertStringContainsString(', to abuse@'.self::getContainer()->get(Installation::class)->domain().'.', $policy, 'abuse reports still have their address');
         });
     }
 

@@ -16,6 +16,9 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  *   APP_ORGANISATION_NAME      who operates it (empty: "the operator of <site name>");
  *   SMARTHOST_PUBLIC_BASE_URL  its domain (the host of the public address);
  *   APP_ADMIN_EMAIL            its contact address (may be empty).
+ *
+ * Abuse reports and complaints are not sent to the contact address: the policy document directs
+ * them to abuse@<domain>, which it writes with the domain placeholder (abuse@{{domain}}).
  */
 final class Installation
 {

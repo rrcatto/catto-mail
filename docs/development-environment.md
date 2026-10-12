@@ -690,6 +690,9 @@ the pod through the connect flow with its own button, and its `bin/dev test-catt
 proof, a validation job, the signed `send.completed` and `validation.completed` webhooks, then a
 declined request, a disconnect (key revoked, endpoint removed) and a reconnect. Every screenshot
 was retaken (`docs/screenshots/`), the sign-up page with public sign-up switched on for it.
+After the policy was corrected the same day to send abuse reports to `abuse@` the installation's
+domain, `check-contracts` (2,942) and `test phase2` (376 tests, 6,622 assertions) were run again
+on the rebuilt pod, and the policy page's screenshot was retaken.
 
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender

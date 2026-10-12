@@ -534,6 +534,10 @@ def check_policy_document(example: dict[str, str]) -> None:
     known = {"{{site_name}}", "{{domain}}", "{{organisation}}", "{{contact}}"}
     check(used <= known, f"docs/AUP.md: unknown placeholders {sorted(used - known)}")
     check(known <= used, f"docs/AUP.md: must name the installation's {sorted(known - used)}")
+    # Abuse reports and complaints go to the installation's abuse mailbox, never to the administrator's address (owner, 2026-10-12).
+    abuse = [line for line in text.splitlines() if re.search(r"\babuse\b", line, re.I) and re.search(r"\breport|\bcomplain", line, re.I)]
+    check(bool(abuse) and all("abuse@{{domain}}" in line and "{{contact}}" not in line for line in abuse),
+          "docs/AUP.md: abuse reports and complaints must be directed to abuse@{{domain}}, not to {{contact}}")
     stated = re.search(r"^Version ([A-Za-z0-9][A-Za-z0-9._-]{0,63})(?=[\s.]|$)", text, re.M)
     check(stated is not None, "docs/AUP.md: must state its version on a line starting 'Version <identifier>'")
     if stated:
