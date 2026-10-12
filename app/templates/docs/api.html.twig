@@ -7,14 +7,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {{ site.application_meta() }}
-    <title>Catto Mail API</title>
+    <title>{{ site_name() }} API</title>
     {{ site.stylesheets() }}
 </head>
 <body class="bare">
-<header class="topbar topbar-bare"><span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span></header>
+<header class="topbar topbar-bare"><span class="brand">{{ icon.logo() }}<span>{{ site_name() }}</span></span></header>
 <main class="content content-bare">
     <section class="narrow" aria-labelledby="api-h">
-        <h1 id="api-h">Catto Mail API</h1>
+        <h1 id="api-h">{{ site_name() }} API</h1>
         <ul class="result-list">
             <li><a href="/docs/api/integration-guide.md"><span class="result-text"><span class="result-title">Client integration guide</span><span class="result-meta">(Markdown): authentication, idempotency, errors,
                 pagination, validation and send jobs, webhooks, limits and quotas, polling and reconciliation.</span></span>{{ icon.i('chevron', 16) }}</a></li>

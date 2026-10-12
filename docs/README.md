@@ -12,7 +12,7 @@
 | `production/components.md` | Every component with its container, unit, purpose, inputs, outputs, network and data |
 | `production/architecture.md` | What happens to an address and a message, step by step |
 | `integration/ctnlist.md` | The ctnlist integration, and what is outstanding on the ctnlist side |
-| `AUP.md` | The acceptable use policy, published by the application at `/acceptable-use-policy` |
+| `AUP.md` | The acceptable use policy, published by the application at `/acceptable-use-policy`. It names the installation through placeholders, never the software |
 | `production/onboarding.md` | Client onboarding and SaaS operations (Phase 9): checklist, lifecycle, limits, API keys, reputation alerts, usage and billing statements, the public-onboarding decision |
 | `api/integration-guide.md` | Client integration guide (public at `/docs/api`): authentication, limits, jobs, webhooks, connecting an application with one approval, the meaning of statuses |
 | `screenshots/README.md` | Screenshots of every dashboard page (operator console, client workspace, public pages, phone width) |

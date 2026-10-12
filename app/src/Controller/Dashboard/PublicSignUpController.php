@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller\Dashboard;
 
 use App\Client\PublicSignUp;
+use App\Config\Installation;
 use App\Connect\ConnectRequest;
 use App\Domain\DomainRuleViolation;
 use App\Security\LoginLinkAuthenticator;
@@ -55,6 +56,7 @@ final class PublicSignUpController extends AbstractController
         private readonly RateLimiterFactoryInterface $publicSignUpVerifyLimiter,
         private readonly RateLimiterFactoryInterface $publicSignUpAddressLimiter,
         private readonly LoggerInterface $logger,
+        private readonly Installation $installation,
     ) {
     }
 
@@ -154,11 +156,11 @@ final class PublicSignUpController extends AbstractController
         $request->getSession()->getFlashBag()->clear();
         $returnTo = ConnectRequest::returnPath($opened['return_path']);
         if (null !== $returnTo) {   // signed up from the connect page: back to the connect step
-            $this->addFlash('success', \sprintf('Welcome to Catto Mail. The account of %s is open.', $opened['client']->getCompanyName()));
+            $this->addFlash('success', \sprintf('Welcome to %s. The account of %s is open.', $this->installation->siteName(), $opened['client']->getCompanyName()));
 
             return new RedirectResponse($returnTo);
         }
-        $this->addFlash('success', \sprintf('Welcome to Catto Mail. The account of %s is open; the steps below get you sending.', $opened['client']->getCompanyName()));
+        $this->addFlash('success', \sprintf('Welcome to %s. The account of %s is open; the steps below get you sending.', $this->installation->siteName(), $opened['client']->getCompanyName()));
 
         return new RedirectResponse($this->generateUrl('dashboard_client_overview', ['clientId' => $opened['client']->getId()->toRfc4122()]));
     }

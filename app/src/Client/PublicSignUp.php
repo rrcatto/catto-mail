@@ -6,6 +6,7 @@ namespace App\Client;
 
 use App\Audit\AuditActor;
 use App\Audit\AuditLogger;
+use App\Config\Installation;
 use App\Domain\DomainRuleViolation;
 use App\Entity\Client;
 use App\Entity\User;
@@ -65,6 +66,7 @@ final class PublicSignUp
         #[Autowire('%app.admin_email%')] private readonly string $adminEmail,
         #[Autowire('%app.mail_from%')] private readonly string $mailFrom,
         #[Autowire('%app.public_base_url%')] private readonly string $publicBaseUrl,
+        private readonly Installation $installation,
     ) {
     }
 
@@ -193,7 +195,7 @@ final class PublicSignUp
         }
         try {
             $this->mailer->send((new TemplatedEmail())
-                ->from(new Address($this->mailFrom, 'Catto Mail'))
+                ->from(new Address($this->mailFrom, $this->installation->siteName()))
                 ->to(new Address(trim($this->adminEmail)))
                 ->subject('New sign-up: '.$client->getCompanyName())
                 ->textTemplate('email/sign_up_operator.txt.twig')

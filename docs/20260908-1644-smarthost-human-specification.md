@@ -1804,6 +1804,16 @@ link to the acceptable use policy. The policy page, `/acceptable-use-policy` (ow
 is built from the repository document `docs/AUP.md`, which is copied into the image; it is public and
 static like the front page. An installation with its own policy replaces that file before building.
 
+The software can be installed by anyone on any domain, so what a person reads names the
+installation, not the software (owner decision, 2026-10-12). `APP_SITE_NAME` (default "Catto Mail")
+is the name in the top bar, the page titles and the sign-in and sign-up emails. The policy document
+names no product, domain or repository: it holds the placeholders `{{site_name}}`, `{{domain}}`,
+`{{organisation}}` and `{{contact}}`, and the page fills them with the installation's name, the host of
+its public address, `APP_ORGANISATION_NAME` (without one, "the operator of" the name) and
+`APP_ADMIN_EMAIL`. The policy version in force (`APP_ACCEPTABLE_USE_POLICY_VERSION`) is, in the
+development example and the production profile, the version the document states; the contract
+check compares them. Only the footer and the page head name the software and its version.
+
 ## Settings in the dashboard and the .env file (owner decision, 2026-10-10)
 
 `infra/.env` holds only the settings an operator sets, grouped under plain headings (installation,

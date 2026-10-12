@@ -122,8 +122,8 @@ points span components and need several files to see:
   and operator webhook dashboard pages. `infra/bin/smarthostctl test phase7-e2e` proves the client
   workflow through the API and signed webhooks only, with the external receiver fixture in
   `tests/webhook-receiver/`. The first client application, ctnlist, implements its side in its own
-  repository; the two have not been run together end to end (see *ctnlist, the first client
-  application*).
+  repository; the two development stacks have been run together through the connect flow (see
+  *ctnlist, the first client application*).
 - **Phase 8** (controlled production launch, spec 2.9): repository side implemented (v0.1.8).
   - Production topology: `infra/podman/smarthost-production.sh.in`, standalone containers on
     internal and egress networks.
@@ -180,8 +180,13 @@ points span components and need several files to see:
   (`ClientConnectionController`), `GET /v1/sending-domains` (`Api\SendingDomainController`,
   `App\Sending\SendingDomainRule`), table `application_connections`; tests `ConnectTest`,
   `ConnectRequestTest`, `SendingDomainApiTest`. The acceptable use policy is `/acceptable-use-policy`
-  (`PolicyController`, `App\Util\Markdown`, built from `docs/AUP.md`; `PolicyPageTest`). No
-  application uses the flow yet: ctnlist's side is outstanding (`docs/integration/ctnlist.md`).
+  (`PolicyController`, `App\Util\Markdown`, built from `docs/AUP.md`; `PolicyPageTest`). ctnlist
+  uses the flow (`docs/integration/ctnlist.md`).
+- **The installation's name** (unreleased, owner decision 2026-10-12): the software can be installed
+  on any domain, so pages, emails and the policy name the installation (`App\Config\Installation`:
+  `APP_SITE_NAME`, `APP_ORGANISATION_NAME`, the host of the public address, `APP_ADMIN_EMAIL`; Twig
+  `site_name()`). `docs/AUP.md` holds placeholders only, and `APP_ACCEPTABLE_USE_POLICY_VERSION`
+  is the version it states in the development example and the production profile.
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## ctnlist, the first client application
@@ -219,10 +224,15 @@ outstanding. Keep it current when either side changes.
   - Its webhook endpoint verifies `Smarthost-Signature` before parsing, de-duplicates on
     `Smarthost-Event-Id`, refuses bodies over 1 MiB, and records and ignores event types it does
     not know.
-- **Where ctnlist is behind the contract** (ctnlist 6.0.9, written against OpenAPI
-  1.0.0-draft.7; the contract is 1.0.0-draft.10):
-  - It does not use the connect flow, `DELETE /v1/connection` or `GET /v1/sending-domains` yet: its
-    key and webhook secret are copied into its `.env` by hand.
+- **How ctnlist connects** (ctnlist after 6.0.10): an administrator enters this installation's
+  address on ctnlist's Delivery page; ctnlist sends the browser to `/dashboard/connect`, exchanges
+  the code (`POST /v1/connect/exchange`) and stores the key and the webhook secret encrypted. Its
+  Disconnect calls `DELETE /v1/connection` with the connection's own key, and it reads
+  `GET /v1/sending-domains` (`can_send`) to warn when its From domain cannot send. It relies on:
+  `api_base_url`, `api_key` and `webhook.signing_secret` in the exchange answer; `409` meaning
+  "refused for now, the code stays usable" and every other `4xx` of the exchange meaning "start
+  again"; `401` from `DELETE /v1/connection` meaning the connection is already ended.
+- **Where ctnlist is behind the contract** (it follows OpenAPI 1.0.0-draft.10 otherwise):
   - `repermission.responded` is recorded and ignored. The handling is specified in
     `docs/integration/ctnlist.md` (*Outstanding ctnlist work*).
   - `429 quota-exceeded` is handled like `rate-limited`: retried in place, then by ctnlist's
@@ -231,12 +241,15 @@ outstanding. Keep it current when either side changes.
   - A limit set below a contract ceiling (a client's `max_recipients_per_send_job`, the
     installation's `APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH`) is not known to ctnlist: the batch
     that passes it is refused with `422`, and ctnlist marks the whole job refused.
-- **Development route.** The two development stacks are separate. ctnlist's `bin/dev
-  cattomail-link` creates an internal Podman network, `cattomail-dev`, and expects this pod on it
-  with the alias `catto-mail`, `ctnlist-web` in `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`, and a client
-  with a sending domain, an API key and a webhook endpoint `http://ctnlist-web/cattomail/webhook`
-  (ctnlist README, *catto-mail development route*). This repository has no command for its half
-  yet: the development pod joins only `smarthost-internal`.
+- **Development route** (`docs/development-environment.md` §3, *Client development route*). The
+  two development stacks are separate. ctnlist's `bin/dev cattomail-link` creates an internal
+  Podman network, `cattomail-dev`; `smarthostctl recreate` attaches this pod to it as
+  `catto-mail` whenever it exists (`infra/podman/smarthost-pod.sh.in`; nothing here creates the
+  network, and a network that is not internal is refused). `ctnlist-web` goes into
+  `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` in `infra/.env`, which the webhook worker and the connect
+  page both apply. ctnlist then connects with its button to `https://localhost:8443`. The two
+  have been run together this way: connect, a proof and a validation job, signed webhooks,
+  disconnect.
 
 ## Public repository
 This is a public repository. Documentation, comments, examples, tests, configuration templates and commit content must contain only information relevant to the Catto Mail software. Do not include private business plans, names of unrelated private projects, historical mailing-list information, personal hardware details, personal addresses, credentials, private infrastructure details, or other personally identifying/contextual information unless explicitly required by the user.
@@ -408,6 +421,16 @@ This is a public repository. Documentation, comments, examples, tests, configura
   - Reputation alerts never act on a client.
   - `client_notes`, `client_reputation_metrics` and `client_alerts` are operator-only: never
     show them to clients (the tenant filter denies them).
+- **The installation is named, not the software** (owner decision 2026-10-12).
+  - Text a person reads (templates, emails, flash messages) says `{{ site_name() }}` or
+    `Installation::siteName()`, never "Catto Mail". Only `application_meta()` and the footer's
+    software line name the software and its version; operator documentation and help pages may
+    name the software and its commands.
+  - `docs/AUP.md` names no product, domain or repository: only `{{site_name}}`, `{{domain}}`,
+    `{{organisation}}` and `{{contact}}` (`Installation::placeholders()`, filled after rendering,
+    escaped). `check-contracts.py` and `PolicyPageTest` enforce it. When its rules change, change
+    the version it states and `APP_ACCEPTABLE_USE_POLICY_VERSION` in the contract (example and
+    production profile) together, then `env-example`.
 - **Application connect (spec 2.12).**
   - The API key and the webhook endpoint of a connection are created by the exchange
     (`ConnectService::exchange`), never by the approval: an API key is stored only as a hash, so

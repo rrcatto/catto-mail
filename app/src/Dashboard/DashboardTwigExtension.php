@@ -23,9 +23,17 @@ final class DashboardTwigExtension
         private readonly \App\System\DeliveryControl $delivery,
         private readonly Navigation $nav,
         private readonly InstallationTime $time,
+        private readonly \App\Config\Installation $installation,
         #[Autowire('%app.admin_email%')] private readonly string $adminEmail = '',
         #[Autowire('%app.public_onboarding_enabled%')] private readonly bool $publicSignUp = false,
     ) {
+    }
+
+    /** The installation's name (APP_SITE_NAME): the top bar, the page titles and the emails use it, never the product's. */
+    #[AsTwigFunction('site_name')]
+    public function siteName(): string
+    {
+        return $this->installation->siteName();
     }
 
     /** Whether the public sign-up page exists (APP_PUBLIC_ONBOARDING_ENABLED, owner decision 2026-10-11). */

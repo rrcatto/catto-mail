@@ -213,6 +213,34 @@ run with `smarthost.service` and do nothing while Postfix is not running.
 PostgreSQL, PHP-FPM, OpenDKIM, Postfix, the Python and Go workers, and fake SMTP publish no
 ports. PostgreSQL is unreachable even from other Podman networks.
 
+### Client development route
+
+A client application under development (ctnlist, for one) runs in its own containers and cannot
+reach this pod: `smarthost-internal` is the pod's alone, and the published port is on the
+workstation's loopback. The route between the two is a second internal network, `cattomail-dev`,
+which the client's tooling creates (ctnlist: `bin/dev cattomail-link`). Nothing here creates or
+removes it.
+
+- **The pod joins it when it exists.** `smarthostctl recreate` (the pod script's `create`)
+  attaches the pod to `cattomail-dev` with the alias `catto-mail`, and says so, if that network
+  exists and is internal (no route to the Internet); otherwise the pod is on `smarthost-internal`
+  only, as before. The service aliases (`postgres`, `mailpit`, ...) stay on `smarthost-internal`.
+  On `cattomail-dev` the client reaches the API as `https://catto-mail` (port 443, the
+  certificate is for `PROXY_SERVER_NAME`), and every other port the pod listens on: join it only
+  with stacks you run yourself.
+- **Webhooks to the client.** The webhook worker delivers to private addresses only for the host
+  names in `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS`. Add the client's name on that network to
+  `infra/.env` (for ctnlist: `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS=webhook-receiver,ctnlist-web`),
+  then `smarthostctl install` and `recreate`. The connect page applies the same list when it
+  checks the webhook address of a connect request.
+- **Connecting.** The client application sends its administrator's browser to
+  `https://localhost:8443/dashboard/connect` (integration guide, section 15); plain `http`
+  redirect and webhook addresses are accepted in development. The person approving must be a
+  client admin of an active client that has the application's From domain as a sending domain
+  (`smarthost:dev:bootstrap` creates the development client and its domain; add yourself to it
+  under Access › Users, or sign up with `APP_PUBLIC_ONBOARDING_ENABLED=true`).
+- `smarthostctl verify` accepts the pod on both networks and still requires each to be internal.
+
 ### Persistent volumes (verified across stop/start, restart, Podman-level stop/start and recreate, T19–T23)
 
 | Volume | Mounted by |
@@ -646,6 +674,22 @@ development client was at its API-key limit at first (ten keys from earlier boot
 the page refused it as designed. The e2e suites against the pod, the rehearsal and the installer
 test were not run. The four new pages were photographed with headless Firefox
 (`docs/screenshots/`); the other screenshots were not retaken.
+
+Latest runs (2026-10-12, after v0.2.6: the installation's name, the acceptable use policy naming
+the installation, the policy version in force, the client development route; on the local Podman
+4.9.3 engine, after `build` and `recreate` with the pod on `smarthost-internal` and
+`cattomail-dev`): `check-contracts` 2,941; `test phase2` 376 tests and 6,618 assertions; `test
+phase3` 298 pytest tests and the 10,000-address run; `test phase4` the Go units and the
+integration tests; `test phase8` 29/29 (81 unit tests); against the running pod `test phase4-e2e`
+21/21, `test phase5-e2e` 50/50, `test phase6-e2e` 75/75 and `test phase7-e2e` 38/38; `verify`
+175/176 (T06, §1), with T05 accepting the second internal network; `test phase8-rehearsal` 69/69.
+`test installer` was started and stopped at step 8 of 21 (`newuidmap: write to uid_map failed`):
+the engine host still has only 65,536 subordinate IDs (the requirement is described with the installer test above), so the
+installer remains unproven on this workstation. ctnlist's development stack was connected to
+the pod through the connect flow with its own button, and its `bin/dev test-cattomail` passed: a
+proof, a validation job, the signed `send.completed` and `validation.completed` webhooks, then a
+declined request, a disconnect (key revoked, endpoint removed) and a reconnect. Every screenshot
+was retaken (`docs/screenshots/`), the sign-up page with public sign-up switched on for it.
 
 **Phase 1 verification note (specification 2.9).** Each submission account may use only its own
 envelope senders. The verification client therefore submits with the VERP envelope sender

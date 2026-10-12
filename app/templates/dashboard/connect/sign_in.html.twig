@@ -2,8 +2,8 @@
 {% block title %}Connect {{ connect.applicationName }}{% endblock %}
 {% block body %}
 <section class="narrow" aria-labelledby="connect-h">
-    <h1 id="connect-h">Connect {{ connect.applicationName }} to Catto Mail</h1>
-    <p><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through this Catto Mail installation with your account.</p>
+    <h1 id="connect-h">Connect {{ connect.applicationName }} to {{ site_name() }}</h1>
+    <p><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through this {{ site_name() }} installation with your account.</p>
     {% include 'dashboard/connect/_request.html.twig' %}
     <p>Sign in to choose the workspace to connect. You come back to this step afterwards, and nothing is connected before you approve it.</p>
     <p class="form-actions"><a class="btn" href="{{ path('dashboard_login', {return_to: return_to}) }}">Sign in</a>{% if public_sign_up_open() %} <a class="btn btn-secondary" href="{{ path('dashboard_sign_up', {return_to: return_to}) }}">Create an account</a>{% endif %}</p>

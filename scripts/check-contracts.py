@@ -516,6 +516,32 @@ def check_environment(spec: dict, api: dict, env_md: str, env_example: str) -> N
           and example.get("DELIVERY_SOFT_BOUNCE_SUPPRESSION_WINDOW_DAYS") == "30",
           ".env.example: soft-bounce defaults must be 3 within 30 days (D-18)")
     check_production_template(contract)
+    check_policy_document(example)
+
+
+def check_policy_document(example: dict[str, str]) -> None:
+    """The acceptable use policy (docs/AUP.md, owner decision 2026-10-12): it names no product,
+    domain or repository, only the installation's placeholders, and the policy version the
+    templates put in force is the version it states."""
+    path = ROOT / "docs/AUP.md"
+    check(path.is_file(), "docs/AUP.md missing (the acceptable use policy page is built from it)")
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    for name in ("catto-mail", "cattomail", "catto mail", "smarthost", "github"):
+        check(name not in text.lower(), f"docs/AUP.md: must name the installation, never '{name}' (use {{{{site_name}}}}, {{{{domain}}}})")
+    used = set(re.findall(r"\{\{[^}]*\}\}", text))
+    known = {"{{site_name}}", "{{domain}}", "{{organisation}}", "{{contact}}"}
+    check(used <= known, f"docs/AUP.md: unknown placeholders {sorted(used - known)}")
+    check(known <= used, f"docs/AUP.md: must name the installation's {sorted(known - used)}")
+    stated = re.search(r"^Version ([A-Za-z0-9][A-Za-z0-9._-]{0,63})(?=[\s.]|$)", text, re.M)
+    check(stated is not None, "docs/AUP.md: must state its version on a line starting 'Version <identifier>'")
+    if stated:
+        version = stated.group(1).rstrip(".")
+        check(example.get("APP_ACCEPTABLE_USE_POLICY_VERSION") == version,
+              f".env.example: APP_ACCEPTABLE_USE_POLICY_VERSION must be the policy's version '{version}'")
+        check(render.defaults("production").get("APP_ACCEPTABLE_USE_POLICY_VERSION") == version,
+              f"environment.md production profile: APP_ACCEPTABLE_USE_POLICY_VERSION must be the policy's version '{version}'")
 
 
 def check_production_template(contract: dict[str, bool]) -> None:

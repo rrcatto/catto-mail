@@ -10,13 +10,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {{ site.application_meta() }}
     <meta name="description" content="A self-hosted email validation and delivery service for the client applications of this installation.">
-    <title>Catto Mail</title>
+    <title>{{ site_name() }}</title>
     {{ site.stylesheets() }}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
-    <span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span>
+    <span class="brand">{{ icon.logo() }}<span>{{ site_name() }}</span></span>
     <a class="btn front-signin" href="{{ path('dashboard_login') }}">Sign in</a>
 </header>
 <main id="main" class="content">

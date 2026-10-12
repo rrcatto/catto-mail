@@ -383,6 +383,18 @@ webhook secret by hand. Choices made while implementing it:
 | The acceptable use policy is the repository document `docs/AUP.md`, rendered by a small Markdown renderer of the application's own (no new dependency) that escapes all text. An installation with its own policy replaces the file before building its images. `APP_ACCEPTABLE_USE_POLICY_VERSION` still names the version that sign-ups accept; the two are kept in step by the operator. | `PolicyController`, `App\Util\Markdown` |
 | ctnlist's side of the connect flow is built in the ctnlist repository, by the owner's instruction (this replaces "ctnlist is not modified from this repository" above for work the owner asks for). | `docs/integration/ctnlist.md` |
 
+### Naming the installation; the client development route (owner instruction, 2026-10-12)
+
+| Decision taken | Where |
+|---|---|
+| The API key and the webhook endpoint of a connection stay created by the exchange (owner, 2026-10-12: "keep it as built"). | `ConnectService::exchange` |
+| The acceptable use policy names the installation it runs on, never the product: `docs/AUP.md` holds four placeholders, filled after rendering with escaped values. The rules of the policy are unchanged; the author's byline was removed, because the document is shown as the policy of whoever runs the installation. The shipped text still refers to South African law: an installation elsewhere replaces the file. | `docs/AUP.md`, `PolicyController`, `App\Config\Installation` |
+| The owner asked for the installation's "configured site name, domain, organisation and contact address". There was no site name or organisation setting, so `APP_SITE_NAME` (default `Catto Mail`) and `APP_ORGANISATION_NAME` (default empty) were added to the group *Installation* of `infra/.env`; the domain is the host of `SMARTHOST_PUBLIC_BASE_URL` and the contact is `APP_ADMIN_EMAIL`, which the footer already shows as the contact. No separate abuse address was added. | `docs/contracts/environment.md` |
+| A site name used only in the policy would contradict the page around it, so the top bar, the titles and the sign-in and sign-up emails use it too. The footer's software line and the `application-name` meta tag keep naming the software and its version (owner decision 2026-10-10), as do operator documentation and the help pages. | `templates/_site.html.twig`, `DashboardTwigExtension::siteName` |
+| `APP_ACCEPTABLE_USE_POLICY_VERSION` is `2026-10` in the development example and in the production profile, and `check-contracts.py` ties it to the version `docs/AUP.md` states. An existing `.env` keeps its own value through `env-migrate`. | `scripts/check-contracts.py` |
+| The development pod joins a client application's network instead of the client joining `smarthost-internal`: the internal network `cattomail-dev`, named by ctnlist's tooling, when it exists at `recreate`. Joining exposes every port the pod listens on to that network's containers, which is accepted for a development stack the developer runs. No environment variable was added for it. | `infra/podman/smarthost-pod.sh.in`, `docs/development-environment.md` §3 |
+| `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` reaches the web application as well as the webhook worker, so the connect page and the worker judge a development webhook address alike. It stays empty in production. | `docs/contracts/environment.md` |
+
 ### Development on a local Linux engine (owner instruction, v0.2.0, 2026-10-08)
 
 The specification is unchanged: it already allows a Linux host or a WSL Podman machine for

@@ -4,6 +4,55 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.12.
 
+## [Unreleased]
+
+What a person reads names the installation instead of the software, the acceptable use policy
+with it; the policy version in force is the shipped policy's; and the development pod can be
+reached by a client application's development stack. No migration, no contract change: OpenAPI
+stays 1.0.0-draft.10 and the specification 2.12.
+
+Upgrading: `infra/.env` gains `APP_SITE_NAME` and `APP_ORGANISATION_NAME` in the group
+*Installation*. Run `prod env-migrate` before `prod check` (in development
+`smarthostctl env-migrate`); `prod upgrade` runs it too. It keeps the old file beside it and adds
+the two settings with their defaults (`Catto Mail`, and no organisation). An existing
+`APP_ACCEPTABLE_USE_POLICY_VERSION` keeps its value, empty included: set it to `2026-10` to put
+the shipped policy in force.
+
+### Added
+- **The installation's name** (owner decision): `APP_SITE_NAME` (default `Catto Mail`) is the name
+  in the top bar, in every page title, in the sign-in and sign-up emails (subject, text and the
+  sender's display name) and in the connect and sign-up pages. `APP_ORGANISATION_NAME` names who
+  runs the installation. The software can be installed by anyone on any domain, so nothing a
+  person reads says "Catto Mail" unless the installation is called that. The footer and the page
+  head still name the software and its version (`App\Config\Installation`, Twig `site_name()`).
+- **Client development route:** when the internal Podman network `cattomail-dev` exists (a client
+  application's tooling creates it; for ctnlist `bin/dev cattomail-link`), `smarthostctl recreate`
+  attaches the development pod to it as `catto-mail`. The service aliases stay on
+  `smarthost-internal`, a network that is not internal is refused, and `smarthostctl verify`
+  accepts the pod on both networks. `docs/development-environment.md`, section 3.
+- `scripts/check-contracts.py` checks the policy document: it names no product, domain or
+  repository, uses only the four placeholders, states its version, and that version is the
+  `APP_ACCEPTABLE_USE_POLICY_VERSION` of the development example and the production profile.
+
+### Changed
+- **The acceptable use policy names the installation** (owner decision): `docs/AUP.md` no longer
+  says "catto-mail" or "cattomail.com". It holds the placeholders `{{site_name}}`, `{{domain}}`,
+  `{{organisation}}` and `{{contact}}`; the page fills them with `APP_SITE_NAME`, the host of the
+  public address, `APP_ORGANISATION_NAME` (without one, "the operator of" the name) and
+  `APP_ADMIN_EMAIL` (without one, "the administrator of this installation"), escaped. The rules
+  are unchanged. The author's byline is gone: the policy is the installation's.
+- **The shipped policy version is in force by default** (owner decision):
+  `APP_ACCEPTABLE_USE_POLICY_VERSION` is `2026-10` in `infra/.env.example` and in the production
+  profile (`infra/production.env.example`), the version `docs/AUP.md` states. A new client that
+  requires acceptance accepts it before approval, and a public sign-up records it. The rule for
+  its form (a short identifier) now applies in every environment, not only production.
+- `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS` (development and test only) now also reaches the web
+  application, so the connect page judges a webhook address as the webhook worker will. Until
+  now a development client application on a private network passed the worker and was refused
+  by the connect page.
+- The production rehearsal creates its SaaS client exempt from policy acceptance: the profile
+  now has a version in force and the rehearsal has no person to accept it.
+
 ## [0.2.6] - 2026-10-11
 
 An application can be connected with one approval instead of a copied API key and webhook secret

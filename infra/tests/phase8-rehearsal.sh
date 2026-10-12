@@ -317,8 +317,9 @@ prod ops-status | grep -q "^delivery" && pass "ops-status summary" || fail "ops-
 echo "== S Phase 9 SaaS operations"
 [[ "$(prod machine systemctl is-active "$I-reputation-evaluate.timer" 2>/dev/null)" == active ]] \
   && pass "the reputation-evaluation timer runs with the topology" || fail "reputation timer"
-SAAS="$(console smarthost:client:create --company "SaaS applicant" --contact-email "ops@$NAME" | field client_id)"
-# No policy version is in force in the rehearsal (APP_ACCEPTABLE_USE_POLICY_VERSION empty), so approval needs none.
+# The production profile puts the shipped policy version in force (APP_ACCEPTABLE_USE_POLICY_VERSION), and a
+# client admin accepts it in the dashboard; the rehearsal has no person to do that, so this client is exempt.
+SAAS="$(console smarthost:client:create --company "SaaS applicant" --contact-email "ops@$NAME" --policy-acceptance exempt | field client_id)"
 console smarthost:client:set-status "$SAAS" active --operator "admin@$NAME" --note "rehearsal approval" >/dev/null 2>&1
 [[ "$(sql "SELECT status || ',' || (approved_at IS NOT NULL) FROM clients WHERE id = '$SAAS'")" == "active,true" \
    && "$(sql "SELECT detail_json->>'note' FROM audit_log WHERE action = 'client.approved' AND target_id = '$SAAS'")" == "rehearsal approval" ]] \

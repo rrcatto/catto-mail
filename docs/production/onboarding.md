@@ -26,8 +26,13 @@ Before approval:
   - The abuse contact must answer complaints quickly.
 - [ ] **Service policy.**
   - The policy text is `docs/AUP.md`, published at `/acceptable-use-policy` and linked from every
-    page's footer. Replace the file with your own policy before you build the images, and set
-    `APP_ACCEPTABLE_USE_POLICY_VERSION` to its version.
+    page's footer. It names your installation, not the software: set `APP_SITE_NAME` and
+    `APP_ORGANISATION_NAME` in `infra/.env` (group *Installation*); the page also shows the
+    domain of the public address and `APP_ADMIN_EMAIL` as the contact for abuse reports.
+  - The production profile puts the shipped policy's version in force
+    (`APP_ACCEPTABLE_USE_POLICY_VERSION=2026-10`). If you replace the file with your own policy
+    before you build the images, keep its placeholders or write your names in, and set the
+    variable to your policy's version. The shipped text refers to South African law.
   - When `APP_ACCEPTABLE_USE_POLICY_VERSION` is set, a client admin accepts that version in the
     dashboard.
   - Or you record an acceptance obtained elsewhere, with a reference

@@ -109,7 +109,8 @@ def production_profile() -> dict[str, str]:
 # production profile's value), and a .env may still name it to change that value.
 B, D, P = "both", "development", "production"
 LAYOUT: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Installation", [("SMARTHOST_ENV", B), ("SMARTHOST_TIMEZONE", B), ("SMARTHOST_LOG_LEVEL", B)]),
+    ("Installation", [("SMARTHOST_ENV", B), ("SMARTHOST_TIMEZONE", B), ("SMARTHOST_LOG_LEVEL", B),
+                      ("APP_SITE_NAME", B), ("APP_ORGANISATION_NAME", B)]),
     ("Set by smarthostctl (live-enable, upgrade, rollback); do not edit by hand", [
         ("SMARTHOST_LIVE_DELIVERY_ENABLED", B), ("SMARTHOST_IMAGE_TAG", P)]),
     ("Server", [("SMARTHOST_PUBLIC_IPV4", P), ("SMARTHOST_SSH_PORT", P), ("SMARTHOST_EGRESS_ENABLED", P)]),
@@ -439,9 +440,6 @@ def production_errors(v: dict[str, str]) -> list[str]:
     # nginx receives each client connection itself (the inherited ingress socket) and
     # passes the peer as REMOTE_ADDR: no forwarded header is ever trusted in production.
     need(v.get("APP_PUBLIC_ONBOARDING_ENABLED") in ("true", "false"), "APP_PUBLIC_ONBOARDING_ENABLED must be true or false")
-    policy = v.get("APP_ACCEPTABLE_USE_POLICY_VERSION", "")
-    need(policy == "" or bool(re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", policy)),
-         "APP_ACCEPTABLE_USE_POLICY_VERSION must be empty or a short version identifier such as 2026-10")
     need(v.get("TRUSTED_PROXIES", "") == "",
          "TRUSTED_PROXIES must be empty in production (no proxy in front of nginx; the client address is REMOTE_ADDR)")
     need(bool(re.match(r"^[a-z][a-z0-9-]{1,30}$", v.get("SMARTHOST_INSTANCE", ""))), "SMARTHOST_INSTANCE must match [a-z][a-z0-9-]+")
@@ -501,6 +499,14 @@ def validate(raw: dict[str, str]) -> list[str]:
     env = values.get("SMARTHOST_ENV")
     if env not in ("development", "test", "production"):
         errors.append("SMARTHOST_ENV must be development, test or production")
+    # What every page and the acceptable use policy say about the installation: one line each.
+    for name, limit, required in (("APP_SITE_NAME", 60, True), ("APP_ORGANISATION_NAME", 120, False)):
+        text = values.get(name, "")
+        if (required and not text.strip()) or len(text) > limit or text != text.strip() or re.search(r"[\x00-\x1f\x7f]", text):
+            errors.append(f"{name} must be one line of at most {limit} characters" + (", not empty" if required else ""))
+    policy = values.get("APP_ACCEPTABLE_USE_POLICY_VERSION", "")
+    if policy and not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", policy):
+        errors.append("APP_ACCEPTABLE_USE_POLICY_VERSION must be empty or a short version identifier such as 2026-10")
     if env == "production":
         errors += production_errors(values)
     else:

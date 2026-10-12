@@ -8,13 +8,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {{ site.application_meta() }}
-    <title>{{ title }} · Catto Mail</title>
+    <title>{{ title }} · {{ site_name() }}</title>
     {{ site.stylesheets() }}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
-    <a class="brand" href="{{ path('front_page') }}">{{ icon.logo() }}<span>Catto Mail</span></a>
+    <a class="brand" href="{{ path('front_page') }}">{{ icon.logo() }}<span>{{ site_name() }}</span></a>
     <a class="btn front-signin" href="{{ path('dashboard_login') }}">Sign in</a>
 </header>
 <main id="main" class="content">

@@ -9,11 +9,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {{ site.application_meta() }}
-    <title>{{ status_code }} {{ status_text }} · Catto Mail</title>
+    <title>{{ status_code }} {{ status_text }} · {{ site_name() }}</title>
     {{ site.stylesheets() }}
 </head>
 <body class="bare">
-    <header class="topbar topbar-bare"><span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span></header>
+    <header class="topbar topbar-bare"><span class="brand">{{ icon.logo() }}<span>{{ site_name() }}</span></span></header>
     <main class="content content-bare">
         <section class="narrow">
             <p class="muted small">Error {{ status_code }}</p>

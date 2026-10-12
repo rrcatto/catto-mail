@@ -13,6 +13,11 @@ parameters:
     app.log_format: '%env(default:app.default_log_format:SMARTHOST_LOG_FORMAT)%'
     app.default_log_format: 'json'
     app.openapi_contract: '%kernel.project_dir%/config/contracts/openapi.v1.yaml'
+    # What the installation calls itself and who operates it (App\Config\Installation).
+    app.site_name: '%env(default:app.default_site_name:APP_SITE_NAME)%'
+    app.default_site_name: 'Catto Mail'
+    app.organisation_name: '%env(default:app.no_organisation_name:APP_ORGANISATION_NAME)%'
+    app.no_organisation_name: ''
     # Passwordless dashboard sign-in (specification 2.7).
     app.admin_email: '%env(default:app.no_admin_email:APP_ADMIN_EMAIL)%'
     app.no_admin_email: ''

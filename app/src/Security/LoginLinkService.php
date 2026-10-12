@@ -8,6 +8,7 @@ use App\Access\AccessControl;
 use App\Audit\AuditActor;
 use App\Audit\AuditLogger;
 use App\Client\AccountAdministration;
+use App\Config\Installation;
 use App\Entity\User;
 use App\Util\Clock;
 use Doctrine\DBAL\Connection;
@@ -68,6 +69,7 @@ final class LoginLinkService
         #[Autowire('%app.mail_from%')] private readonly string $mailFrom,
         #[Autowire('%app.login_link_ttl_seconds%')] private readonly int $ttlSeconds,
         #[Autowire('%kernel.secret%')] private readonly string $secret,
+        private readonly Installation $installation,
     ) {
     }
 
@@ -106,9 +108,9 @@ final class LoginLinkService
         $url = rtrim($this->publicBaseUrl, '/').'/dashboard/login/verify?token='.$token;
         try {
             $this->mailer->send((new TemplatedEmail())
-                ->from(new Address($this->mailFrom, 'Catto Mail'))
+                ->from(new Address($this->mailFrom, $this->installation->siteName()))
                 ->to(new Address(null === $user ? $email : $user->getEmail(), (string) $user?->getDisplayName()))
-                ->subject('Your sign-in link for Catto Mail')
+                ->subject('Your sign-in link for '.$this->installation->siteName())
                 ->textTemplate('email/login_link.txt.twig')
                 ->htmlTemplate('email/login_link.html.twig')
                 ->context(['url' => $url, 'minutes' => intdiv($this->ttlSeconds, 60)]));
@@ -242,9 +244,9 @@ final class LoginLinkService
         $url = rtrim($this->publicBaseUrl, '/').'/dashboard/sign-up/verify?token='.$token;
         try {
             $this->mailer->send((new TemplatedEmail())
-                ->from(new Address($this->mailFrom, 'Catto Mail'))
+                ->from(new Address($this->mailFrom, $this->installation->siteName()))
                 ->to(new Address($email))
-                ->subject('Confirm your Catto Mail sign-up')
+                ->subject('Confirm your '.$this->installation->siteName().' sign-up')
                 ->textTemplate('email/sign_up_link.txt.twig')
                 ->htmlTemplate('email/sign_up_link.html.twig')
                 ->context(['url' => $url, 'minutes' => intdiv($this->ttlSeconds, 60), 'organisation' => $organisation]));

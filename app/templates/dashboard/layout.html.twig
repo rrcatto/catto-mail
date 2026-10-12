@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {{ site.application_meta() }}
     <meta name="referrer" content="same-origin">
-    <title>{% block title %}Dashboard{% endblock %} · Catto Mail</title>
+    <title>{% block title %}Dashboard{% endblock %} · {{ site_name() }}</title>
     {{ site.stylesheets() }}
     {{ importmap('app', {nonce: csp_nonce()}) }}
 </head>
@@ -18,7 +18,7 @@
 {% set platform = app.user.platformUser %}
 {% set ds = platform and is_granted('PLATFORM.SYSTEM.VIEW') ? delivery_status() : null %}
 <header class="topbar">
-    <a class="brand" href="{{ path('dashboard_home') }}">{{ icon.logo() }}<span>Catto Mail</span></a>
+    <a class="brand" href="{{ path('dashboard_home') }}">{{ icon.logo() }}<span>{{ site_name() }}</span></a>
     {# The area buttons sit in the top bar, so the page grid spans the full width (owner decision, 2026-10-10). #}
     {% if nav.areas is not empty or nav.help or nav.switch %}
     <nav class="orbs" aria-label="Main">
@@ -101,7 +101,7 @@
 {{ site.footer() }}
 {% else %}
 <header class="topbar topbar-bare">
-    <span class="brand">{{ icon.logo() }}<span>Catto Mail</span></span>
+    <span class="brand">{{ icon.logo() }}<span>{{ site_name() }}</span></span>
 </header>
 <main id="main" class="content content-bare">
     {% for type, messages in app.flashes %}

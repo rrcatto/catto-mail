@@ -532,6 +532,11 @@ Start with your seed addresses, then a controlled sample — never a whole list.
 - **From 0.2.5 or earlier to 0.2.6 or later**, nothing changes in `infra/.env`. The upgrade adds
   one table (application connections) and the acceptable use policy page, built from
   `docs/AUP.md`: replace that file with your own policy before `prod upgrade` builds the images.
+- **To a version after 0.2.6**, `env-migrate` adds `APP_SITE_NAME` and `APP_ORGANISATION_NAME`
+  to the group *Installation* of `infra/.env`. Set them: the pages, the sign-in emails and the
+  acceptable use policy name your installation with them, and the policy names
+  `APP_ADMIN_EMAIL` as the address for abuse reports. To put the shipped policy in force for new
+  clients, set `APP_ACCEPTABLE_USE_POLICY_VERSION=2026-10` (a new installation has it already).
 - **Rollback:**
   ```sh
   git checkout v<previous>

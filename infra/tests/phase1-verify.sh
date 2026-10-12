@@ -154,7 +154,19 @@ done
 internal="$(podman network inspect smarthost-internal --format '{{.Internal}}')"
 [[ "$internal" == true ]] && pass "smarthost-internal network is Internal=true" || fail "network Internal=$internal"
 nets="$(podman inspect smarthost-infra --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}')"
-[[ "$nets" == "smarthost-internal " ]] && pass "the pod is attached only to smarthost-internal" || fail "pod networks: $nets"
+# Besides its own network the pod may be on the client development route, an internal network too
+# (docs/development-environment.md §3): it joins cattomail-dev when that network exists.
+other="$(tr ' ' '\n' <<<"$nets" | grep -vx -e smarthost-internal -e cattomail-dev -e '' | tr '\n' ' ')"
+if [[ "$nets" == *"smarthost-internal "* && -z "$other" ]]; then
+  if [[ "$nets" == *"cattomail-dev "* ]]; then
+    [[ "$(podman network inspect cattomail-dev --format '{{.Internal}}')" == true ]] \
+      && pass "the pod is attached to smarthost-internal and the internal client development network" || fail "cattomail-dev is not Internal=true"
+  else
+    pass "the pod is attached only to smarthost-internal"
+  fi
+else
+  fail "pod networks: $nets"
+fi
 
 section "T06 no Internet egress (network level)"
 out="$(podman exec smarthost-postfix sh -c 'cat /proc/net/route | awk "NR>1 && \$2==\"00000000\"" | wc -l')"

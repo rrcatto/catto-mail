@@ -30,6 +30,10 @@ PG_IMAGE=docker.io/library/postgres:16.15-trixie
 SERVICES=(postgres mailpit fake-smtp opendkim postfix symfony-app webhook-worker nginx validator delivery)
 # One-off DB tasks run by `start`, in this order (D-15): roles, schema, grants.
 TASKS=(db-bootstrap db-migrate db-grants)
+# The client development route (docs/development-environment.md §3): the internal network a
+# client application's development stack shares with this pod, and the pod's name on it.
+CLIENT_NETWORK=cattomail-dev
+CLIENT_ALIAS=catto-mail
 
 # Contract values (shell-quoted by the renderer).
 PROXY_HTTPS_BIND=${PROXY_HTTPS_BIND}
@@ -85,6 +89,19 @@ cmd_create() {
     --network-alias opendkim --network-alias mailpit --network-alias fake-smtp \
     --publish "$PROXY_HTTPS_BIND:443" --publish "$MAILPIT_UI_BIND:8025" >/dev/null
   say "created pod $POD"
+  # The client development route: a client application's development stack calls the API as
+  # https://$CLIENT_ALIAS, and the webhook worker reaches that stack, over $CLIENT_NETWORK. The
+  # client's own tooling creates the network (ctnlist: `bin/dev cattomail-link`). The pod joins
+  # it only when it exists and is internal (no route to the Internet); nothing here creates or
+  # removes it. The service aliases above stay on smarthost-internal only.
+  if podman network exists "$CLIENT_NETWORK"; then
+    if [[ "$(podman network inspect "$CLIENT_NETWORK" --format '{{.Internal}}')" == true ]]; then
+      podman network connect --alias "$CLIENT_ALIAS" "$CLIENT_NETWORK" smarthost-infra
+      say "joined network $CLIENT_NETWORK as $CLIENT_ALIAS (client development route)"
+    else
+      say "WARNING: network $CLIENT_NETWORK is not internal; the pod does not join it"
+    fi
+  fi
 
   service postgres "$(env_file postgres)" \
     -v smarthost-postgres-data:/var/lib/postgresql/data \

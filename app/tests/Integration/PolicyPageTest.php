@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration;
 
+use App\Config\Installation;
 use App\Tests\Support\DashboardTestCase;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
- * The acceptable use policy (owner decision 2026-10-11): /acceptable-use-policy is built from
- * docs/AUP.md (copied into the image), public and static, and every page's footer links to it.
+ * The acceptable use policy (owner decisions 2026-10-11 and 2026-10-12): /acceptable-use-policy is
+ * built from docs/AUP.md (copied into the image), public and static, and every page's footer
+ * links to it. The document names no product: the page names the installation it runs on (its
+ * name, domain, operator and contact address) from the configuration.
  */
 final class PolicyPageTest extends DashboardTestCase
 {
@@ -22,12 +25,14 @@ final class PolicyPageTest extends DashboardTestCase
         self::assertNotSame('', trim($source), 'the image carries docs/AUP.md');
 
         // Its structure is the document's: the title, every section heading, lists and the table of rates.
+        $names = self::getContainer()->get(Installation::class)->placeholders();
         self::assertSame(1, preg_match('/^#\s+(.+)$/m', $source, $title));
-        self::assertSame(trim($title[1]), $page->filter('article.policy h1')->text());
-        self::assertStringContainsString(trim($title[1]), $page->filter('title')->text());
+        self::assertSame(strtr(trim($title[1]), $names), $page->filter('article.policy h1')->text());
+        self::assertStringContainsString(strtr(trim($title[1]), $names), $page->filter('title')->text());
         preg_match_all('/^##\s+(.+)$/m', $source, $sections);
         self::assertGreaterThanOrEqual(3, \count($sections[1]));
         self::assertSame(array_map('trim', $sections[1]), $page->filter('article.policy h2')->each(static fn (Crawler $h): string => $h->text()));
+        self::assertStringNotContainsString('{{', $page->filter('article.policy')->text(), 'every placeholder is filled');
         self::assertGreaterThan(5, $page->filter('article.policy ol > li')->count());
         self::assertGreaterThan(0, $page->filter('article.policy ol > li > ul > li')->count(), 'nested points');
         self::assertSame(['Measure', 'Warning', 'Action likely'], $page->filter('article.policy table thead th')->each(static fn (Crawler $h): string => $h->text()));
@@ -42,6 +47,57 @@ final class PolicyPageTest extends DashboardTestCase
         self::assertStringContainsString('public', (string) $response->headers->get('Cache-Control'));
         $this->browser->request('POST', '/acceptable-use-policy');
         self::assertSame(405, $this->browser->getResponse()->getStatusCode());
+    }
+
+    public function testThePolicyNamesTheInstallationAndNeverTheProduct(): void
+    {
+        // The shipped document names no product, domain or repository: only placeholders.
+        $source = (string) file_get_contents(self::getContainer()->getParameter('kernel.project_dir').'/config/contracts/AUP.md');
+        foreach (['catto-mail', 'cattomail', 'catto mail', 'smarthost', 'github'] as $name) {
+            self::assertStringNotContainsStringIgnoringCase($name, $source);
+        }
+        foreach (['{{site_name}}', '{{domain}}', '{{organisation}}', '{{contact}}'] as $placeholder) {
+            self::assertStringContainsString($placeholder, $source);
+        }
+        self::assertSame(1, preg_match('/^Version ([A-Za-z0-9][A-Za-z0-9._-]*)/m', $source), 'the document states its version');
+
+        $this->withEnv(['APP_SITE_NAME' => 'Example Post', 'APP_ORGANISATION_NAME' => 'Example & Sons (Pty) Ltd',
+            'SMARTHOST_PUBLIC_BASE_URL' => 'https://post.example.org', 'APP_ADMIN_EMAIL' => 'abuse_desk@example.org'], function (): void {
+                $response = $this->page('/acceptable-use-policy');
+                self::assertSame(200, $response->getStatusCode());
+                $page = new Crawler((string) $response->getContent());
+                $policy = $page->filter('article.policy')->text();
+                self::assertSame('Example Post Acceptable Use Policy', $page->filter('article.policy h1')->text());
+                self::assertStringContainsString('through Example Post (post.example.org), a service run by Example & Sons (Pty) Ltd.', $policy);
+                self::assertStringContainsString('You may not use Example Post to send:', $policy);
+                self::assertStringContainsString('to abuse_desk@example.org.', $policy);
+                self::assertStringContainsString('Example &amp; Sons (Pty) Ltd', (string) $response->getContent(), 'a configured value is escaped');
+                self::assertStringNotContainsString('{{', $policy);
+                self::assertStringNotContainsStringIgnoringCase('catto', $policy);
+                // The page around it names the installation too.
+                self::assertSame('Example Post Acceptable Use Policy · Example Post', $page->filter('title')->text());
+                self::assertSame('Example Post', $page->filter('header .brand')->text());
+            });
+
+        // Without an organisation or an administrator's address the policy still says who.
+        $this->withEnv(['APP_SITE_NAME' => 'Example Post', 'APP_ORGANISATION_NAME' => '', 'APP_ADMIN_EMAIL' => ''], function (): void {
+            $policy = (new Crawler((string) $this->page('/acceptable-use-policy')->getContent()))->filter('article.policy')->text();
+            self::assertStringContainsString('a service run by the operator of Example Post.', $policy);
+            self::assertStringContainsString('to the administrator of this installation.', $policy);
+        });
+    }
+
+    public function testTheInstallationsNameIsOnEveryPage(): void
+    {
+        $this->withEnv(['APP_SITE_NAME' => 'Example Post'], function (): void {
+            foreach (['/' => 'Example Post', '/dashboard/login' => 'Example Post', '/docs/api' => 'Example Post API'] as $uri => $title) {
+                $this->browser->request('GET', $uri);
+                $page = new Crawler((string) $this->browser->getResponse()->getContent());
+                self::assertStringContainsString($title, $page->filter('title')->text(), $uri);
+                self::assertSame('Example Post', $page->filter('.brand')->first()->text(), $uri);
+                self::assertStringNotContainsString('Catto Mail', $page->filter('body')->text(), $uri);
+            }
+        });
     }
 
     public function testEveryFooterLinksToIt(): void

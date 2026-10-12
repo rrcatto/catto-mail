@@ -19,7 +19,7 @@ catto-mail  = validation, sending, suppression, delivery events, bounces, compla
 They never share a database. ctnlist uses catto-mail only through the authenticated API
 (`/v1`, an API key of the ctnlist client) and receives signed webhooks.
 
-## What ctnlist already does (read from its repository, release 6.0.9)
+## What ctnlist already does (read from its repository, after release 6.0.10)
 
 | Concern | catto-mail API / event | ctnlist |
 |---|---|---|
@@ -27,20 +27,26 @@ They never share a database. ctnlist uses catto-mail only through the authentica
 | Send a campaign | `POST /v1/send-jobs`, `POST /v1/send-jobs/{id}/recipients` (≤ 500 per batch), `POST /v1/send-jobs/{id}/submit` | `CattoMailSender`, `OutgoingMessageFactory` (List-Id `Name <shortcode.domain>`, per-recipient unsubscribe URL) |
 | Follow results | `GET /v1/send-jobs/{id}`, `GET /v1/send-jobs/{id}/messages`, `GET /v1/messages/{id}/events` | `SendJobSync` (polling fallback) |
 | Recipient global opt-out | `POST /v1/global-suppressions`, `GET /v1/global-suppressions/{id}`, `POST /v1/global-suppressions/{id}/lift` | `GlobalOptOut` |
+| Connect and disconnect | the connect page `/dashboard/connect`, `POST /v1/connect/exchange`, `DELETE /v1/connection` | `ConnectFlow`, `ConnectionStore`, `Admin\DeliveryConnectionController` (Delivery page) |
+| Whether its From domain can send | `GET /v1/sending-domains` (`can_send`), and `sending_domains` in the exchange answer | `SendingDomainCheck` (a warning on the Delivery page) |
 | Webhooks | `validation.completed/failed`, `send.completed/failed`, `message.hard_bounced`, `message.complained`, `webhook.test`; signature `Smarthost-Signature`, de-duplication by `Smarthost-Event-Id` | `WebhookProcessor`, `WebhookSignature`; unknown event types are recorded and ignored |
 
 Ordinary list unsubscribes stay in ctnlist (its unsubscribe links), as catto-mail requires: they
 are never reported to catto-mail as global opt-outs.
 
-ctnlist tests this against its own hand-written fake of the `/v1` API. The two applications have
-not been run together end to end. ctnlist was written against OpenAPI 1.0.0-draft.7; where it is
-behind the contract is listed under *Outstanding ctnlist work*.
+ctnlist tests this against its own hand-written fake of the `/v1` API, which follows OpenAPI
+1.0.0-draft.10. The two development stacks have been run together (2026-10-12, both on one
+workstation): connect with ctnlist's button, a proof and a validation job (`bin/dev
+test-cattomail`), the signed `send.completed` and `validation.completed` webhooks, a declined
+request, disconnect and reconnect. Where ctnlist is behind the contract is listed under
+*Outstanding ctnlist work*. Neither application is in production.
 
-## Connecting ctnlist with one approval (catto-mail side implemented, specification 2.12)
+## Connecting ctnlist with one approval (both sides implemented, specification 2.12)
 
-Until now an administrator copied catto-mail's API key and webhook signing secret into ctnlist's
-`.env` by hand (`CATTOMAIL_API_KEY`, `CATTOMAIL_WEBHOOK_SECRET`). catto-mail now offers an
-authorisation-code flow with PKCE instead (integration guide, section 15):
+An administrator of ctnlist no longer copies catto-mail's API key and webhook signing secret into
+ctnlist's `.env` (`CATTOMAIL_API_KEY`, `CATTOMAIL_WEBHOOK_SECRET`; that still works, and a value
+there wins). They enter catto-mail's address on ctnlist's Delivery page and press Connect: an
+authorisation-code flow with PKCE (integration guide, section 15):
 
 1. ctnlist sends its administrator's browser to `https://<catto-mail>/dashboard/connect` with
    `application_name`, `redirect_uri` (a ctnlist route), `webhook_url`
@@ -51,9 +57,16 @@ authorisation-code flow with PKCE instead (integration guide, section 15):
 3. catto-mail redirects back with `code` and `state`; ctnlist exchanges the code with
    `POST /v1/connect/exchange` and receives the API key, the webhook signing secret, the API
    base URL and the client's sending domains, once.
-4. ctnlist can end the connection with `DELETE /v1/connection`, and read the client's sending
-   domains at any time with `GET /v1/sending-domains` (`can_send` says whether a From domain can
-   send now).
+4. ctnlist stores the API base URL, and the key and the secret encrypted, in its Settings store.
+   Its Disconnect ends the connection with `DELETE /v1/connection` and then clears them, and it
+   reads `GET /v1/sending-domains` (`can_send`) to warn when the domain of its From address
+   cannot send.
+
+What ctnlist relies on beyond the schemas: `409` from the exchange means "refused for now, the
+code stays usable" (it lets the administrator finish again), every other `4xx` means "start
+again"; `401` from `DELETE /v1/connection` means the connection is already ended. ctnlist is
+named in catto-mail by its list name (`application_name`), and connecting again from the same
+site replaces the earlier connection, because the webhook address is the same.
 
 The webhook endpoint this creates is subscribed to the six events ctnlist handles today, not to
 `repermission.responded`: a client admin adds that event in catto-mail (Settings › Webhooks)
@@ -98,21 +111,12 @@ ones. Delivery is at least once: de-duplicate by the event id, as for every even
 
 ## Outstanding ctnlist work
 
-### Connect
-
-1. **The connect flow in ctnlist**: a "Connect to catto-mail" action for administrators (state
-   and code verifier kept server-side, the callback route, the exchange), storing the received
-   key and secret where ctnlist keeps its secrets, a disconnect action, and a warning from
-   `GET /v1/sending-domains` before sending from a domain that cannot send.
-2. **`FakeCattoMail`** extended with `POST /v1/connect/exchange`, `DELETE /v1/connection` and
-   `GET /v1/sending-domains` as the contract defines them.
-
 ### Contract 1.0.0-draft.8 to draft.10
 
-3. **`429 quota-exceeded`** is handled like a rate limit: ctnlist retries in place and then on
+1. **`429 quota-exceeded`** is handled like a rate limit: ctnlist retries in place and then on
    every worker pass until the quota resets. It should stop retrying until the problem's
    `quota.resets_at` and tell the administrator which quota was reached.
-4. **Limits below the contract ceilings.** ctnlist assumes 10,000 recipients per send job and
+2. **Limits below the contract ceilings.** ctnlist assumes 10,000 recipients per send job and
    500 per batch. A client's `max_recipients_per_send_job` or the installation's
    `APP_SEND_JOB_MAX_RECIPIENTS_PER_BATCH` can be lower; the batch that passes the limit is
    refused (`422`, `recipient-limit-exceeded` or `batch-too-large`) and ctnlist marks the whole
@@ -145,3 +149,19 @@ ones. Delivery is at least once: de-duplicate by the event id, as for every even
 
 Nothing else changes: ctnlist keeps sending its campaigns through `/v1/send-jobs`, and catto-mail
 keeps checking suppressions before every message.
+
+## Running the two development stacks together
+
+The stacks are separate; the route between them is the internal Podman network `cattomail-dev`
+(`docs/development-environment.md`, section 3, *Client development route*; ctnlist's README,
+*catto-mail development route*):
+
+1. In ctnlist: `bin/dev cattomail-link`, and in its `dev/podman/ctnlist.env`
+   `CATTOMAIL_API_CONNECT_HOST=catto-mail:443`, `CATTOMAIL_CA_FILE` (from `bin/dev cattomail-ca`)
+   and `CATTOMAIL_WEBHOOK_URL=http://ctnlist-web/cattomail/webhook`.
+2. Here: `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS=webhook-receiver,ctnlist-web` in `infra/.env`, then
+   `smarthostctl install` and `recreate` (the pod joins `cattomail-dev` as `catto-mail`).
+3. In ctnlist: Admin → Sending → Delivery, the address `https://localhost:8443`, Connect; approve
+   as a client admin of a client whose sending domain is the domain of ctnlist's From address.
+4. `bin/dev test-cattomail` in ctnlist sends a proof and a validation job through this pod; the
+   mail lands in this pod's Mailpit and the webhooks go to `http://ctnlist-web/cattomail/webhook`.

@@ -1,7 +1,7 @@
 # Screenshots
 
-Every page of the dashboard as of version 0.2.6 with the Bootstrap 6 four-column grid (most were taken at 0.2.3 to 0.2.5, so their footers show those numbers and lack the link to the acceptable use policy that 0.2.6 added; the four pages new in 0.2.6 were taken at 0.2.6, signed in as a client admin where a sign-in is needed), taken on the
-development pod (`smarthostctl`) at 1,440 pixels wide unless noted, signed in as the administrator. The grid was designed
+Every page of the dashboard with the Bootstrap 6 four-column grid, all retaken on 2026-10-12 from the code after version 0.2.6, so every footer shows 0.2.6 and the link to the acceptable use policy. They were taken on the
+development pod (`smarthostctl`) at 1,440 pixels wide unless noted, each page at its full length, signed in as the administrator (the connect approval and Connected applications as a client admin). The installation is named "Catto Mail" here, the default of `APP_SITE_NAME`. The grid was designed
 for 2,560 pixels; at 1,440 a half holding a wide table takes the full width. The figures come from the end-to-end test suites, so the clients, addresses and
 domains are test data. Every time is in the installation time zone (`SMARTHOST_TIMEZONE`, here SAST). The development pod is
 always in HELD mode: live delivery is off and mail goes to Mailpit.
@@ -273,7 +273,7 @@ account* is offered beside it only while public sign-up is on. Nothing is connec
 
 ### Acceptable use policy
 
-`/acceptable-use-policy` · Built from `docs/AUP.md`; every page's footer links to it.
+`/acceptable-use-policy` · Built from `docs/AUP.md`; every page's footer links to it. The document names no product: the page fills in the installation's name, its domain (here `localhost`), who runs it and the contact address from the configuration.
 
 ![Acceptable use policy](public-acceptable-use-policy.png)
 

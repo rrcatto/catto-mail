@@ -177,7 +177,10 @@ of a client admin, in an authorisation-code flow with PKCE (`App\Connect\Connect
 - `GET /v1/sending-domains` (`Api\SendingDomainController`): the client's domains and `can_send`
   (`App\Sending\SendingDomainRule`, the submit rule).
 - `/acceptable-use-policy` (`PolicyController`, `App\Util\Markdown`): the policy page, built from
-  `docs/AUP.md`; every footer links to it.
+  `docs/AUP.md`; every footer links to it. The document names no product: its placeholders are
+  filled from `App\Config\Installation` (`APP_SITE_NAME`, `APP_ORGANISATION_NAME`, the public
+  address's host, `APP_ADMIN_EMAIL`), which also names the installation in the top bar, the page
+  titles and the sign-in and sign-up emails (Twig `site_name()`).
 - Rate limits `connect_page` and `connect_exchange` in framework.yaml. Migration
   `Version20261015000100` (`application_connections`; `webhook_endpoints.status` `removed`).
 

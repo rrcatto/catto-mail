@@ -2,7 +2,7 @@
 {% block title %}Sign up{% endblock %}
 {% block body %}
 <section class="narrow" aria-labelledby="signup-h">
-    <h1 id="signup-h">Open a Catto Mail account</h1>
+    <h1 id="signup-h">Open a {{ site_name() }} account</h1>
     {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
     {% set back = return_to|default(null) ? {return_to: return_to} : {} %}
     {% if back %}<p class="caveat">Once the account is open, you continue connecting the application.</p>{% endif %}
