@@ -161,7 +161,7 @@ The stacks are separate; the route between them is the internal Podman network `
    and `CATTOMAIL_WEBHOOK_URL=http://ctnlist-web/cattomail/webhook`.
 2. Here: `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS=webhook-receiver,ctnlist-web` in `infra/.env`, then
    `smarthostctl install` and `recreate` (the pod joins `cattomail-dev` as `catto-mail`).
-3. In ctnlist: Admin → Sending → Delivery, the address `https://localhost:8443`, Connect; approve
+3. In ctnlist: Admin → Settings → Delivery, the address `https://localhost:8443`, Connect; approve
    as a client admin of a client whose sending domain is the domain of ctnlist's From address.
 4. `bin/dev test-cattomail` in ctnlist sends a proof and a validation job through this pod; the
    mail lands in this pod's Mailpit and the webhooks go to `http://ctnlist-web/cattomail/webhook`.
