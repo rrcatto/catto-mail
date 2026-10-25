@@ -4,9 +4,13 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import io
+import os
 import re
+import socketserver
+import ssl
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -121,6 +125,51 @@ class CertificateTest(unittest.TestCase):
         self.assertFalse(pf.name_matches("other.example.net", info.names))
         with self.assertRaises(ValueError):
             pf.cert_info(None)
+
+    def test_smtp_trust_is_checked_against_the_server_name_not_the_address(self) -> None:
+        # The check dials 127.0.0.1 for a bind of 0.0.0.0:25; a trusted certificate names the server, never that address.
+        with tempfile.TemporaryDirectory() as tmp:
+            def openssl(*args: str) -> None:
+                subprocess.run(["openssl", *args], check=True, capture_output=True)
+            Path(f"{tmp}/ext").write_text("[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\nsubjectKeyIdentifier=hash\n"
+                                          "[leaf]\nsubjectAltName=DNS:mta.example.net\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\n"
+                                          "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n")
+            openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=Test CA", "-keyout", f"{tmp}/ca.key", "-out", f"{tmp}/ca.csr")
+            openssl("x509", "-req", "-in", f"{tmp}/ca.csr", "-key", f"{tmp}/ca.key", "-days", "2", "-extfile", f"{tmp}/ext", "-extensions", "ca", "-out", f"{tmp}/ca.pem")
+            openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=mta.example.net", "-keyout", f"{tmp}/k", "-out", f"{tmp}/csr")
+            openssl("x509", "-req", "-in", f"{tmp}/csr", "-CA", f"{tmp}/ca.pem", "-CAkey", f"{tmp}/ca.key", "-days", "2",
+                    "-extfile", f"{tmp}/ext", "-extensions", "leaf", "-out", f"{tmp}/c")
+            served = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            served.load_cert_chain(f"{tmp}/c", f"{tmp}/k")
+
+            class Smtp(socketserver.StreamRequestHandler):
+                def handle(self) -> None:
+                    conn, f = self.request, self.request.makefile("rwb")
+                    f.write(b"220 mta.example.net ESMTP\r\n"); f.flush()
+                    while line := f.readline():
+                        verb = line.split()[0].upper() if line.split() else b""
+                        f.write({b"EHLO": b"250-mta.example.net\r\n250 STARTTLS\r\n", b"STARTTLS": b"220 ready\r\n",
+                                 b"QUIT": b"221 bye\r\n"}.get(verb, b"250 ok\r\n")); f.flush()
+                        if verb == b"QUIT":
+                            return
+                        if verb == b"STARTTLS":
+                            try:
+                                conn = served.wrap_socket(conn, server_side=True)
+                            except (ssl.SSLError, OSError):
+                                return
+                            f = conn.makefile("rwb")
+
+            with socketserver.ThreadingTCPServer(("127.0.0.1", 0), Smtp) as server, \
+                    mock.patch.dict(os.environ, {"SSL_CERT_FILE": f"{tmp}/ca.pem"}):
+                server.daemon_threads = True
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+                port = server.server_address[1]
+                der, err, _banner = pf.fetch_smtp_cert("127.0.0.1", port, "mta.example.net", timeout=5)
+                self.assertIsNone(err, "the certificate is trusted for the server's name")
+                self.assertEqual(["mta.example.net"], pf.cert_info(der).names)
+                _der, err, _banner = pf.fetch_smtp_cert("127.0.0.1", port, "other.example.net", timeout=5)
+                self.assertIsNotNone(err, "another name is still refused")
+                server.shutdown()
 
 
 # ------------------------------------------------------------ grant matrix

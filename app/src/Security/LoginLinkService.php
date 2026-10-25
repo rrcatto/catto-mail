@@ -204,9 +204,10 @@ final class LoginLinkService
             "DELETE FROM auth_login_tokens WHERE expires_at < now() - interval '7 days' OR used_at < now() - interval '7 days'");
     }
 
+    /** Never a path auth_login_tokens refuses: /dashboard/ alone (the address with a trailing slash) is none. */
     public static function safeReturnPath(?string $path): ?string
     {
-        return null !== $path && 1 === preg_match('#^/dashboard(/[A-Za-z0-9_\-/.?=&%~]*)?\z#', $path) && !str_contains($path, '//')
+        return null !== $path && 1 === preg_match('#^/dashboard(/[A-Za-z0-9_\-.?=&%~][A-Za-z0-9_\-/.?=&%~]*)?\z#', $path) && !str_contains($path, '//')
             && !str_starts_with($path, '/dashboard/login') ? $path : null;
     }
 

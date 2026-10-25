@@ -513,6 +513,7 @@ def fetch_smtp_cert(addr: str, port: int, sni: str, timeout: float = 15) -> tupl
         der = sock.getpeercert(binary_form=True) if isinstance(sock, ssl.SSLSocket) else None
     try:
         with smtplib.SMTP(addr, port, local_hostname="preflight.invalid", timeout=timeout) as s:
+            s._host = sni  # starttls() checks the certificate against this: the server's name, not the address dialled
             s.starttls(context=ssl.create_default_context())
         return der, None, banner
     except (ssl.SSLError, smtplib.SMTPException) as exc:

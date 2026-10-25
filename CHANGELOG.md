@@ -4,6 +4,34 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.12.
 
+## [0.2.8] - 2026-10-25
+
+Two fixes found on the first installed server. No migration, no contract change and no new
+setting: OpenAPI stays 1.0.0-draft.10, the specification 2.12, and `infra/.env` is unchanged.
+
+Upgrading from any earlier release, as root on the server:
+`curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/v0.2.8/upgrade-catto-mail`, then
+`bash upgrade-catto-mail --version v0.2.8`. By hand, as the service user: `git fetch --tags`,
+`git checkout v0.2.8`, `prod env-migrate`, `prod check`, `prod upgrade 0.2.8`.
+
+### Fixed
+- **No sign-in link after opening `/dashboard/`** (since 0.1.6). A signed-out visitor who opened
+  the dashboard's address with a trailing slash was sent to the sign-in page with `/dashboard/`
+  remembered as the way back. The application accepted that path, but the database refuses it
+  (`auth_login_tokens_return_path_check`), so asking for a link ended in a server error and no
+  email was sent, again on every try from that browser until another dashboard page was opened.
+  `/dashboard/` is no longer kept as the way back: the link leads to the dashboard.
+- **False warning on the mail server's certificate** (since 0.1.8). The TLS check (`prod preflight
+  --section tls`, also in the dashboard) checked the trust of Postfix's certificate against the
+  address it connected to, 127.0.0.1 when Postfix listens on every address, instead of
+  `POSTFIX_MYHOSTNAME`. A trusted certificate was reported as `postfix certificate trust: WARN ...
+  IP address mismatch`. It is now checked against the server's name, as the HTTPS check is.
+- **A test that failed late in every month.** The Phase 9 query-plan test reconciled the current
+  month of a 40-day fixture, so its share of the rows grew with the day of the month: it passed
+  on the 12th, and on the 25th PostgreSQL rightly read the whole usage table. It now reconciles twelve days. A
+  real reconciliation of a client with a large history late in a month can still read that table:
+  a batch job within its budget, not a page.
+
 ## [0.2.7] - 2026-10-12
 
 One command upgrades an installed server (`upgrade-catto-mail`). What a person reads names the

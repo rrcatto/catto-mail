@@ -220,6 +220,24 @@ final class DashboardUserTest extends DashboardTestCase
         self::assertStringEndsWith($target, (string) $this->browser->getResponse()->headers->get('Location'), 'back to where they were going');
     }
 
+    public function testSignInFromTheDashboardAddressWithATrailingSlash(): void
+    {
+        // /dashboard/ was remembered as the way back, which auth_login_tokens refuses: the request failed and no link was sent.
+        $user = $this->accounts()->createUser(self::email(), null, self::actor());
+        self::assertStringEndsWith('/dashboard/login', (string) $this->page('/dashboard/')->headers->get('Location'));
+        $path = $this->requestLink($user->getEmail());
+        self::assertNotNull($path, 'a sign-in link was emailed');
+        $this->browser->request('GET', (string) $path);
+        self::assertStringEndsWith('/dashboard', (string) $this->browser->getResponse()->headers->get('Location'));
+
+        foreach (['/dashboard', '/dashboard/', '/dashboard/c/x/usage', '/dashboard/?tab=1', '/dashboard//x', '/dashboard/login'] as $candidate) {
+            $kept = LoginLinkService::safeReturnPath($candidate);
+            if (null !== $kept) {
+                self::assertTrue((bool) Db::owner()->fetchOne("SELECT ?::text ~ '^/dashboard(/[^/]|$)'", [$kept]), $kept.' satisfies the table check');
+            }
+        }
+    }
+
     public function testThereAreNoPasswords(): void
     {
         self::assertSame([], Db::owner()->fetchFirstColumn("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name IN ('password_hash', 'global_role')"));

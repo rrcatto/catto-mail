@@ -69,7 +69,7 @@ the sign-in page included, shows it in the footer as the contact for the service
 
 ## 2. Install
 
-catto-mail is installed from an exact **release**: a Git tag such as `v0.2.7`, which always
+catto-mail is installed from an exact **release**: a Git tag such as `v0.2.8`, which always
 names the same code (unlike the `main` branch, which moves). List the releases:
 
 ```sh
@@ -80,7 +80,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.7`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.8`):
 
 ```sh
 apt-get update && apt-get install -y git

@@ -692,6 +692,14 @@ the page refused it as designed. The e2e suites against the pod, the rehearsal a
 test were not run. The four new pages were photographed with headless Firefox
 (`docs/screenshots/`); the other screenshots were not retaken.
 
+Latest runs (v0.2.8, 2026-10-25: the sign-in link after `/dashboard/`, the TLS check of Postfix's
+certificate by name; on the local Podman 4.9.3 engine): `check-contracts` 2,944; `test phase2` 377
+tests and 6,637 assertions (the first run had two failures: the Phase 9 query-plan test, which
+failed on untouched v0.2.7 too because of the day of the month and was then fixed, and
+`WebhookWorkerTest` case 8, which passed when run again); `test phase8` 29/29 (82 unit tests);
+`test installer --from v0.2.7` 15/15 (the released 0.2.7 installed by its own installer, upgraded
+to this release and rolled back). The other suites were last run as recorded below.
+
 Latest runs (v0.2.7, 2026-10-12: the upgrade script; on the local Podman 4.9.3 engine):
 `check-contracts` 2,944; `test phase2` 376 tests and 6,626 assertions; `test phase8` 29/29, with
 `upgrade-catto-mail` in its shellcheck; `test installer --with-upgrade` 23/23 (the installation,
