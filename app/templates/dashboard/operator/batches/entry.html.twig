@@ -1,13 +1,13 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Address{% endblock %}
+{% block crumb_tail %}<a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Address{% endblock %}
 {% block body %}
 {% set e = entry %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Address</p>
 <div class="pagehead">
     <div>
         <h1>{{ e.normalized_address ?? e.original_value }}</h1>
-        <p class="sub">Row {{ e.row_number }} of {{ batch.name }} · {{ e.outcome }}</p>
+        <p class="lead">Row {{ e.row_number }} of {{ batch.name }} · {{ e.outcome }}</p>
     </div>
 </div>
 <div class="grid">
@@ -23,14 +23,14 @@
 </dl>
 </section>
 <section class="card g-col-4 2xl:g-col-2" aria-labelledby="tl-h"><h2 id="tl-h">Timeline</h2>
-<p class="muted small">Only recorded events are shown. DKIM signing happens inside Postfix and is not recorded per message; check it in a received copy.</p>
+<p class="card-note">Recorded events only.{{ ui.tip('DKIM signing happens inside Postfix and is not recorded per message; check it in a received copy.') }}</p>
 <ol class="timeline">{% for t in timeline %}<li class="ev"><strong>{{ t.what }}</strong> <small>{{ t.at|ts }}</small>{% if t.detail %}<br><small>{{ t.detail }}</small>{% endif %}</li>{% endfor %}</ol>
 </section>
 </div>
 {% if evidence is not empty %}
 <section class="card card-flush" aria-labelledby="evi-h">
 <div class="card-head"><h2 id="evi-h">Validator evidence</h2></div>
-<div class="scroll"><table class="dense"><thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Host</th><th scope="col">Code</th><th scope="col">Detail</th></tr></thead>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">When</th><th scope="col">Type</th><th scope="col">Host</th><th scope="col">Code</th><th scope="col">Detail</th></tr></thead>
 <tbody>{% for v in evidence %}<tr><td>{{ v.occurred_at|ts }}</td><td>{{ v.evidence_type }}</td><td>{{ v.provider_host }}</td><td>{{ v.response_code }} {{ v.enhanced_status_code }}</td><td><small class="diag">{{ v.detail_json }}</small></td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% endif %}

@@ -209,6 +209,9 @@ final class WebhookWorkerTest extends ApiTestCase
             [new MockResponse('', ['error' => 'Connection refused for URI https://hooks.example.test']), 'pending', null],
         ];
         foreach ($cases as $i => [$response, $status, $http]) {
+            // Only this case's delivery may be due. An earlier case's retry (Retry-After 7 s) falls due while
+            // a slow machine is still on later cases, and would take the response scripted for this one.
+            Db::owner()->executeStatement("UPDATE webhook_deliveries SET next_attempt_at = now() + interval '1 day' WHERE status = 'pending'");
             $client = $this->newClient();
             [$endpoint] = $this->endpoint($client);
             $sent = $this->sendCompleted($client);

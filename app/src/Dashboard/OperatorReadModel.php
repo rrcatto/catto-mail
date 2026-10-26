@@ -39,6 +39,24 @@ final class OperatorReadModel
 
     public const AUDIT_SORTS = ['occurred' => ['a.occurred_at', 'timestamptz']];
 
+    /**
+     * The audit log's views (System › Audit log, the menu and the chips on the page): key =>
+     * [label, condition]. The conditions are fixed SQL; a request names a key only.
+     */
+    public const AUDIT_VIEWS = [
+        '' => ['Everything', 'true'],
+        'sign-in-emails' => ['Sign-in emails', "a.action = 'auth.login_link_requested'"],
+        'sign-ins' => ['Sign-ins', "a.action = 'auth.login'"],
+        'sign-up-emails' => ['Sign-up emails', "a.action = 'auth.sign_up_link_requested'"],
+        'server-links' => ['Links made on the server', "a.action = 'auth.host_login_link_issued'"],
+        'delivery' => ['Delivery controls', "(a.action LIKE 'delivery.%' OR a.action LIKE 'system.request.delivery.%')"],
+        'setup' => ['Setup and settings', "(a.action LIKE 'setup.%' OR a.action LIKE 'settings.%' OR a.action LIKE 'dkim.%' OR (a.action LIKE 'system.%' AND a.action NOT LIKE 'system.request.delivery.%'))"],
+        'clients' => ['Client changes', "(a.action LIKE 'client.%' OR a.action LIKE 'client\\_%' OR a.action LIKE 'api\\_key.%' OR a.action LIKE 'webhook%' OR a.action LIKE 'sending\\_domain.%' OR a.action LIKE 'application\\_connection.%' OR a.action LIKE 'billing\\_statement.%' OR a.action LIKE 'usage.%')"],
+        'lists' => ['Address batches', "(a.action LIKE 'address\\_batch.%' OR a.action LIKE 'repermission.%')"],
+        'suppressions' => ['Suppressions and bounces', "(a.action LIKE 'suppression.%' OR a.action LIKE 'unmatched\\_dsn.%')"],
+        'access' => ['Users and roles', "(a.action LIKE 'user.%' OR a.action LIKE 'acl.%')"],
+    ];
+
     public const OUTBOX_SORTS = ['created' => ['w.created_at', 'timestamptz']];
 
     public const OUTBOX_SORTS_DELIVERIES = ['created' => ['d.created_at', 'timestamptz']];
@@ -585,7 +603,7 @@ final class OperatorReadModel
      */
     public function audit(array $filters, Listing $listing): array
     {
-        $where = [];
+        $where = [self::AUDIT_VIEWS[$filters['view'] ?? ''][1] ?? 'true'];
         $params = [];
         foreach (['action' => 'a.action', 'actor' => 'a.actor_id', 'target_type' => 'a.target_type', 'target_id' => 'a.target_id', 'actor_type' => 'a.actor_type'] as $key => $column) {
             if ('' !== ($filters[$key] ?? '')) {

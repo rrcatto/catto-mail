@@ -197,6 +197,10 @@ final class SystemTest extends DashboardTestCase
         $this->submit('/dashboard/operator/setup/host', '/dashboard/operator/setup/host/state', ['state' => 'skipped', 'note' => 'later']);
         self::assertSame('web_identity', $this->container()->get(SetupWizard::class)->current(), 'resumes at the first step not handled');
         self::assertSame(['done', 'skipped'], Db::owner()->fetchFirstColumn("SELECT state FROM setup_steps WHERE step_key IN ('welcome', 'host') ORDER BY step_key = 'host'"));
+        // A step can be marked done from the overview of the steps, which then shows that step again.
+        $r = $this->submit('/dashboard/operator/setup', '/dashboard/operator/setup/web_identity/state', ['state' => 'done', 'return' => 'index']);
+        self::assertStringEndsWith('/dashboard/operator/setup#step-web_identity', (string) $r->headers->get('Location'));
+        self::assertSame('done', Db::owner()->fetchOne("SELECT state FROM setup_steps WHERE step_key = 'web_identity'"));
         $this->container()->get(SetupWizard::class)->set('readiness', SetupStepState::Done, $this->reload($admin));
         $this->browser->request('GET', '/dashboard');
         self::assertStringNotContainsString('/setup', (string) $this->browser->getResponse()->headers->get('Location'), 'no redirect once complete');

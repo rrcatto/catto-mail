@@ -162,7 +162,8 @@ LAYOUT: list[tuple[str, list[tuple[str, str]]]] = [
         ("APP_RETENTION_STAGED_CONTENT_DAYS", B), ("APP_RETENTION_TRACKING_DAYS", B),
         ("DELIVERY_DSN_RETENTION_DAYS", B), ("POSTFIX_LOG_RETENTION_DAYS", B)]),
     ("Certificates (Let's Encrypt)", [
-        ("ACME_EMAIL", P), ("ACME_DNS_PROVIDER", P), ("ACME_CREDENTIALS_FILE", P), ("ACME_SERVER", P), ("ACME_RENEW_DAYS", P)]),
+        ("ACME_EMAIL", P), ("ACME_DNS_PROVIDER", P), ("ACME_CREDENTIALS_FILE", P), ("ACME_EXTRA_DOMAINS", P), ("ACME_SERVER", P),
+        ("ACME_RENEW_DAYS", P)]),
     ("Backups", [
         ("BACKUP_DIR", P), ("BACKUP_KEEP", P), ("BACKUP_SCHEDULE", P), ("BACKUP_OFFHOST_TARGET", P),
         ("BACKUP_OFFHOST_SSH_KEY", P), ("BACKUP_ENCRYPTION_PASSPHRASE_FILE", P)]),
@@ -393,6 +394,8 @@ def production_errors(v: dict[str, str]) -> list[str]:
         name = v.get(var, "").lower()
         need(bool(HOSTNAME.match(name)), f"{var} must be a fully qualified DNS name (got '{name}')")
         need(rehearsal or not reserved(name), f"{var} is a reserved/placeholder name ('{name}'); set the real production name")
+    for name in v.get("ACME_EXTRA_DOMAINS", "").replace(",", " ").lower().split():
+        need(bool(HOSTNAME.match(name)), f"ACME_EXTRA_DOMAINS: '{name}' is not a fully qualified DNS name")
     url = urlsplit(v.get("SMARTHOST_PUBLIC_BASE_URL", ""))
     need(url.scheme == "https" and url.path in ("", "/") and not url.query and url.port in (None, 443),
          "SMARTHOST_PUBLIC_BASE_URL must be https://<PROXY_SERVER_NAME> (port 443, no path)")

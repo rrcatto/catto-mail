@@ -18,7 +18,7 @@
 # one, and continues an upgrade that was interrupted. Guide: docs/production/VPS-INSTALL.md §12.
 set -uo pipefail
 
-TOTAL=12
+TOTAL=13
 SERVICE_USER="cattomail"
 VERSION="" REPO_URL=""
 ASSUME_YES=false DISCARD=false
@@ -51,6 +51,29 @@ while (($#)); do
     *) echo "unknown option $1 (--help)" >&2; exit 64 ;;
   esac
 done
+
+# The ACME client: the official lego release, pinned by version and checksum. Ubuntu's lego
+# package leaves DNS providers out (Porkbun, for one), so a configured provider could be missing.
+LEGO_VERSION=4.35.2
+declare -A LEGO_SHA256=(
+  [amd64]=ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3
+  [arm64]=e1f153179098d27ce044aaaa168c0e323d50ae71b0f1a147aa8ae49ac6b14d89
+)
+install_lego() {  # prints what it did; non-zero when the release could not be installed
+  local arch tmp
+  arch="$(dpkg --print-architecture 2>/dev/null)"
+  [[ -n "${LEGO_SHA256[$arch]:-}" ]] || { echo "no pinned lego release for $arch"; return 1; }
+  if [[ "$(/usr/local/bin/lego --version 2>/dev/null)" == "lego version $LEGO_VERSION "* ]]; then echo "lego $LEGO_VERSION"; return 0; fi
+  tmp="$(mktemp -d)"
+  if curl -fsSL --max-time 120 -o "$tmp/lego.tar.gz" \
+        "https://github.com/go-acme/lego/releases/download/v$LEGO_VERSION/lego_v${LEGO_VERSION}_linux_$arch.tar.gz" \
+      && echo "${LEGO_SHA256[$arch]}  $tmp/lego.tar.gz" | sha256sum -c --quiet - \
+      && tar -xzf "$tmp/lego.tar.gz" -C "$tmp" lego \
+      && install -m 755 -o root -g root "$tmp/lego" /usr/local/bin/lego; then
+    rm -rf "$tmp"; echo "lego $LEGO_VERSION installed"; return 0
+  fi
+  rm -rf "$tmp"; echo "lego $LEGO_VERSION could not be downloaded or verified"; return 1
+}
 
 # ------------------------------------------------------------------------- output
 STEP=0
@@ -246,19 +269,32 @@ main() {
   elif run timedatectl set-timezone "$zone"; then pass "set to $zone"
   else warn "run: timedatectl set-timezone $zone"; fi
 
+  step "Installing the certificate tool (lego)"
+  if lego_now="$(install_lego 2>>"$LOG")"; then pass "$lego_now"
+  else warn "$lego_now: certificate renewal keeps using the lego already installed"; fi
+
   step "Refreshing the firewall rules"
-  FW="/home/$SERVICE_USER/catto-mail-firewall.nft"
+  FW="/home/$SERVICE_USER/catto-mail-firewall.nft" FW_ETC=/etc/nftables.d/catto-mail-firewall.nft
   SSH_PORT="$(python3 "$(APP_DIR)/infra/lib/smarthost_render.py" get SMARTHOST_SSH_PORT --env "$ENV_FILE" 2>>"$LOG")"
   if ! prod firewall >"$FW.new" 2>>"$LOG"; then
     rm -f "$FW.new"; warn "the rules could not be generated: sudo -iu $SERVICE_USER $(APP_DIR)/infra/bin/smarthostctl prod firewall"
   elif [[ -f "$FW" ]] && cmp -s "$FW" "$FW.new"; then
-    rm -f "$FW.new"; pass "unchanged"
+    rm -f "$FW.new"
+    if grep -qxF "include \"$FW\"" /etc/nftables.conf 2>/dev/null; then
+      # Applied before 0.2.9 from the service user's home, which nftables.service cannot read at boot.
+      if install -d -m 755 /etc/nftables.d && install -m 644 -o root -g root "$FW" "$FW_ETC" \
+          && sed -i "s#^include \"$FW\"\$#include \"$FW_ETC\"#" /etc/nftables.conf; then pass "unchanged; now loaded at boot from $FW_ETC"
+      else warn "the rules in $FW are not loaded at boot: copy them to $FW_ETC and include that file in /etc/nftables.conf"; fi
+    else pass "unchanged"; fi
   else
     mv "$FW.new" "$FW"; chown "$SERVICE_USER": "$FW"
-    if grep -qF "$FW" /etc/nftables.conf 2>/dev/null; then
-      # The installer applied the rules (--apply-firewall), so the release's rules replace them.
-      if grep -q "tcp dport { $SSH_PORT, " "$FW" && run nft -f "$FW"; then pass "changed by the release, applied; SSH port $SSH_PORT stays open"
-      else warn "changed by the release but not applied: review $FW, then nft -f $FW"; fi
+    if grep -qF -e "$FW" -e "$FW_ETC" /etc/nftables.conf 2>/dev/null; then
+      # The rules are applied (the installer's --apply-firewall, or by hand), so the release's rules
+      # replace them: as a copy under /etc, the only place nftables.service can read at boot.
+      if grep -q "tcp dport { $SSH_PORT, " "$FW" && install -d -m 755 /etc/nftables.d && install -m 644 -o root -g root "$FW" "$FW_ETC" \
+          && sed -i "s#^include \"$FW\"\$#include \"$FW_ETC\"#" /etc/nftables.conf && run nft -f "$FW_ETC"; then
+        pass "changed by the release, applied; SSH port $SSH_PORT stays open"
+      else warn "changed by the release but not applied: review $FW, then copy it to $FW_ETC and nft -f $FW_ETC"; fi
     else
       warn "changed by the release: if you applied the earlier rules, review $FW, then nft -f $FW"
     fi

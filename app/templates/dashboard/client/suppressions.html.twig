@@ -6,40 +6,42 @@
 <div class="pagehead">
     <div>
         <h1>Suppressions</h1>
-        <p class="sub">Smarthost does not submit a message to an address (or domain) with an active suppression. Some suppressions apply to this client only; global ones apply to every client of this installation. This is transport safety state, not your mailing-list or consent data.</p>
+        <p class="lead">Addresses and domains your messages are never sent to.{{ ui.tip('A message to an address (or domain) with an active suppression is never submitted. Some suppressions apply to this client only; global ones apply to every client of this installation. This is transport safety state, not your mailing-list or consent data.') }}</p>
     </div>
 </div>
 
 <section aria-labelledby="full-h">
-    <h2 id="full-h">Suppressions you can see in full</h2>
-    <p class="muted">Suppressions scoped to this client, and the recipient global opt-outs this client reported.</p>
-    <form method="get" class="filters" role="search" aria-label="Filter suppressions">
-        <label>Address or domain (exact, normalised) <input type="text" name="address" value="{{ filters.address }}" autocomplete="off"></label>
-        <label>State <select name="state"><option value="">Active</option><option value="all"{% if filters.state == 'all' %} selected{% endif %}>All, including lifted and expired</option></select></label>
-        <button type="submit">Apply</button>
-        <a href="{{ path('dashboard_client_suppressions', {clientId: cid}) }}">Reset</a>
+    <form method="get" class="searchline" role="search" aria-label="Find an address or domain">
+        <label class="sr" for="sup-q">Address or domain (exact)</label>
+        <input id="sup-q" type="search" name="address" value="{{ filters.address }}" placeholder="Is this address or domain suppressed?" autocomplete="off">
+        <input type="hidden" name="state" value="{{ filters.state }}">
+        <button type="submit">Find</button>
     </form>
+    <nav class="chips" aria-label="Views of the suppressions">
+        <a class="chip-link" href="{{ path('dashboard_client_suppressions', {clientId: cid}) }}"{% if filters.state != 'all' %} aria-current="page"{% endif %}>Active</a>
+        <a class="chip-link" href="{{ path('dashboard_client_suppressions', {clientId: cid, state: 'all'}) }}"{% if filters.state == 'all' %} aria-current="page"{% endif %}>Including lifted and expired</a>
+        <a class="chip-link" href="#blocked">Messages not sent</a>
+    </nav>
     <div class="card card-flush">
+        <div class="card-head"><h2 id="full-h">Suppressions</h2>{{ ui.tip('Suppressions scoped to this client, and the recipient global opt-outs this client reported.') }}</div>
         {% if page.rows is empty %}<p class="empty">No suppressions match.</p>{% else %}
         <div class="scroll">
-        <table>
-            <thead><tr><th scope="col">Address or domain</th><th scope="col">Scope</th><th scope="col">Reason</th><th scope="col">Created</th><th scope="col">Expires</th><th scope="col">Lifted</th><th scope="col">Your reference</th><th scope="col">Action</th></tr></thead>
+        <table class="list">
+            <thead><tr><th scope="col">Address or domain</th><th scope="col">Reason</th><th scope="col">For</th><th scope="col">Since</th><th scope="col"><span class="sr">Details</span></th><th scope="col"><span class="sr">Action</span></th></tr></thead>
             <tbody>
             {% for s in page.rows %}
                 <tr>
                     <td>{{ s.address_or_domain }}</td>
-                    <td><span class="tag">{{ s.is_global ? 'Global' : 'This client' }}</span> <small>({{ s.scope_type }})</small></td>
                     <td>{{ s.reason|label('suppression_reason') }}</td>
-                    <td>{{ s.created_at|ts }}</td>
-                    <td>{{ s.expires_at ? s.expires_at|ts : 'Never' }}</td>
-                    <td>{{ s.lifted_at|ts }}</td>
-                    <td>{{ s.external_reference ?? '—' }}</td>
+                    <td>{{ s.is_global ? 'Every client' : 'This client' }}</td>
+                    <td>{{ s.created_at|when }}</td>
+                    <td class="tipcell">{{ ui.tip(s.scope_type ~ ' · ' ~ (s.lifted_at ? 'lifted ' ~ (s.lifted_at|ts) : (s.expires_at ? 'expires ' ~ (s.expires_at|ts) : 'never expires')) ~ (s.external_reference ? ' · your reference ' ~ s.external_reference : '')) }}</td>
                     <td>
                         {% if s.reason == 'recipient_global_opt_out' and s.lifted_at is null and may_lift %}
                             <form method="post" action="{{ path('dashboard_client_opt_out_lift', {clientId: cid, id: s.id}) }}" data-controller="confirm" data-confirm-message-value="Lift the global opt-out for {{ s.address_or_domain }}? The address becomes sendable again for every client unless another suppression applies.">
                                 {{ ui.csrf() }}<button type="submit" class="secondary">Lift opt-out</button>
                             </form>
-                        {% else %}—{% endif %}
+                        {% endif %}
                     </td>
                 </tr>
             {% endfor %}
@@ -49,12 +51,11 @@
         {% endif %}
     </div>
     {{ ui.pager(page, 'suppressions') }}
-    {% if client.canSubmitGlobalSuppressions and not may_lift %}<p class="muted">Lifting an opt-out needs the client admin role and an active or throttled client.</p>{% endif %}
+    {% if client.canSubmitGlobalSuppressions and not may_lift %}<p class="card-note">Lifting an opt-out needs the client admin role and an active or throttled client.</p>{% endif %}
 </section>
 
 <section aria-labelledby="blocked">
-    <h2 id="blocked">Your messages that were not sent because of a suppression</h2>
-    <p class="muted">For global suppressions caused by bounces, complaints, opt-outs or operator blocks elsewhere, only the broad reason is shown. Hard-bounce and complaint suppressions can only be lifted by an operator.</p>
+    <div class="sectionhead"><h2 id="blocked">Messages not sent</h2>{{ ui.tip('Your messages that were not sent because of a suppression. For global suppressions caused elsewhere, only the broad reason is shown. Hard-bounce and complaint suppressions can only be lifted by an operator.') }}</div>
     <form method="get" class="filters" role="search" aria-label="Find a suppressed recipient" action="#blocked">
         <input type="hidden" name="address" value="{{ filters.address }}"><input type="hidden" name="state" value="{{ filters.state }}">
         <label>Recipient (exact) <input type="text" name="recipient" value="{{ filters.recipient }}" autocomplete="off"></label>
@@ -63,11 +64,11 @@
     <div class="card card-flush">
         {% if blocked.rows is empty %}<p class="empty">No suppressed messages{% if filters.recipient %} for that recipient{% endif %}.</p>{% else %}
         <div class="scroll">
-        <table>
-            <thead><tr><th scope="col">Recipient</th><th scope="col">Reason</th><th scope="col">Message created</th><th scope="col">Message</th></tr></thead>
+        <table class="list">
+            <thead><tr><th scope="col">Recipient</th><th scope="col">Reason</th><th scope="col">Created</th><th scope="col"><span class="sr">Message</span></th></tr></thead>
             <tbody>
             {% for m in blocked.rows %}
-                <tr><td>{{ m.recipient_address }}</td><td>{{ m.reason|label('suppression_reason_client') }}</td><td>{{ m.created_at|ts }}</td>
+                <tr><td>{{ m.recipient_address }}</td><td>{{ m.reason|label('suppression_reason_client') }}</td><td>{{ m.created_at|when }}</td>
                     <td><a href="{{ path('dashboard_client_message', {clientId: cid, messageId: m.id}) }}">Timeline</a></td></tr>
             {% endfor %}
             </tbody>

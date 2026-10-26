@@ -130,8 +130,9 @@ Read only by the production topology script and `smarthostctl prod`; the develop
 | `PROXY_HTTP_BIND` | deployment, proxy | no | 8 | | Plain HTTP listener on the host (owner decision, 2026-10-10). In production `0.0.0.0:80`: the systemd socket `<instance>-ingress.socket` binds it and hands it to nginx, which answers every request with a redirect (301) to the same path on `https://PROXY_SERVER_NAME` and serves nothing over HTTP. Required in production; empty in development (the pod has no HTTP listener). |
 | `SMARTHOST_SSH_PORT` | deployment | no | 8 | `22` | The host's SSH port, kept open by the generated host firewall rules (`smarthostctl prod firewall`). |
 | `ACME_EMAIL` | deployment | no | 10 | | Let's Encrypt account e-mail for the certificate tooling (`smarthostctl prod tls acme`, specification 2.11). Empty: automatic certificates are not configured. |
-| `ACME_DNS_PROVIDER` | deployment | no | 10 | | The DNS-01 provider of the ACME client `lego` (installed on the host by the installer), e.g. `cloudflare`, `route53`, `hetzner`, `ovh`; see `lego dnshelp`. `manual` prints the TXT record for you to create by hand (no automatic renewal). DNS-01 needs no inbound port (80 only redirects to HTTPS). |
+| `ACME_DNS_PROVIDER` | deployment | no | 10 | | The DNS-01 provider of the ACME client `lego` (the official release, installed on the host by the installer and kept current by `upgrade-catto-mail`; distribution packages may leave providers out), e.g. `cloudflare`, `route53`, `hetzner`, `ovh`; see `lego dnshelp`. `manual` prints the TXT record for you to create by hand (no automatic renewal). DNS-01 needs no inbound port (80 only redirects to HTTPS). |
 | `ACME_CREDENTIALS_FILE` | deployment | no | 10 | | Path on the host of a file (mode 0600, outside the repository) with the DNS provider's credentials as `NAME=value` lines, exactly the variables `lego dnshelp -c <provider>` lists. Never in `infra/.env`; included in backups only if under the backup's configuration paths (it is not by default). |
+| `ACME_EXTRA_DOMAINS` | deployment | no | 10 | | More names on the same certificate, separated by spaces or commas, for example the web host's `www` name. The certificate always covers `PROXY_SERVER_NAME` and `POSTFIX_MYHOSTNAME`; each extra name must be in a DNS zone the DNS-01 provider manages. Empty: none. |
 | `ACME_SERVER` | deployment | no | 10 | `https://acme-v02.api.letsencrypt.org/directory` | The ACME directory. Use `https://acme-staging-v02.api.letsencrypt.org/directory` to try the setup without the production rate limits. |
 | `ACME_RENEW_DAYS` | deployment | no | 10 | `30` | Renew when the certificate expires within this many days (the daily `<instance>-tls-renew.timer`). |
 | `BACKUP_DIR` | deployment | no | 10 | | Where scheduled backups are written on the host. Empty: `infra/.generated/backups`. Each backup is a 0700 directory, or a single encrypted file when `BACKUP_ENCRYPTION_PASSPHRASE_FILE` is set. |
@@ -344,7 +345,7 @@ placeholders: `smarthostctl prod check` (and every `prod` command that renders) 
 | `SMARTHOST_BOUNCE_DOMAIN` | `bounce.example.com` | Dedicated return-path domain; its MX points to `POSTFIX_MYHOSTNAME`. |
 | `SMARTHOST_PUBLIC_IPV4` | `203.0.113.10` | The host's public IPv4 (placeholder: TEST-NET-3). |
 | `SMARTHOST_EGRESS_ENABLED` | `true` | Postfix, validator, webhook worker and application DNS reach the Internet. |
-| `SMARTHOST_IMAGE_TAG` | `0.2.8` | The released version being deployed. |
+| `SMARTHOST_IMAGE_TAG` | `0.2.9` | The released version being deployed. |
 | `ACME_SERVER` | `https://acme-v02.api.letsencrypt.org/directory` | Let's Encrypt production; the installer fills in `ACME_EMAIL` and the provider when you choose automatic certificates. |
 | `BACKUP_SCHEDULE` | `*-*-* 03:15:00` | A daily backup. Set `BACKUP_OFFHOST_TARGET` before relying on it. |
 | `SMARTHOST_LOG_LEVEL` | `info` | |

@@ -160,7 +160,7 @@ final class ClientDomainSetupTest extends DashboardTestCase
 
         $this->submit($base, $base, ['domain' => self::domainName()]);
         $page = $this->crawler($base);
-        self::assertStringContainsString('1 of at most 1', $page->filter('#dom-h')->ancestors()->first()->text());
+        self::assertStringContainsString('1 of at most 1', $page->filter('.pagehead .lead')->text());
         self::assertSame(0, $page->filter("form[action=\"$base\"]")->count(), 'no add form at the limit');
         self::assertStringContainsString('Ask the operator for a higher limit', $page->text());
 
@@ -302,7 +302,7 @@ final class ClientDomainSetupTest extends DashboardTestCase
         self::assertSame(['verified', 'active', 'cm202610abcd', $key], array_values(array_slice($this->row($id), 0, 4)));
         $card = $this->crawler($base)->filter("#d-$id");
         self::assertStringContainsString('Active', $card->filter('.card-head')->text());
-        self::assertSame(4, $card->filter('.stepper li.done')->count());
+        self::assertSame(0, $card->filter('.stepper')->count(), 'an active domain shows its state, not the steps');
         self::assertStringContainsString("v=DKIM1; k=rsa; p=$key", $card->filter('details')->text(), 'the records stay available');
     }
 
@@ -413,7 +413,7 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Viewer));
         $card = $this->crawler($this->base($client))->filter("#d-{$domain->getId()->toRfc4122()}");
         self::assertStringContainsString('DKIM signing is active with selector s2026a', $card->text());
-        self::assertSame(4, $card->filter('.stepper li.done')->count());
+        self::assertSame(0, $card->filter('.stepper')->count(), 'an active domain shows its state, not the steps');
         self::assertSame(0, $card->filter('form')->count(), 'viewers check nothing');
         self::assertSame(0, $card->filter('table')->count(), 'no record without the recorded public half');
     }

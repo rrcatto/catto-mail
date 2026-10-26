@@ -244,7 +244,8 @@ final class AddressBatchTest extends DashboardTestCase
             'SELECT file_format, email_column, data_rows, imported_count, duplicate_count, malformed_count FROM address_batches WHERE id = ?', [$id])));
 
         $page = self::text($this->page($location));
-        foreach (['Validation', 'Send eligibility', 'Compliance approval', 'Prepare a send'] as $needle) {
+        // Separate state dimensions, never one status (spec 2.11).
+        foreach (['Validation', 'Eligible to send', 'Compliance approval', 'Prepare a send'] as $needle) {
             self::assertStringContainsString($needle, $page);
         }
         $this->submit($location, "/dashboard/operator/batches/$id/validate");

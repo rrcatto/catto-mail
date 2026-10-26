@@ -692,6 +692,18 @@ the page refused it as designed. The e2e suites against the pod, the rehearsal a
 test were not run. The four new pages were photographed with headless Firefox
 (`docs/screenshots/`); the other screenshots were not retaken.
 
+Latest runs (v0.2.9, 2026-10-26: the dashboard layout of 2026-10-25, the first ACME issue,
+the pinned lego, the firewall under `/etc/nftables.d`; on the local Podman 4.9.3 engine):
+`check-contracts` 2,946; `test phase2` 377 tests and 6,588 assertions (the earlier runs of the day
+found the tests the new pages had broken, and `WebhookWorkerTest` failing on a busy machine, fixed);
+`test phase8` 29/29; `test installer --from v0.2.8` 15/15 (the released 0.2.8 installed by its own
+installer, upgraded to the working tree in 13 steps and rolled back) and `test installer --with-upgrade` 23/23
+(this installer installed lego 4.35.2 and its second run found it; `upgrade-catto-mail` in 13
+steps found it too). The lego download
+step was also run on its own: lego 4.35.2 installed after its checksum, and a second run left it.
+Every screenshot except the two connect pages and sign-up was retaken with headless Firefox
+(`docs/screenshots/`). The other suites were last run as recorded below.
+
 Latest runs (v0.2.8, 2026-10-25: the sign-in link after `/dashboard/`, the TLS check of Postfix's
 certificate by name; on the local Podman 4.9.3 engine): `check-contracts` 2,944; `test phase2` 377
 tests and 6,637 assertions (the first run had two failures: the Phase 9 query-plan test, which

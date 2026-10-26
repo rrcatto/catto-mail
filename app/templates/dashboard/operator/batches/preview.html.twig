@@ -1,12 +1,12 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Preview upload{% endblock %}
+{% block crumb_tail %}Preview{% endblock %}
 {% block body %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › Preview</p>
 <div class="pagehead">
     <div>
         <h1>Preview: {{ filename }}</h1>
-        <p class="sub">Nothing is stored yet. For <strong>{{ batch_client.companyName }}</strong>, batch “{{ form.name }}” ({{ form.purpose }}).</p>
+        <p class="lead">Nothing is stored yet. For <strong>{{ batch_client.companyName }}</strong>, batch “{{ form.name }}” ({{ form.purpose }}).</p>
     </div>
 </div>
 <dl class="facts">
@@ -30,18 +30,18 @@
     <div class="grid">
         <section class="card card-flush {{ problems is not empty ? 'g-col-4 2xl:g-col-2' : 'g-col-4' }}" aria-labelledby="rows-h">
             <div class="card-head"><h2 id="rows-h">First rows</h2></div>
-            <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Will be imported as</th><th scope="col">Outcome</th><th scope="col">Note</th></tr></thead>
+            <div class="scroll"><table class="list"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Will be imported as</th><th scope="col">Outcome</th><th scope="col">Note</th></tr></thead>
             <tbody>{% for r in sample %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.normalized ?? '—' }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
         </section>
         {% if problems is not empty %}
         <section class="card card-flush g-col-4 2xl:g-col-2" aria-labelledby="prob-h">
             <div class="card-head"><h2 id="prob-h">Duplicates and malformed rows (first {{ problems|length }})</h2></div>
-            <div class="scroll"><table class="dense"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
+            <div class="scroll"><table class="list"><thead><tr><th scope="col">Row</th><th scope="col">Original</th><th scope="col">Outcome</th><th scope="col">Why</th></tr></thead>
             <tbody>{% for r in problems %}<tr><td class="num">{{ r.row }}</td><td>{{ r.original }}</td><td>{{ r.outcome }}</td><td>{{ r.detail }}</td></tr>{% endfor %}</tbody></table></div>
         </section>
         {% endif %}
     </div>
-    <p class="muted">Cleanup applied: surrounding spaces removed, <code>mailto:</code> and <code>Name &lt;address&gt;</code> forms reduced to the address, the domain lower-cased (the part before @ is kept exactly). Nothing else is changed; the validator judges the rest.</p>
+    <p class="card-note">Light cleanup only.{{ ui.tip('Surrounding spaces removed, mailto: and Name <address> forms reduced to the address, the domain lower-cased (the part before @ is kept exactly). Nothing else is changed; the validator judges the rest.') }}</p>
     <div class="form-actions">
         <button type="submit">Import {{ parsed.counts.data_rows|number_format }} rows</button>
         <a href="{{ path('dashboard_operator_batches') }}">Cancel</a>

@@ -1,15 +1,14 @@
-{# Validation job rows (the job list and the client overview, inside a card-flush card). Variables: rows, listing (or null). #}
+{# Validation job rows (the job list, inside a card-flush card). Variables: rows, listing (or null). #}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% if rows is empty %}<p class="empty">No validation jobs match.</p>{% else %}
 <div class="scroll">
-<table>
+<table class="list">
     <thead><tr>
         <th scope="col">{% if listing %}{{ ui.sort(listing, 'submitted', 'Submitted') }}{% else %}Submitted{% endif %}</th>
-        <th scope="col">Status</th>
-        <th scope="col">External reference</th>
+        <th scope="col">Reference</th>
         <th scope="col" class="num">{% if listing %}{{ ui.sort(listing, 'total', 'Addresses') }}{% else %}Addresses{% endif %}</th>
-        <th scope="col" class="num">Checked</th>
-        <th scope="col">Classification summary</th>
+        <th scope="col">Status</th>
+        <th scope="col">Result</th>
     </tr></thead>
     <tbody>
     {% for j in rows %}
@@ -17,16 +16,12 @@
         {% set ok = (c.deliverable ?? 0) + (c.probably_deliverable ?? 0) %}
         {% set mid = (c.risky ?? 0) + (c.unknown ?? 0) + (c.temporarily_unverifiable ?? 0) %}
         {% set bad = c.undeliverable ?? 0 %}
-        {% set tot = ok + mid + bad %}
         <tr>
-            <td><a href="{{ path('dashboard_client_validation_job', {clientId: client.id.toRfc4122, jobId: j.id}) }}">{{ j.submitted_at|ts }}</a></td>
-            <td>{{ ui.status(j.status, 'validation_job_status') }}</td>
+            <td class="nowrap"><a href="{{ path('dashboard_client_validation_job', {clientId: client.id.toRfc4122, jobId: j.id}) }}" title="{{ j.submitted_at|ts }}">{{ j.submitted_at|when }}</a></td>
             <td>{{ j.external_reference ?? '—' }}</td>
-            <td class="num">{{ j.total_addresses|number_format }}</td>
-            <td class="num">{{ j.processed_count|number_format }}
-                {% if j.total_addresses > 0 %}<svg class="stackbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/><rect class="seg-ok" width="{{ (100 * min(j.processed_count, j.total_addresses) / j.total_addresses)|round(2) }}" height="8" rx="4"/></svg>{% endif %}</td>
-            <td>{% if tot > 0 %}<svg class="stackbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/><rect class="wf-ok" width="{{ (100 * ok / tot)|round(2) }}" height="8"/><rect class="wf-mid" x="{{ (100 * ok / tot)|round(2) }}" width="{{ (100 * mid / tot)|round(2) }}" height="8"/><rect class="wf-bad" x="{{ (100 * (ok + mid) / tot)|round(2) }}" width="{{ (100 * bad / tot)|round(2) }}" height="8"/></svg>{% endif %}
-                {{ ui.counts(j.classification_counts_json, 'classification') }}</td>
+            <td class="num">{{ j.total_addresses|number_format }}{% if j.processed_count < j.total_addresses %} <span class="muted small">({{ j.processed_count|number_format }} checked)</span>{% endif %}</td>
+            <td>{{ ui.status(j.status, 'validation_job_status') }}</td>
+            <td>{% set parts = [] %}{% if ok %}{% set parts = parts|merge([ok|number_format ~ ' deliverable']) %}{% endif %}{% if mid %}{% set parts = parts|merge([mid|number_format ~ ' risky or unknown']) %}{% endif %}{% if bad %}{% set parts = parts|merge([bad|number_format ~ ' undeliverable']) %}{% endif %}{{ parts is empty ? '—' : parts|join(' · ') }}</td>
         </tr>
     {% endfor %}
     </tbody>

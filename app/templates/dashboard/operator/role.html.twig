@@ -1,16 +1,23 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Role {{ role.roleKey }}{% endblock %}
+{% block crumb_tail %}{{ role.roleKey }}{% endblock %}
 {% block body %}
 {% set manage = is_granted('SYSTEM.ROLE.MANAGE') and not is_admin_role %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_roles') }}">Roles &amp; permissions</a> › {{ role.roleKey }}</p>
 <div class="pagehead">
     <div>
-        <div class="titleline"><h1><code>{{ role.roleKey }}</code> {{ role.name }}</h1><span class="tag">{{ role.builtin ? 'Built-in' : 'Custom' }}</span></div>
-        <p class="sub">{{ role.builtin ? 'Built-in role.' : 'Custom role.' }} Held by {{ holders }} user{{ holders == 1 ? '' : 's' }} (<a href="{{ path('dashboard_operator_users', {role: role.roleKey}) }}">list them</a>).</p>
+        <div class="titleline"><h1><code>{{ role.roleKey }}</code> {{ role.name }}</h1>{% if not role.builtin %}<span class="tag">custom</span>{% endif %}</div>
+        <p class="lead">Held by <a href="{{ path('dashboard_operator_users', {role: role.roleKey}) }}">{{ holders }} user{{ holders == 1 ? '' : 's' }}</a>.{{ ui.tip((is_admin_role ? 'ADMIN always holds every permission and cannot be changed; the account whose email is APP_ADMIN_EMAIL receives it at every sign-in. ' : '') ~ 'System permissions (roles and ADMIN) belong to ADMIN alone. Client pages are governed by client memberships, except PLATFORM.CLIENT.VIEW and PLATFORM.CLIENT.MANAGE, which give access to every client.') }}</p>
     </div>
+    {% if is_granted('SYSTEM.ROLE.MANAGE') and not role.builtin %}
+    <details class="actionform"><summary class="btn btn-stop">Delete this role</summary>
+        <form method="post" action="{{ path('dashboard_operator_role_delete', {id: role.id.toRfc4122}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Delete the role {{ role.roleKey }}?">
+            {{ ui.csrf() }}{% if holders > 0 %}<p class="small">Revoke it from every user first.</p>{% endif %}
+            <button type="submit" class="danger"{% if holders > 0 %} disabled{% endif %}>Delete role</button>
+        </form>
+    </details>
+    {% endif %}
 </div>
-{% if is_admin_role %}<p class="caveat">ADMIN always holds every permission and cannot be changed. The account whose email is <code>APP_ADMIN_EMAIL</code> receives it at every sign-in.</p>{% endif %}
 <form method="post" action="{{ path('dashboard_operator_role_update', {id: role.id.toRfc4122}) }}" class="grid">
     {{ ui.csrf() }}
     <section class="card g-col-4 xl:g-col-1" aria-labelledby="role-details-h">
@@ -35,16 +42,4 @@
         {% if manage %}<div class="form-actions"><button type="submit">Save role</button></div>{% endif %}
     </section>
 </form>
-{% if is_granted('SYSTEM.ROLE.MANAGE') and not role.builtin %}
-<div class="grid">
-<section class="card card-danger g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="role-delete-h">
-    <h2 id="role-delete-h">Delete this role</h2>
-    <form method="post" action="{{ path('dashboard_operator_role_delete', {id: role.id.toRfc4122}) }}" class="form-actions" data-controller="confirm" data-confirm-message-value="Delete the role {{ role.roleKey }}?">
-        {{ ui.csrf() }}<button type="submit" class="danger"{% if holders > 0 %} disabled title="Revoke it from every user first"{% endif %}>Delete role</button>
-        {% if holders > 0 %}<span class="muted small">Revoke it from every user first.</span>{% endif %}
-    </form>
-</section>
-</div>
-{% endif %}
-<p class="muted small">System permissions (roles and ADMIN) belong to ADMIN alone. Client pages are governed by client memberships, not by these permissions, except PLATFORM.CLIENT.VIEW / PLATFORM.CLIENT.MANAGE, which give access to every client.</p>
 {% endblock %}

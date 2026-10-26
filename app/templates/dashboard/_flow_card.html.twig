@@ -1,9 +1,9 @@
 {# Messages per bucket of the period (TrendCharts::flow). Variables: flow, period, flow_title; optional span (its
-   page-grid columns, default the full width). #}
+   page-grid columns, default the full width) and more ({label, href}: a link in the card head). #}
 <section class="card chart-card {{ span ?? 'g-col-4' }}" aria-labelledby="flow-h">
     <div class="card-head">
         <h2 id="flow-h">{{ flow_title }}</h2>
-        <p class="muted small">Messages per {{ period.unit }}, by the {{ period.unit }} their send job was created{% if flow.busiest %} · busiest: {{ flow.busiest.title }}, {{ flow.busiest.messages|number_format }}{% endif %}</p>
+        {% if more ?? null %}<a class="more" href="{{ more.href }}">{{ more.label }}</a>{% endif %}
     </div>
     {% if flow.busiest is null %}
         <p class="empty">No send job was created in the period.</p>
@@ -12,7 +12,7 @@
         aria-label="Bar chart of messages per {{ period.unit }} over the last {{ period.label }}; the table below has the figures."></canvas></div>
     {% endif %}
     <details class="figures">
-        <summary>Figures</summary>
+        <summary>Figures{% if flow.busiest %} · busiest {{ period.unit }}: {{ flow.busiest.title }}, {{ flow.busiest.messages|number_format }}{% endif %}</summary>
         <div class="scroll"><table class="dense">
             <thead><tr><th scope="col">{{ period.unit == 'hour' ? 'Hour' : 'Day' }} ({{ period.zoneAbbreviation }})</th><th scope="col" class="num">Messages</th><th scope="col" class="num">Remote accepted</th><th scope="col" class="num">Deferred or soft bounced</th><th scope="col" class="num">Hard bounced or complained</th><th scope="col" class="num">Suppressed</th></tr></thead>
             <tbody>{% for r in flow.rows %}<tr><td>{{ r.title }}</td><td class="num">{{ r.messages|number_format }}</td><td class="num">{{ r.accepted|number_format }}</td><td class="num">{{ r.deferred_soft|number_format }}</td><td class="num">{{ (r.hard + r.complained)|number_format }}</td><td class="num">{{ r.suppressed|number_format }}</td></tr>{% endfor %}</tbody>

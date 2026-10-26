@@ -69,7 +69,7 @@ final class DashboardSearchTest extends DashboardTestCase
         }
         $this->signIn($this->newUser(true));
 
-        $band = json_decode((string) $this->crawler('/dashboard/operator?period=24h')->filter('canvas[data-chart-kind-value="band"]')->attr('data-chart-config-value'), true);
+        $band = json_decode((string) $this->crawler('/dashboard/operator/system?period=24h')->filter('canvas[data-chart-kind-value="band"]')->attr('data-chart-config-value'), true);
         self::assertCount(24, $band['peak']);
         self::assertGreaterThanOrEqual(3, $band['peak'][23], 'three submissions in the same minute of the current hour');
         $delivery = $this->crawler('/dashboard/operator/system?period=7d');
@@ -78,10 +78,8 @@ final class DashboardSearchTest extends DashboardTestCase
 
         // The client overview has its own period choice and figures from its own jobs only.
         $overview = $this->crawler('/dashboard/c/'.$client->getId()->toRfc4122().'?period=30d');
-        self::assertSame('30 days', $overview->filter('.pills a[aria-current]')->text());
-        $flow = json_decode((string) $overview->filter('canvas[data-chart-kind-value="flow"]')->attr('data-chart-config-value'), true);
-        self::assertCount(30, $flow['totals']);
-        self::assertSame(3, array_sum($flow['totals']), 'only this client\'s three messages');
+        self::assertSame('30 days', $overview->filter('.seg a[aria-current]')->text());
+        self::assertSame('3', $overview->filter('.kpi-value')->first()->text(), 'only this client\'s three messages');
         self::assertSame(4, $overview->filter('.kpi')->count());
     }
 }

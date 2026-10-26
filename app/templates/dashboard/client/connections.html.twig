@@ -6,30 +6,21 @@
 <div class="pagehead">
     <div>
         <h1>Connected applications</h1>
-        <p class="sub">Applications that a client admin connected from their own “connect to {{ site_name() }}” step. Each has its own API key and webhook endpoint; ending the connection revokes the key and removes the endpoint.</p>
+        <p class="lead">{{ connections|filter(c => c.status == 'active')|length }} application{{ connections|filter(c => c.status == 'active')|length == 1 ? '' : 's' }} connected.{{ ui.tip('An application that supports it sends a client admin to this installation; the admin signs in, chooses the workspace and approves, and the application collects its own API key and webhook signing secret. Nobody copies a key or a secret. Each connection has its own key and webhook endpoint; ending it revokes the key and removes the endpoint.' ~ (may_manage ? ' Connections are started in the application, never here.' : ' Client admins connect and disconnect applications.')) }}</p>
     </div>
-    <div class="actions"><a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a></div>
+    <a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a>
 </div>
-<div class="grid">
-    <section class="card card-flush g-col-4 2xl:g-col-3" aria-labelledby="conn-h">
-        <div class="card-head"><h2 id="conn-h">Connections</h2><p class="muted small">Active: {{ connections|filter(c => c.status == 'active')|length }}.</p></div>
-        {% if connections is empty %}<p class="empty">No application is connected.</p>{% else %}
-        <div class="scroll">
-        <table>
-            <thead><tr><th scope="col">Application</th><th scope="col">Webhooks go to</th><th scope="col">API key</th><th scope="col">Approved</th><th scope="col">Key last used</th><th scope="col">State</th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
-            <tbody>{% for c in connections %}<tr><td><strong>{{ c.application_name }}</strong></td><td class="url">{{ c.webhook_url }}</td>
-                <td>{% if c.key_prefix %}<code>{{ c.key_prefix }}…</code>{% else %}—{% endif %}</td><td>{{ c.created_at|ts }}<br><small>{{ c.approved_by }}</small></td><td>{{ c.last_used_at|ts }}</td>
-                <td>{% if c.status == 'active' %}<span class="st st-active">Connected</span>{% elseif c.status == 'pending' %}<span class="st st-pending">Approved</span> <small>waiting for the application until {{ c.code_expires_at|ts }}</small>{% else %}<span class="st st-disabled">Ended</span> <small>{{ c.revoked_at|ts }}</small>{% endif %}</td>
-                {% if may_manage %}<td>{% if c.status != 'revoked' %}<form method="post" action="{{ path('dashboard_client_connection_revoke', {clientId: cid, id: c.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Disconnect {{ c.application_name }}? Its API key stops working at once and its webhook endpoint is removed.">{{ ui.csrf() }}<button type="submit" class="danger">Disconnect</button></form>{% endif %}</td>{% endif %}
-            </tr>{% endfor %}</tbody>
-        </table>
-        </div>
-        {% endif %}
-    </section>
-    <section class="card g-col-4 2xl:g-col-1" aria-labelledby="how-h">
-        <h2 id="how-h">How an application is connected</h2>
-        <p>An application that supports it sends a client admin to this {{ site_name() }} installation. The admin signs in, chooses the workspace and approves; the application then collects its API key and webhook signing secret itself. Nobody copies a key or a secret.</p>
-        <p class="muted small">{% if may_manage %}Connections are started in the application, never here. Keys and endpoints you create yourself are under API keys and Webhooks.{% else %}Client admins connect and disconnect applications.{% endif %}</p>
-    </section>
-</div>
+<section class="card card-flush" aria-labelledby="conn-h">
+    <div class="card-head"><h2 id="conn-h">Connections</h2></div>
+    {% if connections is empty %}<p class="empty">No application is connected.</p>{% else %}
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">Application</th><th scope="col">Webhooks go to</th><th scope="col">State</th><th scope="col"><span class="sr">Details</span></th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
+        <tbody>{% for c in connections %}<tr><td><strong>{{ c.application_name }}</strong></td><td class="url">{{ c.webhook_url }}</td>
+            <td>{% if c.status == 'active' %}<span class="st st-active">Connected</span>{% elseif c.status == 'pending' %}<span class="st st-pending">Approved</span> <small>waiting until {{ c.code_expires_at|when }}</small>{% else %}<span class="st st-disabled">Ended</span> <small>{{ c.revoked_at|when }}</small>{% endif %}</td>
+            <td class="tipcell">{{ ui.tip('API key ' ~ (c.key_prefix ? c.key_prefix ~ '…' : '—') ~ ' · approved ' ~ (c.created_at|ts) ~ ' by ' ~ c.approved_by ~ ' · key last used ' ~ (c.last_used_at|ts)) }}</td>
+            {% if may_manage %}<td>{% if c.status != 'revoked' %}<form method="post" action="{{ path('dashboard_client_connection_revoke', {clientId: cid, id: c.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Disconnect {{ c.application_name }}? Its API key stops working at once and its webhook endpoint is removed.">{{ ui.csrf() }}<button type="submit" class="secondary">Disconnect</button></form>{% endif %}</td>{% endif %}
+        </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
 {% endblock %}

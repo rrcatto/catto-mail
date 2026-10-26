@@ -2,23 +2,33 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Validation jobs{% endblock %}
 {% block body %}
+{% set cid = client.id.toRfc4122 %}
 <div class="pagehead">
     <div>
         <h1>Validation jobs</h1>
-        <p class="sub">The address lists your application submitted for validation, newest first. Validation estimates deliverability; it does not prove that a mailbox will accept a message.</p>
+        <p class="lead">The address lists your application submitted for validation, newest first.{{ ui.tip('Validation estimates deliverability; it does not prove that a mailbox will accept a message.') }}</p>
     </div>
 </div>
-<form method="get" class="filters" role="search" aria-label="Filter validation jobs">
-    {{ ui.select('status', 'Status', label_options('validation_job_status'), filters.status) }}
-    <label>External reference <input type="text" name="external_reference" value="{{ filters.external_reference }}"></label>
-    <label>Submitted from <input type="date" name="from" value="{{ filters.from }}"></label>
-    <label>to <input type="date" name="to" value="{{ filters.to }}"></label>
-    <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
-    <button type="submit">Apply</button>
-    <a href="{{ path('dashboard_client_validation_jobs', {clientId: client.id.toRfc4122}) }}">Reset</a>
+<form method="get" class="searchline" role="search" aria-label="Find a job by reference">
+    <label class="sr" for="ref-q">External reference</label>
+    <input id="ref-q" type="search" name="external_reference" value="{{ filters.external_reference }}" placeholder="Find a job by its reference">
+    <button type="submit">Find</button>
 </form>
-<section class="card card-flush" aria-labelledby="vj-h">
-    <div class="card-head"><h2 id="vj-h">Jobs</h2><span class="muted small">Dates are days in {{ time_zone_label() }}</span></div>
+<nav class="chips" aria-label="Views of the jobs">
+    {% for key, label in {'': 'Every job', processing: 'In progress', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled'} %}<a class="chip-link" href="{{ path('dashboard_client_validation_jobs', key ? {clientId: cid, status: key} : {clientId: cid}) }}"{% if not filters.external_reference and filters.status == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>
+<details class="morefilters"{% if filters.from or filters.to %} open{% endif %}>
+    <summary>More filters: dates</summary>
+    <form method="get" class="filters" role="search" aria-label="Filter jobs">
+        <input type="hidden" name="status" value="{{ filters.status }}">
+        <label>Submitted from <input type="date" name="from" value="{{ filters.from }}"></label>
+        <label>to <input type="date" name="to" value="{{ filters.to }}"></label>
+        <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
+        <button type="submit">Apply</button>
+    </form>
+</details>
+<section class="card card-flush" aria-labelledby="jobs-h">
+    <div class="card-head"><h2 id="jobs-h">Jobs</h2></div>
     {% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: page.rows} %}
 </section>
 {{ ui.pager(page, 'jobs') }}

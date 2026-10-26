@@ -66,10 +66,17 @@ final class DashboardTwigExtension
     }
 
     /**
-     * The area buttons and page pills for the current page (Navigation), built once per request.
+     * The menu bar and breadcrumb for the current page (Navigation), built once per request.
      *
      * @return array<string, mixed>
      */
+    /** The id of a help group's heading on the help index (the Help menu links to it). */
+    #[AsTwigFunction('help_anchor')]
+    public function helpAnchor(string $group): string
+    {
+        return Navigation::anchor($group);
+    }
+
     #[AsTwigFunction('navigation')]
     public function navigation(?\App\Entity\Client $client, string $section): array
     {
@@ -148,6 +155,18 @@ final class DashboardTwigExtension
     }
 
     /** Consistent timestamps in the dashboard's time zone, ISO-like, seconds precision, with the zone; "—" for none. */
+    /** A time in a list: "25 Oct 22:13", with the year when it is not this year; ts gives the full time for its title. */
+    #[AsTwigFilter('when')]
+    public function when(mixed $value): string
+    {
+        $t = $this->time->local($value);
+        if (null === $t) {
+            return '—';
+        }
+
+        return $t->format($t->format('Y') === \App\Util\Clock::now()->setTimezone($this->time->zone)->format('Y') ? 'j M H:i' : 'j M Y H:i');
+    }
+
     #[AsTwigFilter('ts')]
     public function timestamp(mixed $value): string
     {

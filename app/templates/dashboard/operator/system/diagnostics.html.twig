@@ -4,45 +4,42 @@
 {% block body %}
 {% set counts = {pass: 0, warn: 0, fail: 0} %}
 {% for comp, s in by_component %}{% if s.result in ['pass', 'warn', 'fail'] %}{% set counts = counts|merge({(s.result): counts[s.result] + 1}) %}{% endif %}{% endfor %}
+{% set problems = [] %}{% for comp, checks in grouped %}{% for c in checks %}{% if c.result in ['fail', 'warn'] %}{% set problems = problems|merge([c]) %}{% endif %}{% endfor %}{% endfor %}
+{% set problems = problems|sort((a, b) => (a.result == 'fail' ? 0 : 1) <=> (b.result == 'fail' ? 0 : 1)) %}
 <div class="pagehead">
     <div>
         <h1>Diagnostics</h1>
-        <p class="sub">Every check of every subsystem, with what it proves and what to do. PASS works; WARN works but needs attention; FAIL does not work or is unsafe; SKIPPED did not run (a prerequisite is missing, or it does not apply); INFO is a fact.
-            {{ ui.help('troubleshooting') }}</p>
+        <p class="lead">{% if by_component is empty %}No check has run yet.{% else %}<strong>{{ counts.pass }} of {{ by_component|length }}</strong> components pass{% if counts.warn %} · <span class="text-warn">{{ counts.warn }} warn</span>{% endif %}{% if counts.fail %} · <strong class="text-bad">{{ counts.fail }} fail</strong>{% endif %}.{% endif %}
+            {{ ui.tip('PASS works; WARN works but needs attention; FAIL does not work or is unsafe; SKIPPED did not run (a prerequisite is missing or it does not apply); INFO is a fact. The application checks run at once; the host agent runs its checks within a minute' ~ (agent_age is null ? ' (it has never reported)' : '') ~ (last_run ? '. Last host run: ' ~ last_run.status ~ ' ' ~ (last_run.finished_at|ts) : '') ~ '.', 'What the results mean') }}</p>
     </div>
     <div class="actions">
-        <a class="btn btn-secondary" href="{{ path('dashboard_operator_diagnostics_history') }}">Test-result history</a>
-        <a class="btn btn-secondary" href="{{ path('dashboard_operator_system_requests') }}">Host requests</a>
+        {{ ui.help('troubleshooting', 'Help: troubleshooting') }}
         {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
-        <form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}">
-            {{ ui.csrf() }}<button type="submit">Run all checks now</button>
-        </form>
+        <form method="post" action="{{ path('dashboard_operator_diagnostics_run') }}">{{ ui.csrf() }}<button type="submit">Run every check now</button></form>
         {% endif %}
     </div>
 </div>
-{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}
-<p class="muted">The application checks run at once; the host agent runs its checks within a minute{% if agent_age is null %} <strong>(it has never reported: see the Host agent check)</strong>{% endif %}.
-    {% if last_run %}Last host run: {{ last_run.status }} {{ last_run.finished_at|ts }}.{% endif %}</p>
+
+{% if problems is not empty %}
+<section class="card card-flush" aria-labelledby="needs-h">
+    <div class="card-head"><h2 id="needs-h">Needs you</h2></div>
+    {{ ui.checks(problems) }}
+</section>
 {% endif %}
 
-{% if by_component is not empty %}
-<dl class="facts">
-    <div><dt>Components</dt><dd class="lg">{{ by_component|length }}</dd></div>
-    <div><dt>Pass</dt><dd class="lg">{{ counts.pass }}</dd></div>
-    <div><dt>Warning</dt><dd class="lg">{{ counts.warn }}</dd></div>
-    <div><dt>Fail</dt><dd class="lg{{ counts.fail > 0 ? ' text-bad' : '' }}">{{ counts.fail }}</dd></div>
-</dl>
-<nav class="seg" aria-label="Components">{% for comp, s in by_component %}<a href="#c-{{ comp }}">{{ comp }}&nbsp;{{ ui.result(s.result) }}</a>{% endfor %}</nav>
-{% endif %}
-
-<div class="grid">
-{% for comp, checks in grouped %}
-    <section class="card card-flush g-col-4 xl:g-col-2" aria-labelledby="c-{{ comp }}">
-        <div class="card-head"><h2 id="c-{{ comp }}">{{ comp|capitalize }}</h2>{% if by_component[comp] is defined %}{{ ui.result(by_component[comp].result) }}{% endif %}</div>
-        {{ ui.checks(checks) }}
-    </section>
-{% else %}
-    <p class="empty g-col-4">No check has run yet. {% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %}Use "Run all checks now".{% endif %}</p>
-{% endfor %}
-</div>
+<section class="card card-flush" aria-labelledby="comp-h">
+    <div class="card-head"><h2 id="comp-h">Every component</h2>{{ ui.tip('Open a component to see each of its checks.') }}</div>
+    {% for comp, checks in grouped %}
+    <details class="setup-step setup-{{ (by_component[comp].result ?? 'none') in ['pass', 'info'] ? 'done' : 'todo' }}" id="c-{{ comp }}">
+        <summary>
+            {{ ui.result(by_component[comp].result ?? 'none') }}
+            <span class="setup-text"><span class="setup-title">{{ comp|capitalize }}</span>
+                <span class="setup-line">{% set bad = checks|filter(x => x.result in ['fail', 'warn']) %}{% if bad is not empty %}{{ (bad|first).summary }}{% else %}{{ checks|length }} check{{ checks|length == 1 ? '' : 's' }}{% endif %}</span></span>
+        </summary>
+        <div class="setup-body setup-body-flush">{{ ui.checks(checks) }}</div>
+    </details>
+    {% else %}
+    <p class="empty">No check has run yet.{% if is_granted('SYSTEM.DIAGNOSTICS.RUN') %} Use "Run every check now".{% endif %}</p>
+    {% endfor %}
+</section>
 {% endblock %}

@@ -1,27 +1,27 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Host requests{% endblock %}
+{% block crumb_tail %}Host requests{% endblock %}
 {% block body %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_system') }}">Delivery</a> › Host requests</p>
 <div class="pagehead">
     <div>
         <h1>Host requests</h1>
-        <p class="sub">The web application never runs commands on the server. Actions that need the host (checks, holding the Postfix queue, live activation, backups, DKIM keys, certificates)
-            are recorded here and carried out by the <strong>host agent</strong>, a service on the server that runs as the catto-mail user
-            ({% if agent_age is null %}<strong>it has never reported: run <code>smarthostctl prod install</code> on the server</strong>{% else %}last report {{ agent_age|duration }} ago{% endif %}).
-            {{ ui.help('components') }}</p>
+        <p class="lead">What the dashboard asked the server to do. The host agent {% if agent_age is null %}<strong class="text-bad">has never reported</strong>{% else %}last reported {{ agent_age|duration }} ago{% endif %}.{{ ui.tip('The web application never runs commands on the server. Actions that need the host (checks, holding the Postfix queue, live activation, backups, DKIM keys, certificates) are recorded here and carried out by the host agent, a service on the server that runs as the catto-mail user.' ~ (agent_age is null ? ' Install it with smarthostctl prod install on the server.' : '')) }}</p>
     </div>
+    <div class="actions">{{ ui.help('components', 'Help: the components') }}</div>
 </div>
 <section class="card card-flush" aria-labelledby="requests-h">
-    <div class="card-head"><h2 id="requests-h">Requests</h2><span class="count count-dark">{{ requests|length }}</span></div>
-    <div class="scroll"><table class="dense">
-        <thead><tr><th scope="col">Requested</th><th scope="col">Action</th><th scope="col">By</th><th scope="col">Status</th><th scope="col">Finished</th><th scope="col">Outcome</th><th scope="col"><span class="sr">Cancel</span></th></tr></thead>
-        <tbody>{% for r in requests %}<tr>
-            <td>{{ r.requested_at|ts }}</td><td>{{ r.action }}{% set p = r.params_json|json_counts %}{% if p is not empty %}<br><small>{% for k, v in p %}{{ k }}={{ v }} {% endfor %}</small>{% endif %}{% if r.note %}<br><small class="muted">{{ r.note }}</small>{% endif %}</td>
-            <td>{{ r.requested_by ?? 'system' }}</td><td>{{ ui.result(r.status == 'succeeded' ? 'pass' : (r.status == 'failed' ? 'fail' : (r.status == 'cancelled' ? 'skipped' : 'waiting'))) }} {{ r.status }}</td>
-            <td>{{ r.finished_at|ts }}</td><td>{{ r.result_summary }}</td>
+    <div class="card-head"><h2 id="requests-h">Requests</h2></div>
+    {% if requests is empty %}<p class="empty">No request yet.</p>{% else %}
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">When</th><th scope="col">What</th><th scope="col">By</th><th scope="col">Result</th><th scope="col"><span class="sr">Details</span></th><th scope="col"><span class="sr">Cancel</span></th></tr></thead>
+        <tbody>{% for r in requests %}{% set p = r.params_json|json_counts %}{% set what = ('system.request.' ~ r.action)|audit_label|replace({'Host asked to ': ''}) %}<tr>
+            <td class="nowrap" title="{{ r.requested_at|ts }}">{{ r.requested_at|when }}</td><td>{{ what|first|upper ~ what|slice(1) }}</td>
+            <td>{{ r.requested_by ?? 'the system' }}</td><td>{{ ui.result(r.status == 'succeeded' ? 'pass' : (r.status == 'failed' ? 'fail' : (r.status == 'cancelled' ? 'skipped' : 'waiting'))) }}</td>
+            <td class="tipcell">{% set parts = [r.action] %}{% for k, v in p %}{% set parts = parts|merge([k ~ '=' ~ v]) %}{% endfor %}{% if r.note %}{% set parts = parts|merge(['note: ' ~ r.note]) %}{% endif %}{% if r.result_summary %}{% set parts = parts|merge([r.result_summary]) %}{% endif %}{% if r.finished_at %}{% set parts = parts|merge(['finished ' ~ (r.finished_at|ts)]) %}{% endif %}{{ ui.tip(parts|join(' · ')) }}</td>
             <td>{% if r.status == 'pending' and is_granted('SYSTEM.DIAGNOSTICS.RUN') %}<form method="post" action="{{ path('dashboard_operator_system_request_cancel', {id: r.id}) }}">{{ ui.csrf() }}<button type="submit" class="secondary">Cancel</button></form>{% endif %}</td>
-        </tr>{% else %}<tr><td colspan="7"><span class="muted">No request yet.</span></td></tr>{% endfor %}</tbody>
+        </tr>{% endfor %}</tbody>
     </table></div>
+    {% endif %}
 </section>
 {% endblock %}

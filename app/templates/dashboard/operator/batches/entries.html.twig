@@ -1,12 +1,12 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Addresses of {{ batch.name }}{% endblock %}
+{% block crumb_tail %}<a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Addresses{% endblock %}
 {% block body %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Addresses</p>
 <div class="pagehead">
     <div>
         <h1>Addresses: {{ filter|replace({'_': ' '}) }} <small class="muted">({{ total|number_format }})</small></h1>
-        <p class="sub">Each address has separate dimensions: its validation result (with warning flags), whether it may be sent to, what the recipient answered, what happened to the message, and whether an open or click was observed. {{ ui.help('validation-results') }}</p>
+        <p class="lead">Each address with its validation result, whether it may be sent to, the recipient's answer and what became of the message.{{ ui.tip('Validation result (with warning flags), send eligibility, the recipient\'s answer, the message outcome and whether an open or click was observed are separate dimensions.') }} {{ ui.help('validation-results') }}</p>
     </div>
     <div class="actions"><a class="btn btn-secondary" href="{{ path('dashboard_operator_batch_export', {id: batch.id, filter: filter}) }}">Download these as CSV</a></div>
 </div>
@@ -16,7 +16,7 @@
 {{ ui.csrf() }}<input type="hidden" name="filter" value="{{ filter }}">
 <section class="card card-flush" aria-labelledby="addr-h">
     <div class="card-head"><h2 id="addr-h">Page {{ page }} of {{ pages }}</h2></div>
-    <div class="scroll"><table class="dense">
+    <div class="scroll"><table class="list">
     <thead><tr><th scope="col"><span class="sr">Select</span></th><th scope="col">Row</th><th scope="col">Address</th><th scope="col">Validation</th><th scope="col">Why</th><th scope="col">Eligibility</th><th scope="col">Consent</th><th scope="col">Delivery</th><th scope="col">Engagement</th></tr></thead>
     <tbody>{% for e in entries %}<tr>
     <td>{% if e.outcome == 'imported' %}<input type="checkbox" name="entries[]" value="{{ e.id }}" aria-label="Select row {{ e.row_number }}">{% endif %}</td>

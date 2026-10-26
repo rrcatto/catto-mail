@@ -1,29 +1,40 @@
 # Screenshots
 
-Every page of the dashboard with the Bootstrap 6 four-column grid, all retaken on 2026-10-12 from the code after version 0.2.6, so every footer shows 0.2.6 and the link to the acceptable use policy. They were taken on the
-development pod (`smarthostctl`) at 1,440 pixels wide unless noted, each page at its full length, signed in as the administrator (the connect approval and Connected applications as a client admin). The installation is named "Catto Mail" here, the default of `APP_SITE_NAME`. The grid was designed
-for 2,560 pixels; at 1,440 a half holding a wide table takes the full width. The figures come from the end-to-end test suites, so the clients, addresses and
-domains are test data. Every time is in the installation time zone (`SMARTHOST_TIMEZONE`, here SAST). The development pod is
-always in HELD mode: live delivery is off and mail goes to Mailpit.
+Every page of the dashboard after the layout of 2026-10-25 (a three-tier menu bar, a breadcrumb, at most four key figures
+and one main list per page, explanations behind ⓘ), retaken on 2026-10-26 from the code after version 0.2.8, so every
+footer shows 0.2.8. Three pages that could not be reproduced on the development pod keep their screenshots of 2026-10-12
+(0.2.6): the two connect pages and sign-up; their templates did not change, only the type scale. They were taken on the
+development pod (`smarthostctl`) at 1,440 pixels wide unless noted, each page at its full length, signed in as the
+administrator (the public pages signed out). The installation is named "Catto Mail" here, the default of `APP_SITE_NAME`.
+The figures come from the end-to-end test suites, so the clients, addresses and domains are test data; the overviews show
+30 days because the test data is older than the default 7. Every time is in the installation time zone
+(`SMARTHOST_TIMEZONE`, here SAST). The development pod is always in HELD mode: live delivery is off and mail goes to Mailpit.
 
 ## Operator console
 
+### The menu bar
+
+`/dashboard/operator/audit` with the System menu open · Pointing at an area opens its pages; a page with an arrow opens
+its views, here the audit log's (sign-in emails, sign-ins, sign-up emails …). A number counts what needs a look. Below
+1,100 pixels the bar folds behind a *Menu* button.
+
+![The menu bar](operator-menu-bar.png)
+
 ### Overview at 2,560 pixels
 
-`/dashboard/operator` · The four-column grid at the width it was designed for: the area buttons and period pills in one top
-bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three columns next to needs attention.
+`/dashboard/operator?period=30d` · The same page on a wide screen: the content keeps a readable width.
 
 ![Overview at 2,560 pixels](wide-operator-overview.png)
 
 ### Overview
 
-`/dashboard/operator` · Period pills, the delivery banner, send jobs by hard-bounce rate, submission rate, KPIs, mail flow, needs attention, workers and queues, per-client rates, validation, health, suppressions and activity.
+`/dashboard/operator?period=30d` · What needs attention, four key figures against the previous period, messages per day, the five clients to watch and system health; the period at the top right.
 
 ![Overview](operator-overview.png)
 
 ### Mail flow › Delivery
 
-`/dashboard/operator/system` · The delivery mode with its controls, the delivery daemon, what each mode means, the submission rate, the Postfix queue, host requests and components.
+`/dashboard/operator/system` · The delivery mode with its controls, workers and queues (the Postfix queue among them), the submission rate and the latest host requests.
 
 ![Mail flow › Delivery](operator-mail-flow-delivery.png)
 
@@ -33,17 +44,17 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ![Mail flow › Suppressions](operator-mail-flow-suppressions.png)
 
-### Mail flow › Unmatched DSNs
+### Mail flow › Unmatched bounces
 
 `/dashboard/operator/unmatched-dsns`
 
-![Mail flow › Unmatched DSNs](operator-mail-flow-unmatched-dsns.png)
+![Mail flow › Unmatched bounces](operator-mail-flow-unmatched-dsns.png)
 
-### An unmatched DSN
+### An unmatched bounce
 
 `/dashboard/operator/unmatched-dsns/{id}`
 
-![An unmatched DSN](operator-mail-flow-unmatched-dsn.png)
+![An unmatched bounce](operator-mail-flow-unmatched-dsn.png)
 
 ### Mail flow › Webhooks
 
@@ -53,15 +64,21 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Clients › Clients
 
-`/dashboard/operator/clients` · The lists (all, public sign-ups, approval queue, throttled, suspended), the status and origin filters, and every client with its status, plan, alerts and domains.
+`/dashboard/operator/clients` · Views as chips (all, public sign-ups, waiting for approval, throttled, suspended), the other filters under *More filters*, and every client with its status, alerts and domains.
 
 ![Clients › Clients](operator-clients.png)
 
 ### A client profile
 
-`/dashboard/operator/clients/{id}` · Lifecycle controls, account, service policy, limits and quotas, usage, reputation, API keys, domains, members, private notes and audit history.
+`/dashboard/operator/clients/{id}` · The Summary tab: four key figures, the status with its actions, the account and private notes. The other tabs hold limits and usage, reputation, domains and webhooks, keys and members, the policy and opt-outs, and the history.
 
 ![A client profile](operator-client-profile.png)
+
+### A client profile: Limits & usage
+
+`/dashboard/operator/clients/{id}?tab=limits`
+
+![A client profile: Limits & usage](operator-client-limits.png)
 
 ### Clients › Abuse & reputation
 
@@ -83,13 +100,13 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### System › System setup
 
-`/dashboard/operator/setup`
+`/dashboard/operator/setup` · The 19 steps in groups, each with its checks' result in one line; a step opens to its checks and *Mark done*.
 
 ![System › System setup](operator-system-setup.png)
 
 ### System setup: the DNS step
 
-`/dashboard/operator/setup/dns` · The steps on the left; the step’s records, checks and state on the right.
+`/dashboard/operator/setup/dns` · The step's records and checks, the previous and next step, and its state.
 
 ![System setup: the DNS step](operator-system-setup-dns.png)
 
@@ -101,7 +118,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### System › Settings
 
-`/dashboard/operator/system/settings` · Each operational setting with its value in `infra/.env`, the value set in the dashboard (which takes precedence without changing the file) and the value in force; changes need a reason and take effect when applied.
+`/dashboard/operator/system/settings` · One group of operational settings at a time, chosen in the menu or from the chips.
 
 ![System › Settings](operator-system-settings.png)
 
@@ -113,7 +130,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### System › Audit log
 
-`/dashboard/operator/audit`
+`/dashboard/operator/audit` · Views as chips (sign-in emails, sign-ins, …) and the full filter form under *More filters*; each entry's details behind ⓘ.
 
 ![System › Audit log](operator-system-audit-log.png)
 
@@ -155,7 +172,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Search
 
-`/dashboard/search?q=smarthost` · The round search button at the top right; results are grouped by kind.
+`/dashboard/search?q=smarthost` · The search button at the top right; results are grouped by kind.
 
 ![Search](operator-search.png)
 
@@ -163,7 +180,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Overview
 
-`/dashboard/c/{client}` · *Get started* (until the client has a sending domain that can send, an API key and a webhook), period pills, messages per day, quota rings, KPIs, validation, sending domains, engagement and recent jobs (opened by an operator, hence the strip at the top).
+`/dashboard/c/{client}?period=30d` · *Get started* (until the client has a sending domain that can send, an API key and a webhook), the state and the limits in one line, four key figures, the latest send jobs and one status per sending domain.
 
 ![Overview](client-overview.png)
 
@@ -205,8 +222,7 @@ bar, charts in halves, KPIs and the bottom cards in quarters, mail flow in three
 
 ### Settings › Sending domains
 
-`/dashboard/c/{client}/sending-domains` · Each domain's progress (added, TXT verified, DKIM pending in DNS, active) with
-the records to publish, *Check DNS now*, and for client admins *Add a sending domain* within the client's limit.
+`/dashboard/c/{client}/sending-domains` · Every domain with its state in one table, then each domain's records to publish and *Check DNS now*; an active domain keeps its records folded away. Client admins add a domain within the client's limit.
 
 ![Settings › Sending domains](client-settings-sending-domains.png)
 
@@ -300,8 +316,8 @@ instead.
 
 ### Operator overview
 
-`/dashboard/operator` · The area buttons get a row of their own, the page pills another; the grid falls to one column and
-wide tables scroll inside their cards.
+`/dashboard/operator?period=30d` · The menu bar folds behind *Menu*; the cards fall to one column and wide tables scroll
+inside their cards.
 
 ![Operator overview](phone-operator-overview.png)
 
@@ -319,7 +335,7 @@ wide tables scroll inside their cards.
 
 ### Client overview
 
-`/dashboard/c/{client}`
+`/dashboard/c/{client}?period=30d`
 
 ![Client overview](phone-client-overview.png)
 

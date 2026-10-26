@@ -90,7 +90,8 @@ final class PageFrameTest extends DashboardTestCase
                     "$uri: <{$child->nodeName} class=\"{$child->getAttribute('class')}\"> in a .grid names no span");
             }
         }
-        self::assertGreaterThan(50, $grids, 'the pages use the grid');
+        // Since 2026-10-25 a list page is one full-width card; the pages with cards side by side use the grid.
+        self::assertGreaterThan(20, $grids, 'the pages use the grid');
     }
 
     public function testWithoutAnAdministratorAddressTheFooterSaysWhomToAsk(): void

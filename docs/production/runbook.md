@@ -384,7 +384,7 @@ Back off (lower the values) at the first spike. A client on probation can be set
 
 ## 13. DSN failures
 
-- Unmatched DSNs: Mail flow › Unmatched DSNs. Inspect them; request a match only when the evidence
+- Unmatched DSNs: Mail flow › Unmatched bounces. Inspect them; request a match only when the evidence
   identifies the message; otherwise dismiss them with a reason.
 - DSNs not arriving:
   - `prod preflight --section dns --section postfix`: MX, port 25, bounce domain;

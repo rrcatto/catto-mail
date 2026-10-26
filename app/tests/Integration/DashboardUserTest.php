@@ -168,7 +168,7 @@ final class DashboardUserTest extends DashboardTestCase
             self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'user.role_granted' AND target_id = ? AND detail_json->>'reason' = 'APP_ADMIN_EMAIL'", [$id]));
             self::assertSame(200, $this->page('/dashboard/operator/roles')->getStatusCode(), 'ADMIN sees the roles page');
             $text = self::text($this->page('/dashboard/operator/roles'));
-            self::assertStringContainsString(\count(PermissionCatalog::keys()).' / '.\count(PermissionCatalog::keys()), $text, 'ADMIN holds every permission');
+            self::assertStringContainsString(\count(PermissionCatalog::keys()).' of '.\count(PermissionCatalog::keys()), $text, 'ADMIN holds every permission');
 
             // Even if ADMIN is taken away (or its row lost), the next sign-in restores it.
             Db::owner()->executeStatement('DELETE FROM user_roles WHERE user_id = ?', [$id]);

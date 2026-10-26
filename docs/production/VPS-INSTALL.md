@@ -69,7 +69,7 @@ the sign-in page included, shows it in the footer as the contact for the service
 
 ## 2. Install
 
-catto-mail is installed from an exact **release**: a Git tag such as `v0.2.8`, which always
+catto-mail is installed from an exact **release**: a Git tag such as `v0.2.9`, which always
 names the same code (unlike the `main` branch, which moves). List the releases:
 
 ```sh
@@ -80,7 +80,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.8`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.9`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -415,10 +415,16 @@ Only SSH, 25, 80 and 443 need to be reachable (80 only redirects to HTTPS). The 
 out. Check that your SSH port is in the `tcp dport { … }` line, then as root:
 
 ```sh
-nft -f /home/cattomail/catto-mail-firewall.nft
-echo 'include "/home/cattomail/catto-mail-firewall.nft"' >> /etc/nftables.conf
+install -D -m 644 /home/cattomail/catto-mail-firewall.nft /etc/nftables.d/catto-mail-firewall.nft
+nft -f /etc/nftables.d/catto-mail-firewall.nft
+echo 'include "/etc/nftables.d/catto-mail-firewall.nft"' >> /etc/nftables.conf
 systemctl enable nftables
 ```
+
+The copy under `/etc` is the one loaded at boot: Ubuntu's `nftables.service` cannot read `/home`
+(`ProtectHome=true`), so an `include` of the file in the service user's home fails at boot and
+loads no rules at all. `upgrade-catto-mail` refreshes the copy when a release changes the rules,
+and moves an older `include` of the home file to the copy.
 
 Keep your SSH session open and test a new SSH connection before closing it. The rules also limit
 the service user's outbound traffic to DNS, SMTP 25, HTTP(S) and SSH (off-host backups).
@@ -509,11 +515,12 @@ Start with your seed addresses, then a controlled sample — never a whole list.
   bash upgrade-catto-mail --version vX.Y.Z
   ```
   It names the installed and the new release and asks before it restarts anything (`--yes` does
-  not ask; without `--version` it takes the newest release). Then, in 12 numbered steps that
+  not ask; without `--version` it takes the newest release). Then, in 13 numbered steps that
   each say PASS, WARN or FAIL, it does the procedure below, waits until every component is
   healthy, checks that the new release answers on port 443, sets the server's time zone to the
-  installation's, refreshes the generated firewall rules (and applies them only where the
-  installer had applied them) and prints the command that goes back, with the backup it made.
+  installation's, installs the pinned release of the certificate tool `lego`, refreshes the
+  generated firewall rules (and applies them only where they are applied, as a copy under
+  `/etc/nftables.d`) and prints the command that goes back, with the backup it made.
   - Live delivery stays as it was: HELD stays HELD.
   - A file of the installation that was changed on the server (a policy of your own in
     `docs/AUP.md`, for one) stops it before anything is touched. `--discard-local-changes`
@@ -545,7 +552,8 @@ Start with your seed addresses, then a controlled sample — never a whole list.
   firewall too:
   ```sh
   infra/bin/smarthostctl prod firewall > /home/cattomail/catto-mail-firewall.nft   # as cattomail
-  nft -f /home/cattomail/catto-mail-firewall.nft                                     # as root
+  install -D -m 644 /home/cattomail/catto-mail-firewall.nft /etc/nftables.d/catto-mail-firewall.nft   # as root
+  nft -f /etc/nftables.d/catto-mail-firewall.nft                                     # as root
   ```
 - **From 0.2.4 or earlier to 0.2.5 or later**, `env-migrate` adds the group *Public sign-up*
   to `infra/.env` (`APP_PUBLIC_ONBOARDING_ENABLED=false` and the starter limits): public
@@ -670,7 +678,7 @@ loginctl disable-linger cattomail
 loginctl terminate-user cattomail; sleep 5; pkill -KILL -u cattomail
 userdel -r cattomail                                       # the user and /home/cattomail (code, images, volumes)
 sed -i '/^cattomail:/d' /etc/subuid /etc/subgid
-sed -i '\#catto-mail-firewall.nft#d' /etc/nftables.conf; nft delete table inet catto_mail
+sed -i '\#catto-mail-firewall.nft#d' /etc/nftables.conf; rm -f /etc/nftables.d/catto-mail-firewall.nft; nft delete table inet catto_mail
 rm -rf /root/catto-mail-installer /var/log/catto-mail-install.log /etc/sysctl.d/60-catto-mail-ports.conf
 ```
 

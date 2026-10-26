@@ -66,36 +66,47 @@ final class OperatorDashboardTest extends DashboardTestCase
         foreach (self::PAGES as $uri) {
             self::assertSame(200, $this->page($uri)->getStatusCode(), $uri);
         }
-        $overview = self::text($this->page('/dashboard/operator'));
-        self::assertStringContainsString('Workers and queues', $overview);
-        self::assertStringContainsString('Operator View Co', $overview, 'cross-client rates');
-        // Phase 8: the queue depth comes only from the delivery daemon's durable heartbeat; without
-        // one, the panel says so instead of inventing a figure.
-        self::assertStringContainsString('Postfix queue', $overview);
-        self::assertStringContainsString('no snapshot yet', $overview);
+        // The overview lists the five clients to watch, worst first, from the cross-client rates.
+        $watch = $this->crawler('/dashboard/operator')->filter('section[aria-labelledby="cl-h"] tbody tr');
+        self::assertGreaterThan(0, $watch->count());
+        self::assertLessThanOrEqual(5, $watch->count(), 'five clients to watch at most');
+        self::assertContains($client->getId()->toRfc4122(), array_column($this->container()->get(\App\Dashboard\OperatorReadModel::class)->rates(), 'client_id'), 'cross-client rates');
+        // Workers and queues are on Mail flow › Delivery (owner decision 2026-10-25). Phase 8: the queue
+        // depth comes only from the delivery daemon's durable heartbeat; without one, the panel says so.
+        $delivery = self::text($this->page('/dashboard/operator/system'));
+        self::assertStringContainsString('Workers and queues', $delivery);
+        self::assertStringContainsString('Postfix queue', $delivery);
+        self::assertStringContainsString('no snapshot yet', $delivery);
         // Times are shown in the dashboard's time zone (SMARTHOST_TIMEZONE; the test pod uses Africa/Johannesburg).
-        self::assertStringContainsString('Times are shown in SAST (Africa/Johannesburg)', $overview);
+        self::assertStringContainsString('Times are shown in SAST (Africa/Johannesburg)', self::text($this->page('/dashboard/operator')));
         self::assertMatchesRegularExpression('/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d SAST/', self::text($this->page('/dashboard/operator/audit')));
         // The figures of the period come from the job counters; the charts get them as JSON.
         $crawler = $this->crawler('/dashboard/operator?period=24h');
-        self::assertSame('24 hours', $crawler->filter('.pills a[aria-current]')->text());
+        self::assertSame('24 hours', $crawler->filter('.seg a[aria-current]')->text());
         self::assertSame(4, $crawler->filter('.kpi')->count());
         $flow = json_decode((string) $crawler->filter('canvas[data-chart-kind-value="flow"]')->attr('data-chart-config-value'), true);
         self::assertCount(24, $flow['totals'], 'hourly buckets');
         self::assertGreaterThanOrEqual(3, $flow['totals'][23], 'the three messages of the job created now, in the current hour');
         self::assertSame(7, \count(json_decode((string) $this->crawler('/dashboard/operator?period=bogus')
             ->filter('canvas[data-chart-kind-value="flow"]')->attr('data-chart-config-value'), true)['totals']), 'unknown periods fall back to 7 days');
-        // Navigation: every operator area the user may open, the current one marked.
-        $areas = $crawler->filter('.orbs .orb-label')->each(static fn ($n): string => $n->text());
-        self::assertSame(['Overview', 'Mail flow', 'Clients', 'System', 'Access'], \array_slice($areas, 0, 5));
-        self::assertSame('Overview', $crawler->filter('.orbs a[aria-current] .orb-label')->text());
+        // Navigation: every operator area the user may open, the current one marked; each area's pages
+        // and the views of a page in the menu bar (owner decision 2026-10-25).
+        $areas = $crawler->filter('.menubar-label')->each(static fn ($n): string => $n->text());
+        self::assertSame(['Overview', 'Mail flow', 'Clients', 'System', 'Access', 'Help'], $areas);
+        self::assertSame('Overview', $crawler->filter('.menubar-link[aria-current] .menubar-label')->text());
         $mail = $this->crawler('/dashboard/operator/unmatched-dsns');
-        self::assertSame(['Delivery', 'Suppressions', 'Unmatched DSNs', 'Webhooks'], $mail->filter('.pills a')->each(static fn ($n): string => trim(preg_replace('/\s+\d+$/', '', $n->text()))));
-        self::assertSame('Mail flow', $mail->filter('.orbs a[aria-current] .orb-label')->text());
+        $area = $mail->filter('.menubar-item')->reduce(static fn ($n): bool => 'Mail flow' === $n->filter('.menubar-label')->text());
+        self::assertSame(['Delivery', 'Suppressions', 'Unmatched bounces', 'Webhooks'], $area->filter('.menu-panel > .menu-item > a .menu-label')->each(static fn ($n): string => $n->text()));
+        self::assertSame('Mail flow', $mail->filter('.menubar-link[aria-current] .menubar-label')->text());
+        self::assertSame('Unmatched bounces', $mail->filter('.menu-panel a[aria-current] .menu-label')->text());
+        self::assertSame(['Open', 'Match requested', 'Matched', 'Dismissed'], $area->filter('.menu-item.has-views')->eq(2)->filter('.menu-flyout .menu-label')->each(static fn ($n): string => $n->text()));
+        self::assertStringContainsString('Mail flow › Unmatched bounces', preg_replace('/\s+/', ' ', $mail->filter('nav.crumbs')->text()));
+        $system = $mail->filter('.menubar-item')->reduce(static fn ($n): bool => 'System' === $n->filter('.menubar-label')->text());
+        self::assertContains('Sign-in emails', $system->filter('.menu-flyout .menu-label')->each(static fn ($n): string => $n->text()), 'the audit log\'s views are in the menu');
         $clients = $this->crawler('/dashboard/operator/clients?q=Operator%20View');
         self::assertSame(1, $clients->filter('tbody tr')->count());
-        $detail = self::text($this->page('/dashboard/operator/clients/'.$client->getId()->toRfc4122()));
-        self::assertStringContainsString('Metadata only', $detail);
+        $detail = self::text($this->page('/dashboard/operator/clients/'.$client->getId()->toRfc4122().'?tab=access'));
+        self::assertStringContainsString('stored as hashes', $detail);
         $hash = (string) $o->fetchOne('SELECT key_hash FROM api_keys WHERE client_id = ? LIMIT 1', [$client->getId()->toRfc4122()]);
         if ('' !== $hash) {
             self::assertStringNotContainsString($hash, $detail);
@@ -120,9 +131,9 @@ final class OperatorDashboardTest extends DashboardTestCase
         $audit = Db::owner()->fetchAssociative("SELECT actor_type, actor_id FROM audit_log WHERE action = 'client.approved' AND target_id = ? ORDER BY occurred_at DESC LIMIT 1", [$id]);
         self::assertSame(['actor_type' => 'user', 'actor_id' => $operator->getId()->toRfc4122()], $audit);
 
-        $this->submit($page, "$page/global-suppressions", ['setting' => 'enable', 'note' => '']);
+        $this->submit("$page?tab=policy", "$page/global-suppressions", ['setting' => 'enable', 'note' => '']);
         self::assertFalse((bool) Db::owner()->fetchOne('SELECT can_submit_global_suppressions FROM clients WHERE id = ?', [$id]), 'a note is required');
-        $this->submit($page, "$page/global-suppressions", ['setting' => 'enable', 'note' => 'trusted list operator']);
+        $this->submit("$page?tab=policy", "$page/global-suppressions", ['setting' => 'enable', 'note' => 'trusted list operator']);
         self::assertTrue((bool) Db::owner()->fetchOne('SELECT can_submit_global_suppressions FROM clients WHERE id = ?', [$id]));
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'client.global_suppressions_enabled' AND target_id = ?", [$id]));
         self::assertNotEmpty($key);

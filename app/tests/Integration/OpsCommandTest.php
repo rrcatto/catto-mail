@@ -88,13 +88,16 @@ final class OpsCommandTest extends DashboardTestCase
     {
         $this->heartbeat(true, false, 7);
         $this->signIn($this->newUser(true));
-        $html = self::text($this->page('/dashboard/operator'));
+        self::assertStringContainsString('Delivery is HELD', self::text($this->page('/dashboard/operator')), 'the mode in the overview\'s first line');
+        // The detail is on Mail flow › Delivery (owner decision 2026-10-25).
+        $html = self::text($this->page('/dashboard/operator/system'));
         self::assertStringContainsString('Delivery is HELD', $html);
         self::assertStringContainsString('Live delivery has not been activated', $html);
-        self::assertStringContainsString('rate ceiling 5 messages per minute', $html);
+        self::assertStringContainsString('<dt>Rate ceiling</dt><dd>5 per minute</dd>', (string) $this->browser->getResponse()->getContent());
         self::assertStringContainsString('1 active · 7 deferred · 0 held · 0 incoming', $html, 'the Postfix queue from the heartbeat');
         Db::owner()->executeStatement('UPDATE delivery_heartbeats SET stopped_at = now()');
-        $stopped = self::text($this->page('/dashboard/operator'));
+        self::assertStringContainsString('Delivery is STOPPED', self::text($this->page('/dashboard/operator')));
+        $stopped = self::text($this->page('/dashboard/operator/system'));
         self::assertStringContainsString('Delivery is STOPPED', $stopped);
         self::assertStringContainsString('The delivery daemon is not running', $stopped);
         Db::owner()->executeStatement("DELETE FROM delivery_heartbeats WHERE worker_id LIKE 'ops-test-%'");

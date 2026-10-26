@@ -43,7 +43,7 @@ final class OperatorSettingsController extends AbstractController
 
     #[Route('', name: 'dashboard_operator_settings', methods: ['GET'])]
     #[IsGranted('PLATFORM.SYSTEM.VIEW')]
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $overrides = $this->overrides->all();
         $state = $this->applied->state();
@@ -66,11 +66,16 @@ final class OperatorSettingsController extends AbstractController
                     'ignored' => $state['ignored'][$name] ?? null,
                 ];
             }
-            $groups[] = ['title' => $group, 'slug' => self::slug($group), 'rows' => $rows];
+            $groups[] = ['title' => $group, 'slug' => SettingCatalog::slug($group), 'rows' => $rows];
         }
 
+        // One group at a time (owner decision 2026-10-25): the one asked for, else the first with a change waiting.
+        $wanted = $request->query->getString('group');
+        $current = \in_array($wanted, array_column($groups, 'slug'), true) ? $wanted
+            : (array_values(array_filter($groups, static fn (array $g): bool => [] !== array_filter($g['rows'], static fn (array $r): bool => (bool) $r['pending'])))[0]['slug'] ?? ($groups[0]['slug'] ?? null));
+
         return $this->render('dashboard/operator/system/settings.html.twig', [
-            'section' => 'settings', 'groups' => $groups, 'state' => $state, 'pending' => $pending,
+            'section' => 'settings', 'groups' => $groups, 'current' => $current, 'state' => $state, 'pending' => $pending,
             'environment' => $this->environment, 'agent_age' => $this->state->agentAge(),
             'last_apply' => $this->requests->latest(SystemRequestAction::SettingsApply),
             'can_manage' => $this->isGranted('SYSTEM.SETTINGS.MANAGE'),
@@ -101,7 +106,7 @@ final class OperatorSettingsController extends AbstractController
             $this->addFlash('error', $e->getMessage());
         }
 
-        return $this->redirect($this->generateUrl('dashboard_operator_settings').'#'.self::slug($group));
+        return $this->redirectToRoute('dashboard_operator_settings', ['group' => SettingCatalog::slug($group)]);
     }
 
     /** Ask the host agent to render the configuration with the dashboard values and restart what changed. */
@@ -118,11 +123,6 @@ final class OperatorSettingsController extends AbstractController
         }
 
         return $this->redirectToRoute('dashboard_operator_settings');
-    }
-
-    private static function slug(string $group): string
-    {
-        return 'g-'.trim(strtolower((string) preg_replace('/[^A-Za-z]+/', '-', $group)), '-');
     }
 
     private function assertCsrf(Request $request): void

@@ -96,6 +96,73 @@ final class Labels
         ],
     ];
 
+    /** What an audit entry did, in plain words (System › Audit log); the stored action stays in its tooltip. */
+    private const AUDIT_ACTIONS = [
+        'auth.login' => 'Signed in', 'auth.login_link_requested' => 'Sign-in email sent',
+        'auth.sign_up_link_requested' => 'Sign-up email sent', 'auth.host_login_link_issued' => 'Sign-in link made on the server',
+        'acl.role_created' => 'Role created', 'acl.role_updated' => 'Role changed', 'acl.role_deleted' => 'Role deleted',
+        'acl.role_permissions_updated' => 'Role permissions changed',
+        'user.created' => 'User created', 'user.enabled' => 'User enabled', 'user.disabled' => 'User disabled',
+        'user.display_name_changed' => 'Display name changed', 'user.role_granted' => 'Role granted', 'user.role_revoked' => 'Role revoked',
+        'client.created' => 'Client created', 'client.approved' => 'Client approved', 'client.throttled' => 'Client throttled',
+        'client.unthrottled' => 'Client throttle lifted', 'client.suspended' => 'Client suspended', 'client.reactivated' => 'Client reactivated',
+        'client.closed' => 'Client closed', 'client.account_updated' => 'Client account changed', 'client.limits_changed' => 'Client limits changed',
+        'client.note_added' => 'Note added', 'client.policy_accepted' => 'Acceptable use policy accepted',
+        'client.policy_requirement_changed' => 'Policy requirement changed',
+        'client.global_suppressions_enabled' => 'Global opt-out reporting allowed', 'client.global_suppressions_disabled' => 'Global opt-out reporting withdrawn',
+        'client_alert.acknowledged' => 'Alert acknowledged', 'client_membership.created' => 'Member added',
+        'client_membership.removed' => 'Member removed', 'client_membership.role_changed' => 'Member role changed',
+        'api_key.created' => 'API key created', 'api_key.revoked' => 'API key revoked',
+        'webhook_endpoint.created' => 'Webhook endpoint added', 'webhook_endpoint.updated' => 'Webhook endpoint changed',
+        'webhook_endpoint.removed' => 'Webhook endpoint removed', 'webhook_endpoint.secret_rotated' => 'Webhook secret rotated',
+        'webhook.test' => 'Test webhook sent', 'webhook.test_requested' => 'Test webhook requested',
+        'application_connection.approved' => 'Application connection approved', 'application_connection.connected' => 'Application connected',
+        'application_connection.revoked' => 'Application disconnected',
+        'sending_domain.created' => 'Sending domain added', 'sending_domain.verified' => 'Sending domain verified',
+        'sending_domain.verification_failed' => 'Sending domain verification failed', 'sending_domain.disabled' => 'Sending domain disabled',
+        'sending_domain.enabled' => 'Sending domain enabled', 'sending_domain.dkim_changed' => 'Sending domain DKIM changed',
+        'sending_domain.dkim_check_failed' => 'Sending domain DKIM check failed',
+        'billing_statement.prepared' => 'Statement prepared', 'billing_statement.finalized' => 'Statement finalised',
+        'billing_statement.exported' => 'Statement exported', 'billing_statement.voided' => 'Statement voided', 'usage.exported' => 'Usage exported',
+        'address_batch.imported' => 'Address batch uploaded', 'address_batch.validation_started' => 'Address batch validation started',
+        'address_batch.review_decided' => 'Address batch review decided', 'address_batch.typo_decided' => 'Typo correction decided',
+        'address_batch.compliance_approved' => 'Address batch approved for sending', 'address_batch.list_id_set' => 'Address batch list ID set',
+        'address_batch.send_created' => 'Send created from an address batch', 'repermission.responded' => 'Permission request answered',
+        'suppression.operator_created' => 'Suppression added', 'suppression.operator_lifted' => 'Suppression lifted',
+        'suppression.global_opt_out_created' => 'Global opt-out recorded', 'suppression.global_opt_out_lifted' => 'Global opt-out lifted',
+        'suppression.global_opt_out_reaffirmed' => 'Global opt-out confirmed again',
+        'unmatched_dsn.dismissed' => 'Unmatched bounce dismissed', 'unmatched_dsn.match_requested' => 'Unmatched bounce matched to a message',
+        'delivery.live_enabled' => 'Live delivery switched on', 'delivery.live_disabled' => 'Live delivery switched off (HELD)',
+        'delivery.outbound_paused' => 'Sending stopped (emergency stop)', 'delivery.outbound_resumed' => 'Sending resumed',
+        'setup.step_done' => 'Setup step marked done', 'setup.step_skipped' => 'Setup step skipped', 'setup.step_reopened' => 'Setup step reopened',
+        'settings.apply' => 'Settings applied', 'system.test_confirmed' => 'Test result confirmed', 'system.request.cancelled' => 'Host request cancelled',
+        'dkim.generate' => 'DKIM key generated', 'dkim.activate' => 'DKIM key activated',
+    ];
+
+    /** What the host agent was asked to do (system.request.<action>). */
+    private const HOST_REQUESTS = [
+        'diagnostics.run' => 'run every check', 'delivery.pause' => 'stop sending', 'delivery.resume' => 'resume sending',
+        'delivery.live_enable' => 'switch live delivery on', 'delivery.live_disable' => 'return to HELD', 'backup.run' => 'take a backup',
+        'backup.restore_rehearsal' => 'rehearse a restore', 'dkim.generate' => 'generate a DKIM key', 'dkim.activate' => 'activate a DKIM key',
+        'tls.renew' => 'renew the certificates', 'settings.apply' => 'apply the settings',
+    ];
+
+    #[AsTwigFilter('audit_label')]
+    public static function auditAction(?string $action): string
+    {
+        $action = (string) $action;
+        if (isset(self::AUDIT_ACTIONS[$action])) {
+            return self::AUDIT_ACTIONS[$action];
+        }
+        if (str_starts_with($action, 'system.request.')) {
+            $what = substr($action, \strlen('system.request.'));
+
+            return 'Host asked to '.(self::HOST_REQUESTS[$what] ?? $what);
+        }
+
+        return '' === $action ? '—' : $action;
+    }
+
     #[AsTwigFilter('label')]
     public static function label(mixed $value, string $vocabulary): string
     {

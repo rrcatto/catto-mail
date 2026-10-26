@@ -317,8 +317,17 @@ cmd_acme() {
   esac
   local args=(--accept-tos --email "$email" --dns "$provider" --domains "$web" --path "$dir")
   [[ "$mta" != "$web" ]] && args+=(--domains "$mta")
+  # More names on the same certificate (ACME_EXTRA_DOMAINS, e.g. the web host's www name).
+  local extra name
+  extra="$(envval ACME_EXTRA_DOMAINS)"
+  for name in ${extra//,/ }; do
+    [[ "$name" == "$web" || "$name" == "$mta" ]] || args+=(--domains "$name")
+  done
   [[ -n "$server" ]] && args+=(--server "$server")
-  before="$(sha256sum "$cert" 2>/dev/null | cut -d' ' -f1)"
+  # Before the first certificate there is nothing to compare: sha256sum of a missing file
+  # would end the command here under pipefail, and a first issue never ran.
+  before=""
+  [[ -f "$cert" ]] && before="$(sha256sum "$cert" | cut -d' ' -f1)"
   acme_status_set "last_attempt_at=$(now_iso)"
   # The provider credentials are given to lego only, through its environment. The file is
   # read as plain NAME=value lines, never executed.

@@ -1,10 +1,15 @@
-{# KPI cards against the previous period (TrendCharts::kpis). Variables: kpis. #}
+{# Key figures against the previous period (TrendCharts::kpis): at most four, each with what it counts behind ⓘ. Variables: kpis. #}
 {% import 'dashboard/_icons.html.twig' as icon %}
-<div class="grid">
+{% set kpi_help = {
+    'Messages': 'Messages of the send jobs created in the period, whatever became of them.',
+    'Remote accepted': 'The share of the messages that reached Postfix which a receiving mail server accepted. Accepted is not the same as reaching an inbox.',
+    'Hard-bounce rate': 'Hard bounces divided by the messages that reached Postfix in the period. Above its warning and critical thresholds a client gets an alert under Clients › Abuse & reputation.',
+    'Complaint rate': 'Spam complaints divided by the messages that reached Postfix in the period. Above its warning and critical thresholds a client gets an alert under Clients › Abuse & reputation.',
+} %}
+<div class="kpis">
 {% for k in kpis %}
-    <section class="card kpi g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="kpi-{{ loop.index }}">
-        <h2 id="kpi-{{ loop.index }}">{{ k.label }}</h2>
-        <div class="kpi-chart" aria-hidden="true"><canvas data-controller="chart" data-chart-kind-value="trend" data-chart-config-value="{{ k.chart|json_encode }}"></canvas></div>
+    <section class="card kpi" aria-labelledby="kpi-{{ loop.index }}">
+        <div class="kpi-head"><h2 id="kpi-{{ loop.index }}">{{ k.label }}</h2>{% if kpi_help[k.label] is defined %}<span class="tip"><button type="button" class="tip-btn" aria-describedby="kpi-tip-{{ loop.index }}">{{ icon.i('info', 16) }}<span class="sr">What this counts</span></button><span class="tip-body" role="tooltip" id="kpi-tip-{{ loop.index }}">{{ kpi_help[k.label] }}</span></span>{% endif %}</div>
         <p class="kpi-value">{{ k.value }}</p>
         <p class="kpi-delta"><span class="delta delta-{{ k.delta.tone }}" aria-hidden="true">{{ icon.i(k.delta.dir, 13) }}</span><strong>{{ k.delta.text }}</strong> <span class="muted">{{ k.note }}</span></p>
     </section>

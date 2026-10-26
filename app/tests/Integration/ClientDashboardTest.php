@@ -50,7 +50,6 @@ final class ClientDashboardTest extends DashboardTestCase
         $overview = $this->crawler($base);
         self::assertStringContainsString('Client A', $overview->filter('h1')->text());
         self::assertStringContainsString('Remote accepted', $overview->text());
-        self::assertStringContainsString('does not prove that a person read the message', $overview->text());
 
         $jobs = $this->crawler("$base/validation-jobs?status=completed&external_reference=list-import-1");
         self::assertSame(1, $jobs->filter('tbody tr')->count());
@@ -61,15 +60,17 @@ final class ClientDashboardTest extends DashboardTestCase
         self::assertSame(3, $detail->filter('tbody tr')->count(), 'i % 10 = 0 among 30');
         self::assertSame(2, $this->crawler("$base/validation-jobs/{$a['validation']}?typo=yes")->filter('tbody tr')->count(), 'i % 13 = 0 among 30');
         self::assertSame(4, $this->crawler("$base/validation-jobs/{$a['validation']}?role=yes")->filter('tbody tr')->count(), 'i % 7 = 0 among 30');
-        self::assertSame(27, $this->crawler("$base/validation-jobs/{$a['validation']}?smtp=accepted")->filter('tbody tr')->count());
+        self::assertSame(27, $this->crawler("$base/validation-jobs/{$a['validation']}?smtp=accepted&limit=50")->filter('tbody tr')->count(), 'more than the 25 rows of a page');
 
         $send = $this->crawler("$base/send-jobs?external_reference=newsletter-7");
         self::assertSame(1, $send->filter('tbody tr')->count());
         $job = $this->crawler("$base/send-jobs/{$a['send']['job']}");
-        self::assertStringContainsString('Messages with a recorded open', $job->text());
+        self::assertStringContainsString('Recorded opens', $job->text());
+        // The terminology of recorded opens stays next to the figure, behind its ⓘ.
+        self::assertStringContainsString('does not prove that a person read the message', $job->filter('.kpis')->text());
         self::assertStringContainsString('https://shop.example.test/offer', $job->text(), 'clicks by stored target');
-        self::assertSame(6, $job->filter('table.dense tbody tr')->count());
-        self::assertSame(0, $this->crawler("$base/send-jobs/{$a['send']['job']}?status=hard_bounced")->filter('table.dense tbody tr')->count());
+        self::assertSame(6, $job->filter('section[aria-labelledby="msg-h"] tbody tr')->count());
+        self::assertSame(0, $this->crawler("$base/send-jobs/{$a['send']['job']}?status=hard_bounced")->filter('section[aria-labelledby="msg-h"] tbody tr')->count());
 
         $message = $this->crawler("$base/messages/{$a['send']['messages'][0]}");
         $items = $message->filter('ol.timeline li strong')->each(fn (Crawler $c) => $c->text());

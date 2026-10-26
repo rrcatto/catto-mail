@@ -2,23 +2,33 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Send jobs{% endblock %}
 {% block body %}
+{% set cid = client.id.toRfc4122 %}
 <div class="pagehead">
     <div>
         <h1>Send jobs</h1>
-        <p class="sub">The messages your application submitted, by job, newest first. “Remote accepted” means the receiving mail server accepted responsibility for a message; it does not prove inbox placement.</p>
+        <p class="lead">The messages your application submitted, by job, newest first.{{ ui.tip('Remote accepted means the receiving mail server accepted responsibility for a message; it does not prove inbox placement.') }}</p>
     </div>
 </div>
-<form method="get" class="filters" role="search" aria-label="Filter send jobs">
-    {{ ui.select('status', 'Status', label_options('send_job_status'), filters.status) }}
-    <label>External reference <input type="text" name="external_reference" value="{{ filters.external_reference }}"></label>
-    <label>Created from <input type="date" name="from" value="{{ filters.from }}"></label>
-    <label>to <input type="date" name="to" value="{{ filters.to }}"></label>
-    <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
-    <button type="submit">Apply</button>
-    <a href="{{ path('dashboard_client_send_jobs', {clientId: client.id.toRfc4122}) }}">Reset</a>
+<form method="get" class="searchline" role="search" aria-label="Find a job by reference">
+    <label class="sr" for="ref-q">External reference</label>
+    <input id="ref-q" type="search" name="external_reference" value="{{ filters.external_reference }}" placeholder="Find a job by its reference">
+    <button type="submit">Find</button>
 </form>
-<section class="card card-flush" aria-labelledby="sj-h">
-    <div class="card-head"><h2 id="sj-h">Jobs</h2><ul class="legend"><li><svg width="10" height="10" aria-hidden="true"><rect class="seg-ok" width="10" height="10" rx="3"/></svg>Remote accepted</li><li><svg width="10" height="10" aria-hidden="true"><rect class="seg-hatch" width="10" height="10" rx="3"/></svg>In flight or deferred</li><li><svg width="10" height="10" aria-hidden="true"><rect class="seg-bad" width="10" height="10" rx="3"/></svg>Bounced, complained or failed</li><li><svg width="10" height="10" aria-hidden="true"><rect class="wf-mid" width="10" height="10" rx="3"/></svg>Suppressed (not sent)</li></ul><span class="muted small">Dates are days in {{ time_zone_label() }}</span></div>
+<nav class="chips" aria-label="Views of the jobs">
+    {% for key, label in {'': 'Every job', processing: 'In progress', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled'} %}<a class="chip-link" href="{{ path('dashboard_client_send_jobs', key ? {clientId: cid, status: key} : {clientId: cid}) }}"{% if not filters.external_reference and filters.status == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>
+<details class="morefilters"{% if filters.from or filters.to %} open{% endif %}>
+    <summary>More filters: dates</summary>
+    <form method="get" class="filters" role="search" aria-label="Filter jobs">
+        <input type="hidden" name="status" value="{{ filters.status }}">
+        <label>Created from <input type="date" name="from" value="{{ filters.from }}"></label>
+        <label>to <input type="date" name="to" value="{{ filters.to }}"></label>
+        <input type="hidden" name="sort" value="{{ listing.sort }}"><input type="hidden" name="dir" value="{{ listing.dir }}">
+        <button type="submit">Apply</button>
+    </form>
+</details>
+<section class="card card-flush" aria-labelledby="jobs-h">
+    <div class="card-head"><h2 id="jobs-h">Jobs</h2></div>
     {% include 'dashboard/client/_send_job_rows.html.twig' with {rows: page.rows} %}
 </section>
 {{ ui.pager(page, 'jobs') }}

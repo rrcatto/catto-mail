@@ -29,7 +29,7 @@ final class Listing
     }
 
     /** @param list<string> $sorts allowed sort names */
-    public static function fromRequest(Request $request, array $sorts, string $defaultSort, string $defaultDir = 'desc', int $defaultLimit = 50): self
+    public static function fromRequest(Request $request, array $sorts, string $defaultSort, string $defaultDir = 'desc', int $defaultLimit = 25): self
     {
         $sort = $request->query->getString('sort', $defaultSort);
         $sort = \in_array($sort, $sorts, true) ? $sort : $defaultSort;

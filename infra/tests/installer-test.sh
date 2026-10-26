@@ -216,8 +216,8 @@ if [[ $UPGRADE == true ]]; then
       && pass "a file changed on the server stops the upgrade and is named; nothing was changed" || fail "local change: $(tail -n 12 "$GEN/upgrade-0.log")"
   fi
   if upgrade --discard-local-changes > "$GEN/upgrade-1.log" 2>&1; then pass "upgrade-catto-mail finished (exit 0)"; else fail "upgrade exit: $(tail -n 20 "$GEN/upgrade-1.log")"; fi
-  steps="$(grep -cE '^\[[0-9]{2}/12\] .* (PASS|WARN)' "$GEN/upgrade-1.log" || true)"
-  [[ "$steps" == 12 ]] && pass "12 numbered steps, each PASS or WARN" || fail "steps: $(grep -E '^\[[0-9]{2}/12\]' "$GEN/upgrade-1.log" | grep -v PASS)"
+  steps="$(grep -cE '^\[[0-9]{2}/13\] .* (PASS|WARN)' "$GEN/upgrade-1.log" || true)"
+  [[ "$steps" == 13 ]] && pass "13 numbered steps, each PASS or WARN" || fail "steps: $(grep -E '^\[[0-9]{2}/13\]' "$GEN/upgrade-1.log" | grep -v PASS)"
   backup="$(sed -n 's/^Backup: *//p' "$GEN/upgrade-1.log")"
   grep -q "^Release: *v0.0.2 (was v0.0.1)" "$GEN/upgrade-1.log" && [[ -n "$backup" && "$(running)" == "0.0.2 " \
      && "$(as_svc 'git -C ~/catto-mail describe --tags')" == v0.0.2 && "$(as_svc 'grep ^SMARTHOST_IMAGE_TAG= ~/catto-mail/infra/.env')" == *=0.0.2 ]] \

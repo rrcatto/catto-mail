@@ -47,6 +47,15 @@ final class SetupWizard
         'readiness' => ['Production readiness', 'One summary of every subsystem. Live delivery stays a separate, deliberate action.', [], [], ['delivery-states', 'emergency-pause']],
     ];
 
+    /** The steps as System › System setup and the menu group them (owner decision 2026-10-25). */
+    public const GROUPS = [
+        'Start here' => ['welcome'],
+        'Identity' => ['host', 'web_identity', 'smtp_identity', 'dns', 'tls', 'dkim'],
+        'Components' => ['database', 'web_application', 'validator', 'delivery_daemon', 'postfix', 'opendkim', 'webhook_worker', 'backups'],
+        'Tests' => ['seed_test', 'bounce_test', 'reboot_test'],
+        'Ready for live delivery' => ['readiness'],
+    ];
+
     /** The consolidated readiness dashboard: label => [components, check key prefixes] */
     public const READINESS = [
         'Host' => [['host'], []],

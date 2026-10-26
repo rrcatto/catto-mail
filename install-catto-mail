@@ -86,6 +86,29 @@ while (($#)); do
   esac
 done
 
+# The ACME client: the official lego release, pinned by version and checksum. Ubuntu's lego
+# package leaves DNS providers out (Porkbun, for one), so a configured provider could be missing.
+LEGO_VERSION=4.35.2
+declare -A LEGO_SHA256=(
+  [amd64]=ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3
+  [arm64]=e1f153179098d27ce044aaaa168c0e323d50ae71b0f1a147aa8ae49ac6b14d89
+)
+install_lego() {  # prints what it did; non-zero when the release could not be installed
+  local arch tmp
+  arch="$(dpkg --print-architecture 2>/dev/null)"
+  [[ -n "${LEGO_SHA256[$arch]:-}" ]] || { echo "no pinned lego release for $arch"; return 1; }
+  if [[ "$(/usr/local/bin/lego --version 2>/dev/null)" == "lego version $LEGO_VERSION "* ]]; then echo "lego $LEGO_VERSION"; return 0; fi
+  tmp="$(mktemp -d)"
+  if curl -fsSL --max-time 120 -o "$tmp/lego.tar.gz" \
+        "https://github.com/go-acme/lego/releases/download/v$LEGO_VERSION/lego_v${LEGO_VERSION}_linux_$arch.tar.gz" \
+      && echo "${LEGO_SHA256[$arch]}  $tmp/lego.tar.gz" | sha256sum -c --quiet - \
+      && tar -xzf "$tmp/lego.tar.gz" -C "$tmp" lego \
+      && install -m 755 -o root -g root "$tmp/lego" /usr/local/bin/lego; then
+    rm -rf "$tmp"; echo "lego $LEGO_VERSION installed"; return 0
+  fi
+  rm -rf "$tmp"; echo "lego $LEGO_VERSION could not be downloaded or verified"; return 1
+}
+
 # ------------------------------------------------------------------------- output
 STEP=0
 step() {  # step "Description": announce; the caller ends it with pass/warn
@@ -196,7 +219,11 @@ pass
 step "Installing Podman, Git, Python, OpenSSL, nftables, lego"
 run apt-get install -y --no-install-recommends "${PACKAGES[@]}" \
   || fail "the packages could not be installed" "see the log; usually a network or mirror problem. Re-run when it is fixed" yes
-pass "$(podman version --format '{{.Client.Version}}' 2>/dev/null | sed 's/^/Podman /')"
+if lego_now="$(install_lego 2>>"$LOG")"; then
+  pass "$(podman version --format '{{.Client.Version}}' 2>/dev/null | sed 's/^/Podman /'), $lego_now"
+else
+  warn "$lego_now: automatic certificates use Ubuntu's lego, which lacks some DNS providers"
+fi
 
 step "Creating the service user $SERVICE_USER"
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
@@ -357,12 +384,17 @@ FW="/home/$SERVICE_USER/catto-mail-firewall.nft"
 prod firewall >"$FW" 2>>"$LOG" || fail "the firewall rules could not be generated" "see the log" yes
 if [[ "$APPLY_FIREWALL" == true ]]; then
   grep -q "tcp dport { $SSH_PORT, 25, 80, 443 }" "$FW" || fail "the generated rules do not keep SSH port $SSH_PORT open" "pass --ssh-port" yes
-  run nft -f "$FW" || fail "nft could not apply the rules" "see the log" yes
-  grep -qF "$FW" /etc/nftables.conf 2>/dev/null || { echo "include \"$FW\"" >> /etc/nftables.conf; }
+  # Ubuntu's nftables.service cannot read /home (ProtectHome=true): the rules it loads at boot
+  # are a copy under /etc. The file in the service user's home stays the one to review.
+  FW_ETC=/etc/nftables.d/catto-mail-firewall.nft
+  install -d -m 755 /etc/nftables.d && install -m 644 -o root -g root "$FW" "$FW_ETC" \
+    || fail "the rules could not be copied to $FW_ETC" "see the log" yes
+  run nft -f "$FW_ETC" || fail "nft could not apply the rules" "see the log" yes
+  grep -qF "$FW_ETC" /etc/nftables.conf 2>/dev/null || { echo "include \"$FW_ETC\"" >> /etc/nftables.conf; }
   run systemctl enable nftables
   pass "applied; SSH port $SSH_PORT, 25, 80 and 443 open"
 else
-  warn "generated $FW, not applied (review it, then: nft -f $FW)"
+  warn "generated $FW, not applied (review it, then apply it as the installation guide's section 8 shows)"
 fi
 
 step "Checking automatic start after a reboot"

@@ -55,6 +55,9 @@
     {% endif %}
 {% endmacro %}
 
+{# An ⓘ button whose explanation shows on hover or keyboard focus: explanations live here, not in paragraphs on the page (owner decision 2026-10-25). #}
+{% macro tip(text, label = 'More about this') %}{% import 'dashboard/_icons.html.twig' as icon %}{% set id = 'tip-' ~ random(1000000000) %}<span class="tip"><button type="button" class="tip-btn" aria-describedby="{{ id }}">{{ icon.i('info', 16) }}<span class="sr">{{ label }}</span></button><span class="tip-body" role="tooltip" id="{{ id }}">{{ text }}</span></span>{% endmacro %}
+
 {% macro csrf() %}<input type="hidden" name="_token" value="{{ csrf_token('dashboard-action') }}">{% endmacro %}
 
 {# Specification 2.11: a check result, a link to a help page, a table of system checks. #}
@@ -64,14 +67,14 @@
 
 {% macro checks(checks, empty = 'No result yet: run the checks.') %}
     {% if checks is empty %}<p class="empty">{{ empty }}</p>{% else %}
-    <div class="scroll"><table class="dense">
-        <thead><tr><th scope="col">Result</th><th scope="col">Check</th><th scope="col">Finding</th><th scope="col">What it means / what to do</th><th scope="col">Checked</th></tr></thead>
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">Result</th><th scope="col">Check</th><th scope="col">Finding</th><th scope="col">Checked</th><th scope="col"><span class="sr">What it means</span></th></tr></thead>
         <tbody>{% for c in checks %}<tr>
             <td>{{ _self.result(c.result) }}</td>
-            <td>{{ c.title }}<br><small class="muted">{{ c.component }} · {{ c.source }}</small></td>
+            <td>{{ c.title }}</td>
             <td>{{ c.summary }}</td>
-            <td>{{ c.help.what }}{% if c.result in ['warn', 'fail'] %} <strong>To fix:</strong> {{ c.help.fix }}{% endif %} {{ _self.help(c.help.topic, 'More') }}</td>
-            <td><small>{{ c.ran_at|ts }}</small></td>
+            <td class="nowrap" title="{{ c.ran_at|ts }}">{{ c.ran_at|ago }}</td>
+            <td class="tipcell">{{ _self.tip(c.help.what ~ (c.result in ['warn', 'fail'] ? ' To fix: ' ~ c.help.fix : '') ~ ' (' ~ c.component ~ ' · ' ~ c.source ~ ')') }}</td>
         </tr>{% endfor %}</tbody>
     </table></div>{% endif %}
 {% endmacro %}

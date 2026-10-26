@@ -207,12 +207,15 @@ final class OperatorDashboardController extends AbstractController
     #[IsGranted('PLATFORM.AUDIT.VIEW')]
     public function audit(Request $request): Response
     {
-        $filters = ClientDashboardController::filters($request, ['action', 'actor', 'actor_type', 'target_type', 'target_id', 'from', 'to']);
+        $filters = ClientDashboardController::filters($request, ['view', 'action', 'actor', 'actor_type', 'target_type', 'target_id', 'from', 'to']);
+        if (!isset(OperatorReadModel::AUDIT_VIEWS[$filters['view']])) {
+            $filters['view'] = '';
+        }
         $listing = Listing::fromRequest($request, array_keys(OperatorReadModel::AUDIT_SORTS), 'occurred');
 
         return $this->page('audit.html.twig', 'audit', [
             'page' => $this->read->audit($filters, $listing), 'filters' => $filters, 'listing' => $listing,
-            'actions' => $this->read->auditActions()]);
+            'actions' => $this->read->auditActions(), 'views' => OperatorReadModel::AUDIT_VIEWS]);
     }
 
     #[Route('/webhooks', name: 'dashboard_operator_webhooks', methods: ['GET'])]

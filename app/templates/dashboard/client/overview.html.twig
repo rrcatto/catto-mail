@@ -2,35 +2,32 @@
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}{{ client.companyName }} – Overview{% endblock %}
-{% block pills %}
-<nav class="pills" aria-label="Period">
-    {% for key, label in periods %}<a class="pill" href="{{ path('dashboard_client_overview', {clientId: client.id.toRfc4122, period: key}) }}"{% if key == period.key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
-</nav>
-{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
+{% set near = limits.quotas|filter(q => q.limit and q.used >= 0.75 * q.limit) %}
 <div class="pagehead">
     <div>
         <div class="titleline"><h1>{{ client.companyName }}</h1>{{ ui.status(client.status.value, 'client_status') }}</div>
-        <p class="sub">{{ client.approvedAt ? 'Approved ' ~ client.approvedAt|date('j M Y', time_zone()) : 'Not approved yet' }}
-            · {{ policy.version_in_force ? (policy.accepted ? 'service policy version ' ~ policy.version_in_force ~ ' accepted' : (policy.required ? 'service policy version ' ~ policy.version_in_force ~ ' not yet accepted' : 'no service policy acceptance required')) : 'no service policy in force' }}
-            · the last {{ period.label }}</p>
+        <p class="lead">{{ client.approvedAt ? 'Approved ' ~ client.approvedAt|date('j M Y', time_zone()) ~ '.' : 'Not approved yet.' }}
+            {% if near is empty %}Within every limit.{% else %}<span class="text-warn">Close to a limit: {% for q in near %}{{ q.metric|label('quota_metric')|lower }} {{ q.period|label('quota_period')|lower }} ({{ q.used|number_format }} of {{ q.limit|number_format }}){% if not loop.last %}, {% endif %}{% endfor %}.</span> <a href="{{ path('dashboard_client_usage', {clientId: cid}) }}">Usage &amp; limits</a>{% endif %}
+            The last {{ period.label }}.</p>
     </div>
-    <div class="actions"><a class="btn btn-secondary" href="{{ path('docs_api') }}">{{ icon.i('list', 18) }}API reference</a></div>
+    <div class="actions">
+        <nav class="seg" aria-label="Period">{% for key, label in periods %}<a href="{{ path('dashboard_client_overview', {clientId: cid, period: key}) }}"{% if key == period.key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+        <a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a>
+    </div>
 </div>
 
 {% if client.status.value != 'active' %}
 <section class="banner banner-client-{{ client.status.value }}" aria-label="Account status">
     <div class="banner-text"><h2>{{ client.status.value|label('client_status') }}</h2><p>{{ client.status.value|label('client_status_meaning') }}</p></div>
 </section>
-{% else %}
-<p class="muted">{{ client.status.value|label('client_status_meaning') }}</p>
 {% endif %}
 
 {% if policy.version_in_force and policy.required and not policy.accepted %}
 <section class="card card-accent" aria-labelledby="policy-h">
-    <h2 id="policy-h">Service policy</h2>
-    <p>Before this account can be approved, a client admin must accept the service policy, version <strong>{{ policy.version_in_force }}</strong>, as published by the operator.</p>
+    <h2 id="policy-h">Accept the service policy</h2>
+    <p>A client admin must accept the service policy, version <strong>{{ policy.version_in_force }}</strong>, before this account can be approved.</p>
     {% if may_admin %}
     <form method="post" action="{{ path('dashboard_client_policy_accept', {clientId: cid}) }}" class="stack">
         {{ ui.csrf() }}<input type="hidden" name="policy_version" value="{{ policy.version_in_force }}">
@@ -43,78 +40,52 @@
 
 {% if not (steps.domain and steps.api_key and steps.webhook) %}
 <section class="card card-accent get-started" aria-labelledby="start-h">
-    <div class="card-head"><h2 id="start-h">Get started</h2><span class="muted small">{{ [steps.domain, steps.api_key, steps.webhook]|filter(s => s)|length }} of 3 done</span></div>
+    <div class="card-head"><h2 id="start-h">Get started</h2><span class="muted">{{ (steps.domain ? 1 : 0) + (steps.api_key ? 1 : 0) + (steps.webhook ? 1 : 0) }} of 3 done</span>
+        <span class="tip"><button type="button" class="tip-btn" aria-describedby="start-tip">{{ icon.i('info', 16) }}<span class="sr">How sending works</span></button><span class="tip-body" role="tooltip" id="start-tip">Your messages go out from your own domain: add it, publish the DNS records shown, and it is ready once its DKIM key is active. Your application sends through the API with a key, and a webhook endpoint tells it what happened to each message.{% if not may_admin %} A client admin takes these steps.{% endif %}</span></span></div>
     <ol class="stepper stepper-row">
         <li class="{{ steps.domain ? 'done' }}"><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Add a sending domain</a></li>
         <li class="{{ steps.api_key ? 'done' }}"><a href="{{ path('dashboard_client_api_keys', {clientId: cid}) }}">Create an API key</a></li>
         <li class="{{ steps.webhook ? 'done' }}"><a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}">Add a webhook</a></li>
     </ol>
-    <p class="muted small">Your messages go out from your own domain: add it, publish the DNS records shown, and it is ready once its DKIM key is active. Your application then sends through the API with a key (the <a href="{{ path('docs_api') }}">API documentation</a> explains every call), and a webhook endpoint tells it what happened to each message.{% if not may_admin %} A client admin takes these steps.{% endif %}</p>
 </section>
 {% endif %}
-
-<div class="grid">
-    {% include 'dashboard/_flow_card.html.twig' with {flow_title: 'Messages per ' ~ period.unit, span: 'g-col-4 xl:g-col-3'} %}
-    <section class="card g-col-4 xl:g-col-1" aria-labelledby="quota-h">
-        <div class="card-head"><h2 id="quota-h">Quotas</h2><a class="more" href="{{ path('dashboard_client_usage', {clientId: cid}) }}">All limits and usage</a></div>
-        {% set shown = limits.quotas|filter(q => q.limit is not null or q.used > 0) %}
-        {% if shown is empty %}
-            <p class="empty">No quota is set for this account and nothing has been counted today or this month.</p>
-        {% else %}
-        <ul class="quotas">
-            {% for q in shown %}
-            {% set pct = q.limit ? min(100, 100 * q.used / q.limit) : null %}
-            <li>
-                <svg class="ring" viewBox="0 0 80 80" role="img" aria-label="{{ q.metric|label('quota_metric') }}, {{ q.period|label('quota_period')|lower }}: {{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}">
-                    <circle class="ring-track" cx="40" cy="40" r="32"/>
-                    {% if pct is not null %}<circle class="ring-fill ring-{{ pct >= 90 ? 'bad' : (pct >= 75 ? 'warn' : 'ok') }}" cx="40" cy="40" r="32" pathLength="100" stroke-dasharray="{{ max(0.5, pct)|round(1) }} 100" transform="rotate(-90 40 40)"/>{% endif %}
-                    <text class="ring-text" x="40" y="45" text-anchor="middle">{{ pct is null ? 'no limit' : pct|round ~ '%' }}</text>
-                </svg>
-                <span><span class="quota-name">{{ q.metric|label('quota_metric') }}</span>
-                    <span class="quota-period">{{ q.period|label('quota_period') }} ({{ time_zone_abbreviation() }})</span>
-                    <span class="quota-used">{{ q.used|number_format }}{% if q.limit is not null %} of {{ q.limit|number_format }}{% endif %}</span></span>
-            </li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-        <p class="muted small">Work beyond a quota is refused with HTTP 429 (problem type quota-exceeded) until the period resets, at midnight {{ time_zone_abbreviation() }}.</p>
-    </section>
-</div>
 
 {% include 'dashboard/_kpis.html.twig' %}
 
 <div class="grid">
-    {% include 'dashboard/_validation_card.html.twig' with {validation_link: path('dashboard_client_validation_jobs', {clientId: cid})} %}
-    <section class="card g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="dom-h">
-        <div class="card-head"><h2 id="dom-h">Sending domains</h2><a class="more" href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Details</a></div>
-        {% if o.domains is empty %}<p class="empty">No sending domains yet: a client admin adds them under Sending domains.</p>{% else %}
-        <ul class="domains">{% for d in o.domains %}
-            <li><span class="domain-name">{{ d.domain }}</span>
-                <span class="domain-state">{{ ui.status(d.status, 'domain_status') }}<span class="st st-dkim-{{ d.dkim_status }}">DKIM {{ d.dkim_status|label('dkim_status')|lower }}</span></span></li>
+    <section class="card g-col-4 xl:g-col-3" aria-labelledby="rs-h">
+        <div class="card-head"><h2 id="rs-h">Latest send jobs</h2><a class="more" href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">All send jobs</a></div>
+        {% if o.recent_send_jobs is empty %}<p class="empty">No send jobs yet.</p>{% else %}
+        <div class="scroll"><table class="list">
+            <thead><tr><th scope="col">Created</th><th scope="col">Reference</th><th scope="col" class="num">Recipients</th><th scope="col">Result</th></tr></thead>
+            <tbody>{% for j in o.recent_send_jobs|slice(0, 5) %}
+                {% set c = j.summary_counts_json|json_counts %}
+                {% set acc = c.remote_accepted ?? 0 %}
+                {% set fly = (c.created ?? 0) + (c.queued ?? 0) + (c.submitted ?? 0) + (c.deferred ?? 0) + (c.outcome_unknown ?? 0) %}
+                {% set bad = (c.soft_bounced ?? 0) + (c.hard_bounced ?? 0) + (c.complained ?? 0) + (c.failed ?? 0) %}
+                {% set sup = c.suppressed ?? 0 %}
+                <tr>
+                    <td class="nowrap"><a href="{{ path('dashboard_client_send_job', {clientId: cid, jobId: j.id}) }}" title="{{ j.created_at|ts }}">{{ j.created_at|when }}</a></td>
+                    <td>{{ j.external_reference ?: '—' }}</td>
+                    <td class="num">{{ j.total_recipients|number_format }}</td>
+                    <td>{% if j.status not in ['completed', 'dispatched'] %}{{ ui.status(j.status, 'send_job_status') }} {% endif %}
+                        {% if acc + fly + bad + sup == 0 %}<span class="muted">—</span>
+                        {% elseif fly + bad + sup == 0 %}<span class="rate-ok">all accepted</span>
+                        {% else %}{% set parts = [] %}{% if acc %}{% set parts = parts|merge([acc|number_format ~ ' accepted']) %}{% endif %}{% if fly %}{% set parts = parts|merge([fly|number_format ~ ' in flight']) %}{% endif %}{% if bad %}{% set parts = parts|merge([bad|number_format ~ ' bounced or failed']) %}{% endif %}{% if sup %}{% set parts = parts|merge([sup|number_format ~ ' suppressed']) %}{% endif %}{{ parts|join(' · ') }}{% endif %}</td>
+                </tr>
+            {% endfor %}</tbody>
+        </table></div>
+        {% endif %}
+    </section>
+    <section class="card g-col-4 xl:g-col-1" aria-labelledby="dom-h">
+        <div class="card-head"><h2 id="dom-h">Sending domains</h2><a class="more" href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Manage</a></div>
+        {% if o.domains is empty %}<p class="empty">No sending domains yet.</p>{% else %}
+        <ul class="domainlist">{% for d in o.domains %}
+            {% set st = d.status != 'verified' ? (d.status == 'disabled' ? ['Disabled', 'bad', 'The domain is disabled.'] : ['Not verified', 'none', 'Its verification TXT record has not been found yet.'])
+                : (d.dkim_status == 'active' ? ['Sending', 'ok', 'Verified, and its DKIM key is active.'] : (d.dkim_status == 'pending_dns' ? ['DKIM record missing', 'warn', 'Verified; its DKIM record is not in DNS yet.'] : ['No DKIM key', 'warn', 'Verified; it has no active DKIM key yet.'])) %}
+            <li><span class="domain-name">{{ d.domain }}</span><span class="dstate dstate-{{ st[1] }}" title="{{ st[2] }}">{{ st[0] }}</span></li>
         {% endfor %}</ul>
         {% endif %}
-        <p class="muted small">A domain sends only when it is verified and its DKIM key is active.</p>
-    </section>
-    <section class="card g-col-4 lg:g-col-2" aria-labelledby="eng-h">
-        <h2 id="eng-h">Engagement</h2>
-        <p class="muted small">Send jobs of the last {{ period.label }}.</p>
-        <dl class="facts facts-2">
-            <div><dt>Messages with a recorded open</dt><dd>{{ o.engagement.opened_messages|number_format }}</dd></div>
-            <div><dt>Recorded open events</dt><dd>{{ o.engagement.open_events|number_format }}</dd></div>
-            <div><dt>Messages with a recorded click</dt><dd>{{ o.engagement.clicked_messages|number_format }}</dd></div>
-            <div><dt>Recorded click events</dt><dd>{{ o.engagement.click_events|number_format }}</dd></div>
-        </dl>
-        {% include 'dashboard/_engagement_caveat.html.twig' %}
     </section>
 </div>
-
-<section class="card card-flush" aria-labelledby="rs-h">
-    <div class="card-head"><h2 id="rs-h">Recent send jobs</h2><span class="muted small">{{ o.active_send_jobs }} in progress</span><a class="more" href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">All send jobs</a></div>
-    {% include 'dashboard/client/_send_job_rows.html.twig' with {rows: o.recent_send_jobs, listing: null} %}
-</section>
-
-<section class="card card-flush" aria-labelledby="rv-h">
-    <div class="card-head"><h2 id="rv-h">Recent validation jobs</h2><span class="muted small">{{ o.validation.active_jobs }} in progress</span><a class="more" href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}">All validation jobs</a></div>
-    {% include 'dashboard/client/_validation_job_rows.html.twig' with {rows: o.recent_validation_jobs, listing: null} %}
-</section>
 {% endblock %}

@@ -55,8 +55,7 @@ final class ClientDashboardController extends AbstractController
 
         return $this->page('client/overview.html.twig', $client, 'overview', ['o' => $o, 'period' => $period,
             'periods' => array_map(static fn (array $p): string => $p[0], OverviewPeriod::PERIODS),
-            'kpis' => TrendCharts::kpis($o['trends'], $period), 'flow' => TrendCharts::flow($o['trends'], $period),
-            'validation' => TrendCharts::validation($o['trends']['validation']),
+            'kpis' => TrendCharts::kpis($o['trends'], $period),
             'limits' => $this->account->limits($client), 'policy' => $this->account->policy($client),
             'may_admin' => $this->access->may(ClientVoter::ADMIN, $client),
             'steps' => $this->account->nextSteps($clientId, 'production' === $this->smarthostEnv)]);

@@ -166,8 +166,7 @@ points span components and need several files to see:
   `settings-apply`).
 - **v0.2.4 and v0.2.5** (owner decisions): every page has the version in its head and
   the footer (`templates/_site.html.twig`, `PageFrameTest`); Bootstrap 6.0.0-alpha.1 is the base
-  of the design and every dashboard page uses its four-column `.grid`, with the area buttons in the
-  top bar; the public front page at `/` (`FrontPageController`, `templates/front.html.twig`); production
+  of the design and every dashboard page uses its four-column `.grid`; the public front page at `/` (`FrontPageController`, `templates/front.html.twig`); production
   port 80 redirects to HTTPS (`PROXY_HTTP_BIND`, `infra/nginx/production/http-redirect.conf.template`);
   client admins set up sending domains in the client dashboard, the DKIM key through the host agent
   (`ClientDomainController`, `App\Domain\DkimSetup`, `smarthost:system:agent domains`,
@@ -326,8 +325,14 @@ This is a public repository. Documentation, comments, examples, tests, configura
     `g-col-4 xl:g-col-3` + `g-col-4 xl:g-col-1` main and side, `g-col-4` full width; `sticky-side`
     for a sticky side column). A child without a span takes one column. Wide tables stay full width;
     a half or main column holding a table of five or more columns pairs only from `2xl:` (1536px).
-  - New pages use the shell's areas and pills (`Navigation`, gated by permission keys; the area
-    buttons sit in the top bar) and the existing card, table and chart patterns; charts go through
+  - New pages get their place in the menu bar (`App\Dashboard\Navigation`: area › page › views,
+    each gated by its permission key; owner decision 2026-10-25) and follow the page rules of the
+    specification's `dashboard_layout`: one job per page, the state in one sentence under the title,
+    what needs attention first, at most four key figures (`.kpis`), one main list or chart, every
+    explanation behind `ui.tip()` (never a paragraph on the page), common filters as `.chips` with
+    the full form in `details.morefilters`, actions that need a reason behind a button
+    (`details.actionform`), times in lists with `|when` (the full `|ts` in a title or tooltip), and
+    a detail page's place in the breadcrumb through `{% block crumb_tail %}`. Charts go through
     `chart_controller.js`.
   - Show times with the `ts` filter and compute dashboard days, quota days and billing months with
     `App\Util\InstallationTime`.

@@ -66,26 +66,14 @@ final class OperatorSystemController extends AbstractController
         $period = OverviewPeriod::fromKey($request->query->getString('period', OverviewPeriod::DEFAULT), $time->zone);
         $heartbeats = $read->deliveryStatus();
         $daemon = array_values(array_filter($heartbeats, static fn (array $h): bool => (bool) $h['alive']))[0] ?? ($heartbeats[0] ?? null);
-        $all = $this->checks->latest();
-        $components = [];
-        foreach (self::HEALTH_ROWS as $label => [$comps, $prefixes]) {
-            $sel = SetupWizard::select($all, $comps, $prefixes);
-            $components[$label] = ['result' => SetupWizard::worst($sel), 'checks' => $sel];
-        }
-        $host = $this->state->get(SystemState::HOST);
-        $backup = $this->state->get(SystemState::BACKUP);
-        $tls = array_values(array_filter($all, static fn (array $c): bool => str_starts_with((string) $c['check_key'], 'tls.') && str_contains((string) $c['check_key'], 'validity')));
 
+        // The delivery mode and its controls, the workers and queues, the submission rate and the latest host
+        // requests (owner decision 2026-10-25); the components' checks are under System › Diagnostics.
         return $this->render('dashboard/operator/system/health.html.twig', [
-            'section' => 'system', 'components' => $components, 'delivery' => $this->delivery->status(),
-            'work' => $this->connection->fetchAssociative(<<<'SQL'
-                SELECT (SELECT count(*) FROM validation_jobs WHERE status IN ('queued', 'processing')) AS validation_jobs,
-                       (SELECT count(*) FROM send_jobs WHERE status IN ('queued', 'processing')) AS send_jobs,
-                       (SELECT count(*) FROM send_jobs WHERE status = 'collecting') AS collecting_jobs
-                SQL),
-            'host' => $host, 'backup' => $backup, 'tls' => $tls, 'agent_age' => $this->state->agentAge(),
-            'pending_requests' => $this->requests->pendingCount(), 'setup_complete' => $this->wizard->isComplete(),
-            'daemon' => $daemon, 'requests' => $this->requests->recent(8), 'rate' => $overview->submissionChart($period),
+            'section' => 'system', 'delivery' => $this->delivery->status(), 'o' => $read->overviewSnapshot(),
+            'agent_age' => $this->state->agentAge(), 'pending_requests' => $this->requests->pendingCount(),
+            'setup_complete' => $this->wizard->isComplete(), 'daemon' => $daemon, 'requests' => $this->requests->recent(5),
+            'rate' => $overview->submissionChart($period),
             'period' => $period, 'periods' => array_map(static fn (array $p): string => $p[0], OverviewPeriod::PERIODS),
         ]);
     }
@@ -154,7 +142,7 @@ final class OperatorSystemController extends AbstractController
         return $this->render('dashboard/operator/system/history.html.twig', [
             'section' => 'diagnostics', 'last_runs' => $this->checks->lastRuns(),
             'runs' => $this->checks->history(1 === preg_match('/^[a-z0-9_.-]{1,100}$/', $key) ? $key : null,
-                \App\Enum\SystemComponent::tryFrom($component)?->value, \App\Enum\SystemCheckResult::tryFrom($result)?->value),
+                \App\Enum\SystemComponent::tryFrom($component)?->value, \App\Enum\SystemCheckResult::tryFrom($result)?->value, 30),
             'filters' => ['check' => $key, 'component' => $component, 'result' => $result],
             'components' => array_map(static fn ($c) => $c->value, \App\Enum\SystemComponent::cases()),
         ]);
@@ -267,13 +255,22 @@ final class OperatorSystemController extends AbstractController
         $all = $this->checks->latest();
         $steps = $this->wizard->steps();
         foreach ($steps as $key => $s) {
-            [, , $comps, $prefixes] = SetupWizard::STEPS[$key];
-            $steps[$key]['checks'] = SetupWizard::worst(SetupWizard::select($all, $comps, $prefixes));
+            [, , $comps, $prefixes, $topics] = SetupWizard::STEPS[$key];
+            $sel = SetupWizard::select($all, $comps, $prefixes);
+            $worst = SetupWizard::worst($sel);
+            $problem = array_values(array_filter($sel, static fn (array $c): bool => \in_array($c['result'], ['warn', 'fail'], true)))[0] ?? null;
+            $steps[$key]['checks'] = $worst;
+            $steps[$key]['check_rows'] = $sel;
+            $steps[$key]['problem'] = $problem;
+            $steps[$key]['topic'] = $topics[0] ?? null;
+            // Ready to mark done: its checks pass (the welcome step has none to pass).
+            $steps[$key]['view'] = 'done' === $s['state'] ? 'done'
+                : (('pass' === $worst || ('none' === $worst && 'welcome' === $key)) ? 'ready' : 'todo');
         }
 
         return $this->render('dashboard/operator/setup/index.html.twig', [
-            'section' => 'setup', 'steps' => $steps, 'current' => $this->wizard->current(), 'complete' => $this->wizard->isComplete(),
-            'agent_age' => $this->state->agentAge()]);
+            'section' => 'setup', 'steps' => $steps, 'groups' => SetupWizard::GROUPS, 'current' => $this->wizard->current(),
+            'complete' => $this->wizard->isComplete(), 'agent_age' => $this->state->agentAge()]);
     }
 
     #[Route('/setup/{step}', name: 'dashboard_operator_setup_step', methods: ['GET'], requirements: ['step' => '[a-z_]+'])]
@@ -344,6 +341,9 @@ final class OperatorSystemController extends AbstractController
             $this->addFlash('error', $e->getMessage());
 
             return $this->redirectToRoute('dashboard_operator_setup');
+        }
+        if ('index' === $request->request->getString('return')) {
+            return $this->redirect($this->generateUrl('dashboard_operator_setup').'#step-'.$step);
         }
         $keys = array_keys(SetupWizard::STEPS);
         $next = $keys[array_search($step, $keys, true) + 1] ?? null;

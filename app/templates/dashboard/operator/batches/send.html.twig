@@ -1,13 +1,13 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Send from {{ batch.name }}{% endblock %}
+{% block crumb_tail %}<a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Send{% endblock %}
 {% block body %}
 {% set s = summary %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_batches') }}">Address batches</a> › <a href="{{ path('dashboard_operator_batch', {id: batch.id}) }}">{{ batch.name }}</a> › Send</p>
 <div class="pagehead">
     <div>
         <h1>Send from “{{ batch.name }}”</h1>
-        <p class="sub">Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>{% if delivery.mode != 'LIVE' %}: a send job is created and waits; nothing leaves the server until delivery is LIVE{% endif %}.
+        <p class="lead">Delivery is <span class="mode mode-{{ delivery.mode }}">{{ delivery.mode }}</span>{% if delivery.mode != 'LIVE' %}: a send job is created and waits; nothing leaves the server until delivery is LIVE{% endif %}.
             The installation-wide ceiling is {{ delivery.global_rate_per_minute ?? '—' }} messages per minute; the delivery daemon also limits each receiving domain.</p>
     </div>
     <div class="actions">{{ ui.help('sending', 'Stages and limits') }}</div>
@@ -33,7 +33,7 @@
     <label>HTML body (optional; no scripts) <textarea name="html_body" rows="6">{{ form.html_body }}</textarea></label>
     <label class="checkline"><input type="checkbox" name="track_opens" value="1"{% if form.track_opens %} checked{% endif %}> Record opens (HTML only; an imperfect signal)</label>
     <label class="checkline"><input type="checkbox" name="track_clicks" value="1"{% if form.track_clicks %} checked{% endif %}> Record clicks</label>
-    <p class="muted small">Every message carries the List-Unsubscribe header pointing at the recipient's own answer page. {% if batch.purpose == 'repermission' %}A re-permission message must contain <code>{{ '{{response_url}}' }}</code> or <code>{{ '{{confirm_url}}' }}</code>.{% endif %}</p>
+    <p class="card-note">Every message carries a List-Unsubscribe header.{{ ui.tip('It points at the recipient\'s own answer page.' ~ (batch.purpose == 'repermission' ? ' A re-permission message must contain {{response_url}} or {{confirm_url}}.' : '')) }}</p>
     <button type="submit" name="do" value="preview">Preview</button>
 {% if preview %}
     <h2>Preview: {{ preview.stage }} stage, {{ preview.recipients|length|number_format }} recipient(s)</h2>

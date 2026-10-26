@@ -18,30 +18,36 @@
 {% set platform = app.user.platformUser %}
 {% set ds = platform and is_granted('PLATFORM.SYSTEM.VIEW') ? delivery_status() : null %}
 <header class="topbar">
-    <a class="brand" href="{{ path('dashboard_home') }}">{{ icon.logo() }}<span>{{ site_name() }}</span></a>
-    {# The area buttons sit in the top bar, so the page grid spans the full width (owner decision, 2026-10-10). #}
-    {% if nav.areas is not empty or nav.help or nav.switch %}
-    <nav class="orbs" aria-label="Main">
-        <ul>
-            {% for a in nav.areas %}
-            <li><a class="orb" href="{{ a.href }}"{% if a.current %} aria-current="page"{% endif %}>{{ icon.i(a.icon, 22) }}<span class="orb-label">{{ a.label }}</span>{% if a.badge %}<span class="orb-badge count-{{ a.badge[1] }}" aria-hidden="true">{{ a.badge[0] }}</span><span class="sr">, {{ a.badge[0] }} to look at</span>{% endif %}</a></li>
+    <a class="brand" href="{{ path('dashboard_home') }}">{{ icon.logo(34) }}<span>{{ site_name() }}</span></a>
+    {# The menu bar (owner decision, 2026-10-25): areas open their pages on hover or focus, pages open their views. #}
+    {% if nav.menus is not empty %}
+    <nav class="menubar" aria-label="Main" data-controller="navbar">
+        <button type="button" class="menubar-toggle" aria-expanded="false" aria-controls="main-menu" data-navbar-target="toggle" data-action="navbar#toggle">{{ icon.i('menu', 20) }}Menu</button>
+        <ul class="menubar-list" id="main-menu">
+            {% for m in nav.menus %}
+            <li class="menubar-item{{ loop.revindex <= 2 ? ' menubar-item-end' : '' }}">
+                <a class="menubar-link" href="{{ m.href }}"{% if m.current %} aria-current="true"{% endif %}>{{ icon.i(m.icon, 18) }}<span class="menubar-label">{{ m.label }}</span>{% if m.badge %}<span class="count count-{{ m.badge[1] }}" aria-hidden="true">{{ m.badge[0] }}</span><span class="sr">, {{ m.badge[0] }} to look at</span>{% endif %}{{ icon.i('chevron-down', 14) }}</a>
+                <ul class="menu-panel">
+                    {% for p in m.items %}
+                    <li class="menu-item{{ p.views is not empty ? ' has-views' : '' }}">
+                        <a href="{{ p.href }}"{% if p.current %} aria-current="page"{% endif %}><span class="menu-label">{{ p.label }}</span>{% if p.note %}<span class="menu-note">{{ p.note }}</span>{% endif %}{% if p.badge %}<span class="count count-{{ p.badge[1] }}" aria-hidden="true">{{ p.badge[0] }}</span><span class="sr">, {{ p.badge[0] }} to look at</span>{% endif %}{% if p.views is not empty %}{{ icon.i('chevron', 14) }}{% endif %}</a>
+                        {% if p.views is not empty %}
+                        <ul class="menu-flyout">
+                            {% for v in p.views %}
+                            {% if v.header %}<li class="menu-head">{{ v.label }}</li>{% else %}
+                            <li><a href="{{ v.href }}">{% if v.state %}<span class="menu-dot menu-dot-{{ v.state }}" aria-hidden="true"></span>{% endif %}<span class="menu-label">{{ v.label }}</span>{% if v.note %}<span class="menu-note">{{ v.note }}</span>{% endif %}</a></li>
+                            {% endif %}
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </li>
             {% endfor %}
         </ul>
-        {% if nav.help or nav.switch %}
-        <ul class="orbs-end">
-            {% if nav.help %}<li><a class="orb" href="{{ nav.help }}"{% if (section ?? '') == 'help' %} aria-current="page"{% endif %}>{{ icon.i('help', 22) }}<span class="orb-label">Help</span></a></li>{% endif %}
-            {% if nav.switch %}<li><a class="orb" href="{{ nav.switch.href }}">{{ icon.i('switch', 22) }}<span class="orb-label">{{ nav.switch.label }}</span></a></li>{% endif %}
-        </ul>
-        {% endif %}
     </nav>
     {% endif %}
-    {% block pills %}
-        {% if nav.pills|length > 0 %}
-        <nav class="pills" aria-label="Pages in this area">
-            {% for p in nav.pills %}<a class="pill" href="{{ p.href }}"{% if p.current %} aria-current="page"{% endif %}>{{ p.label }}{% if p.badge %} <span class="count count-{{ p.badge[1] }}">{{ p.badge[0] }}</span>{% endif %}</a>{% endfor %}
-        </nav>
-        {% endif %}
-    {% endblock %}
     <div class="topright">
         {% set search_action = nav.context == 'client' ? path('dashboard_client_search', {clientId: nav_client.id.toRfc4122}) : (platform ? path('dashboard_search') : null) %}
         {% if search_action %}
@@ -54,10 +60,10 @@
             </details>
         {% endif %}
         {% if ds %}
-            <a class="modepill mode-{{ ds.mode }}" href="{{ path('dashboard_operator_system') }}" title="{{ ds.explanation }}"><span class="dot" aria-hidden="true"></span>Delivery: {{ ds.mode }}</a>
+            <a class="modepill mode-{{ ds.mode }}" href="{{ path('dashboard_operator_system') }}" title="{{ ds.explanation }}"><span class="dot" aria-hidden="true"></span><span><span class="modepill-word">Delivery </span>{{ ds.mode }}</span></a>
             {% if is_granted('SYSTEM.DELIVERY.CONTROL') and not ds.emergency_stop %}
             <details class="dropdown stopbox" data-controller="dropdown">
-                <summary class="btn btn-danger">{{ icon.i('stop', 18) }}Stop sending</summary>
+                <summary class="btn btn-stop">{{ icon.i('stop', 18) }}Stop sending</summary>
                 <form method="post" action="{{ path('dashboard_operator_stop') }}" class="dropdown-panel stack" data-controller="confirm" data-confirm-message-value="Stop sending all email now? Nothing new is submitted and the Postfix queue is held until an administrator resumes.">
                     {{ ui.csrf() }}<input type="hidden" name="return_to" value="{{ app.request.pathInfo starts with '/dashboard/operator/' ? app.request.pathInfo : '' }}">
                     <p><strong>Stop sending all email now?</strong> Nothing new is submitted and the Postfix queue is held until an administrator resumes. Nothing is lost.</p>
@@ -68,10 +74,7 @@
             {% endif %}
         {% endif %}
         {% if nav.context == 'client' %}
-            <a class="chip" href="{{ nav.switch.href }}" title="{{ nav.switch.label }}"><span class="avatar av-{{ nav_client.companyName|tone_slot }}" aria-hidden="true">{{ nav_client.companyName|initials }}</span>{{ nav_client.companyName }}{{ icon.i('switch', 16) }}<span class="sr">: {{ nav.switch.label }}</span></a>
-        {% endif %}
-        {% if platform and is_granted('PLATFORM.OVERVIEW.VIEW') %}
-            <a class="iconbtn" href="{{ path('dashboard_operator_overview') }}#attention" aria-label="Needs attention: {{ nav.attention }}">{{ icon.i('bell') }}{% if nav.attention > 0 %}<span class="iconbtn-dot" aria-hidden="true"></span>{% endif %}</a>
+            <a class="chip" href="{{ nav.switch.href }}" title="{{ nav_client.companyName }}: {{ nav.switch.label|lower }}"><span class="avatar av-{{ nav_client.companyName|tone_slot }}" aria-hidden="true">{{ nav_client.companyName|initials }}</span><span class="chip-name">{{ nav_client.companyName }}</span>{{ icon.i('switch', 16) }}<span class="sr">: {{ nav.switch.label }}</span></a>
         {% endif %}
         <details class="dropdown account" data-controller="dropdown">
             <summary class="avatar-btn" aria-label="Account menu">{{ (app.user.displayName ?? (app.user.email|split('@')|first))|initials }}</summary>
@@ -88,6 +91,11 @@
     </div>
 </header>
 <main id="main" class="content">
+    {# Where this page is: area › page, and › the item a detail page shows (block crumb_tail, rendered by Twig and so already escaped). #}
+    {% set crumb_tail = block('crumb_tail') is defined ? block('crumb_tail')|trim : '' %}
+    {% if nav.crumbs is not empty %}
+    <nav class="crumbs" aria-label="Breadcrumb">{% for c in nav.crumbs %}{% if not loop.first %}<span aria-hidden="true"> › </span>{% endif %}{% if c.href and (not loop.last or crumb_tail is not empty) %}<a href="{{ c.href }}">{{ c.label }}</a>{% else %}<span{% if loop.last %} aria-current="page"{% endif %}>{{ c.label }}</span>{% endif %}{% endfor %}{% if crumb_tail is not empty %}<span aria-hidden="true"> › </span><span class="crumb-tail">{{ crumb_tail|raw }}</span>{% endif %}</nav>
+    {% endif %}
     {% if nav.context == 'client' and platform %}
         <p class="viewing">You are viewing the workspace of <strong>{{ nav_client.companyName }}</strong> as an operator. <a href="{{ nav.switch.href }}">Back to the operator console</a></p>
     {% endif %}

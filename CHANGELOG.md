@@ -4,6 +4,63 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
 the *specification* version, which is 2.12.
 
+## [0.2.9] - 2026-10-26
+
+A new dashboard layout (owner decision 2026-10-25, from approved mockups) and three fixes found
+while setting up the first installed server. No migration and no contract change: OpenAPI stays
+1.0.0-draft.10, the specification 2.12. One new optional setting, `ACME_EXTRA_DOMAINS`, which
+`env-migrate` adds empty.
+
+Upgrading from any earlier release, as root on the server:
+`curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/v0.2.9/upgrade-catto-mail`, then
+`bash upgrade-catto-mail --version v0.2.9`. By hand, as the service user: `git fetch --tags`,
+`git checkout v0.2.9`, `prod env-migrate`, `prod check`, `prod upgrade 0.2.9`. Only the script installs
+lego 4.35.2 and moves an applied firewall under `/etc/nftables.d` (installation guide, section 8).
+
+### Changed
+- **A menu bar with three tiers instead of the area buttons and page pills.** Pointing at an
+  area (or moving to it with the keyboard) opens its pages, and a page with an arrow opens its
+  views: failed webhook deliveries, clients waiting for approval, every System setup step with its
+  state, the audit log's views (sign-in emails, sign-ins, sign-up emails, server links, delivery,
+  setup, clients, lists, suppressions, access), the settings groups and every help topic. Help is
+  an area of the operator console. Below 1100px the bar folds behind a Menu button; Escape closes
+  an open menu. A breadcrumb (area › page › item) sits above every title.
+- **Uncluttered pages.** Each page says its state in one sentence under the title, puts what
+  needs attention first, shows at most four key figures and one main list or chart, and keeps
+  explanations behind ⓘ buttons (shown on hover or focus) and in Help. Lists show the latest 25
+  rows with ready-made views as chips and the full filter form under *More filters*; codes, ids and
+  exact times are in tooltips; an action that needs a reason is a button that opens its form. The
+  type scale makes headings stand out (page title 30px, section 20px semibold, key figures 34px).
+- **The operator Overview** shows what needs attention, four key figures, messages per hour or
+  day, the five clients to watch and system health. Workers and queues and the submission rate
+  moved to Mail flow › Delivery.
+- **A client's page** in the operator console is split into tabs: Summary, Limits & usage,
+  Reputation, Domains & webhooks, Keys & members, Policy & opt-outs, History.
+- **System setup** lists its 19 steps in groups, each with its checks' result, and a step can be
+  marked done from the list. Settings open one group at a time.
+- **Unmatched DSNs** is called *Unmatched bounces* in the menu and on its page.
+- `upgrade-catto-mail` has 13 steps: it installs the pinned release of the certificate tool `lego`.
+
+### Fixed
+- **The first Let's Encrypt certificate was never requested** (since 0.1.9). `prod tls acme issue`
+  ended silently before asking for a certificate when none had been issued before, so only a
+  renewal worked. It now requests the first one.
+- **Ubuntu's `lego` lacks DNS providers** (Porkbun, for one), so `ACME_DNS_PROVIDER` could name a
+  provider the tool did not know. The installer and `upgrade-catto-mail` install the official lego
+  release 4.35.2 to `/usr/local/bin`, checked against its published SHA-256.
+- **Applied firewall rules were not loaded at boot.** Ubuntu's `nftables.service` cannot read
+  `/home` (`ProtectHome=true`), so an `include` of `/home/cattomail/catto-mail-firewall.nft` made
+  it fail at boot and load no rules. The installer (`--apply-firewall`) and `upgrade-catto-mail`
+  keep the applied rules in `/etc/nftables.d/catto-mail-firewall.nft`, and the upgrade moves an
+  older `include` there. The installation guide shows the same commands.
+- **A webhook test that failed on a busy machine.** One case's retry fell due while later cases
+  ran, and took the response scripted for another case. Each case now runs with only its own
+  delivery due.
+
+### Added
+- `ACME_EXTRA_DOMAINS`: more names on the Let's Encrypt certificate, such as the web host's `www`
+  name, separated by spaces or commas; each must be a host name (`prod check`).
+
 ## [0.2.8] - 2026-10-25
 
 Two fixes found on the first installed server. No migration, no contract change and no new

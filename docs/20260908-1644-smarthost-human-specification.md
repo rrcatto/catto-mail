@@ -1757,27 +1757,45 @@ Every dashboard change is a POST with a CSRF token. Dashboard responses carry a 
 Policy (same-origin scripts and styles only, with a per-request nonce for the import map; no CDN),
 refuse framing and are never cached; error pages are generic.
 
-## Dashboard layout (owner decision, version 0.2.2)
+## Dashboard layout (owner decisions, versions 0.2.2 and 0.2.9)
 
-One shell serves the operator console and the client workspaces and uses the full page width:
+One shell serves the operator console and the client workspaces:
 
-- round area buttons in the top bar, next to the logo (owner decision, 2026-10-10; until then a
-  rail on the left): Overview, Mail flow, Clients, System and Access in the operator console;
-  Overview, Sending, Validation, Settings and Usage in a client workspace; then Help and the
-  workspace switch;
-- the current area's pages as pills after them (below 2200px wide, on a second row); on both
-  overviews the pills choose the period (24 hours, 7, 30 or 90 days);
-- at the top right: the search button, the delivery mode, *Stop sending* (a reason is required),
-  what needs attention and the account menu.
+- the top bar holds the logo, a menu bar and, at the right, the search button, the delivery mode,
+  *Stop sending* (a reason is required) and the account menu;
+- the menu bar has three tiers that open on hover or keyboard focus (owner decision, 2026-10-25):
+  the areas (Overview, Mail flow, Clients, System, Access and Help in the operator console;
+  Overview, Sending, Validation, Settings and Usage in a client workspace), each area's pages, and a
+  page's views: filtered lists such as failed webhook deliveries or clients waiting for approval,
+  the System setup steps with their state, the audit log's views such as sign-in emails, the
+  settings groups and the help topics. Below 1100px it folds behind a Menu button;
+- a breadcrumb (area › page › item) sits above every page title.
 
-Areas, pills and badges appear only where the user's permission keys allow. The operator Overview
-shows KPI cards against the previous period, send jobs by hard-bounce rate, the submission rate
-against the warm-up ceiling, mail flow per hour or day, workers and queues, what needs attention,
-per-client rates, validation results, component health, suppressions and recent activity, all from
-durable signals. The client Overview shows the same kind of figures for that client only. The
-global search finds clients, jobs, messages, suppressions, sending domains and users by an id, an
-address, a domain, an external reference or a name; in a client workspace it covers only that
-client.
+Areas, pages, views and badges appear only where the user's permission keys allow.
+
+Every page follows the same rules (owner decision, 2026-10-25):
+
+- one page, one job: the title says what it is, one sentence under it says the state;
+- what needs attention comes first, and only when something does;
+- at most four key figures, each with an information button saying what it counts;
+- one main list or chart, and at most two supporting cards;
+- explanations sit behind information buttons (shown on hover or focus) and in Help, never as
+  paragraphs on the page;
+- lists show the latest rows with an "All …" link; the common filters are view chips and the full
+  filter form folds away;
+- details by drill-down: a row opens its page or tab, codes and ids are in a tooltip; an action that
+  needs a reason is a button that opens its form.
+
+The type scale makes each level clearly bigger or bolder than the next: page title 30px, section
+heading 20px semibold, key figure 34px, body 15px.
+
+The operator Overview shows what needs attention, KPI cards against the previous period, messages
+per hour or day, the five clients to watch and component health, all from durable signals; the
+workers and queues and the submission rate against the warm-up ceiling are on Mail flow ›
+Delivery. The client Overview shows its status, KPI cards, its latest send jobs and one status per
+sending domain, for that client only. The global search finds clients, jobs, messages,
+suppressions, sending domains and users by an id, an address, a domain, an external reference or a
+name; in a client workspace it covers only that client.
 
 Charts use Chart.js, vendored in the application; the Outfit font is served by the application;
 the Content Security Policy allows no inline styles.

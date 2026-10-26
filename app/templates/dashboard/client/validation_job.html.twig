@@ -1,6 +1,7 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Validation job{% endblock %}
+{% block crumb_tail %}Job{% endblock %}
 {% block body %}
 {% set cid = client.id.toRfc4122 %}
 {% set c = job.classification_counts_json|json_counts %}
@@ -9,45 +10,27 @@
 {% set bad = c.undeliverable ?? 0 %}
 {% set tot = ok + mid + bad %}
 {% set waiting = (job.processing.pending ?? 0) + (job.processing.claimed ?? 0) + (job.processing.retry_scheduled ?? 0) %}
-<p class="crumbs"><a href="{{ path('dashboard_client_validation_jobs', {clientId: cid}) }}">Validation jobs</a> › Job</p>
 <div class="pagehead">
     <div>
         <div class="titleline"><h1>Validation job {{ job.external_reference ? '“' ~ job.external_reference ~ '”' : '' }}</h1>{{ ui.status(job.status, 'validation_job_status') }}</div>
-        <p class="sub">Submitted {{ job.submitted_at|ts }} · {{ job.total_addresses|number_format }} addresses, {{ job.processed_count|number_format }} checked</p>
+        <p class="lead">{{ job.total_addresses|number_format }} addresses submitted {{ job.submitted_at|when }}{% if job.processed_count < job.total_addresses %}, {{ job.processed_count|number_format }} checked so far{% endif %}.{{ ui.tip('Job ' ~ job.id ~ ' · started ' ~ (job.started_at|ts) ~ ' · completed ' ~ (job.completed_at|ts) ~ '. Validation results estimate deliverability; delivery certainty comes only from sending.') }}</p>
     </div>
+    <a class="btn btn-secondary" href="{{ path('dashboard_client_validation_export', {clientId: cid, jobId: job.id}|merge(filters|filter(v => v != ''))) }}" download>Download CSV</a>
 </div>
 
-<div class="grid">
-    <section class="card g-col-4 2xl:g-col-2" aria-labelledby="job-h">
-        <h2 id="job-h">Job</h2>
-        <dl class="rows">
-            <dt>Job id</dt><dd><code>{{ job.id }}</code></dd>
-            <dt>Status</dt><dd>{{ ui.status(job.status, 'validation_job_status') }}</dd>
-            <dt>Submitted</dt><dd>{{ job.submitted_at|ts }}</dd>
-            <dt>Started</dt><dd>{{ job.started_at|ts }}</dd>
-            <dt>Completed</dt><dd>{{ job.completed_at|ts }}</dd>
-            <dt>Addresses</dt><dd>{{ job.total_addresses|number_format }} ({{ job.processed_count|number_format }} checked)</dd>
-        </dl>
-    </section>
-    <section class="card g-col-4 2xl:g-col-2" aria-labelledby="class-h">
-        <h2 id="class-h">Classification summary</h2>
-        <dl class="facts">
-            <div><dt>Deliverable or probably deliverable</dt><dd class="lg">{{ ok|number_format }}</dd></div>
-            <div><dt>Risky, unknown or unverifiable</dt><dd class="lg">{{ mid|number_format }}</dd></div>
-            <div><dt>Undeliverable</dt><dd class="lg">{{ bad|number_format }}</dd></div>
-        </dl>
-        {% if tot > 0 %}<svg class="stackbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="100" height="8" rx="4"/><rect class="wf-ok" width="{{ (100 * ok / tot)|round(2) }}" height="8"/><rect class="wf-mid" x="{{ (100 * ok / tot)|round(2) }}" width="{{ (100 * mid / tot)|round(2) }}" height="8"/><rect class="wf-bad" x="{{ (100 * (ok + mid) / tot)|round(2) }}" width="{{ (100 * bad / tot)|round(2) }}" height="8"/></svg>{% endif %}
-        {{ ui.counts(job.classification_counts_json, 'classification') }}
-        {% if job.processing.pending is defined or job.processing.claimed is defined or job.processing.retry_scheduled is defined %}
-            <p>Still being checked: {{ waiting|number_format }}
-            {% if job.processing.retry_scheduled ?? 0 %}({{ job.processing.retry_scheduled|number_format }} waiting to retry after a temporary failure){% endif %}</p>
-        {% endif %}
-        <p class="muted small">Validation results estimate deliverability; delivery certainty comes only from sending.</p>
-    </section>
+<div class="kpis">
+    <section class="card kpi"><div class="kpi-head"><h2>Deliverable</h2>{{ ui.tip('Deliverable or probably deliverable.') }}</div><p class="kpi-value">{{ ok|number_format }}</p></section>
+    <section class="card kpi"><div class="kpi-head"><h2>Risky or unknown</h2>{{ ui.tip('Risky, unknown or temporarily unverifiable.') }}</div><p class="kpi-value">{{ mid|number_format }}</p></section>
+    <section class="card kpi"><div class="kpi-head"><h2>Undeliverable</h2></div><p class="kpi-value{{ bad ? ' text-bad' : '' }}">{{ bad|number_format }}</p></section>
+    <section class="card kpi"><div class="kpi-head"><h2>Still being checked</h2>{% if job.processing.retry_scheduled ?? 0 %}{{ ui.tip(job.processing.retry_scheduled|number_format ~ ' waiting to retry after a temporary failure.') }}{% endif %}</div><p class="kpi-value">{{ waiting|number_format }}</p></section>
 </div>
 
 <section aria-labelledby="addr-h">
-    <h2 id="addr-h">Address results</h2>
+    <nav class="chips" aria-label="Views of the addresses">
+        {% for key, label in {'': 'Every address'}|merge(label_options('classification')) %}<a class="chip-link" href="{{ path('dashboard_client_validation_job', key ? {clientId: cid, jobId: job.id, classification: key} : {clientId: cid, jobId: job.id}) }}"{% if filters.classification == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+    </nav>
+    <details class="morefilters"{% if filters.syntax or filters.domain or filters.smtp or filters.confidence or filters.role or filters.disposable or filters.catch_all or filters.typo %} open{% endif %}>
+        <summary>More filters: checks, flags, order</summary>
     <form method="get" class="filters" role="search" aria-label="Filter address results">
         {{ ui.select('classification', 'Classification', label_options('classification'), filters.classification) }}
         {{ ui.select('syntax', 'Syntax', {valid: 'Valid', invalid: 'Invalid'}, filters.syntax) }}
@@ -67,42 +50,28 @@
         <button type="submit">Apply</button>
         <a href="{{ path('dashboard_client_validation_job', {clientId: cid, jobId: job.id}) }}">Reset</a>
     </form>
+    </details>
     <div class="card card-flush">
-        <div class="card-head">
-            <p class="muted small">{{ page.rows|length }} addresses on this page</p>
-            <p><a class="more" href="{{ path('dashboard_client_validation_export', {clientId: cid, jobId: job.id}|merge(filters|filter(v => v != ''))) }}" download>Download these results as CSV</a> <span class="muted small">(all rows matching the filters; same fields as the API)</span></p>
-        </div>
+        <div class="card-head"><h2 id="addr-h">Addresses</h2></div>
         {% if page.rows is empty %}<p class="empty">No addresses match.</p>{% else %}
         <div class="scroll">
-        <table class="dense">
+        <table class="list">
             <thead><tr>
-                <th scope="col">{{ ui.sort(listing, 'address', 'Original address') }}</th>
-                <th scope="col">Normalised</th>
-                <th scope="col">{{ ui.sort(listing, 'classification', 'Classification') }}</th>
+                <th scope="col">{{ ui.sort(listing, 'address', 'Address') }}</th>
+                <th scope="col">{{ ui.sort(listing, 'classification', 'Result') }}</th>
                 <th scope="col">Confidence</th>
-                <th scope="col">Syntax</th><th scope="col">Domain</th><th scope="col">SMTP</th>
-                <th scope="col">Role</th><th scope="col">Disposable</th><th scope="col">Catch-all</th><th scope="col">Typo?</th>
                 <th scope="col">Suggestion</th>
-                <th scope="col">Diagnostic</th>
-                <th scope="col">Checked</th>
+                <th scope="col"><span class="sr">Details</span></th>
             </tr></thead>
             <tbody>
             {% for a in page.rows %}
+                {% set flags = [] %}{% if a.is_role %}{% set flags = flags|merge(['role account']) %}{% endif %}{% if a.is_disposable %}{% set flags = flags|merge(['disposable']) %}{% endif %}{% if a.is_catch_all_or_accept_all %}{% set flags = flags|merge(['catch-all domain']) %}{% endif %}{% if a.is_domain_typo_suspected %}{% set flags = flags|merge(['typo suspected']) %}{% endif %}
                 <tr>
-                    <td>{{ a.original_address }}{% if a.external_address_reference %}<br><small>ref {{ a.external_address_reference }}</small>{% endif %}</td>
-                    <td>{{ a.normalized_address ?? '—' }}</td>
+                    <td>{{ a.original_address }}{% for f in flags %} <span class="tag tag-warn">{{ f }}</span>{% endfor %}</td>
                     <td>{% if a.overall_classification %}{{ ui.status(a.overall_classification, 'classification') }}{% else %}<span class="st">Not checked yet</span>{% endif %}</td>
                     <td>{{ a.confidence|default('—')|capitalize }}</td>
-                    <td>{{ a.syntax_status ?? '—' }}</td>
-                    <td>{{ a.domain_status ?? '—' }}</td>
-                    <td>{{ a.smtp_status ?? '—' }}</td>
-                    <td>{{ ui.flag(a.is_role) }}</td>
-                    <td>{{ ui.flag(a.is_disposable) }}</td>
-                    <td>{{ ui.flag(a.is_catch_all_or_accept_all) }}</td>
-                    <td>{{ ui.flag(a.is_domain_typo_suspected) }}</td>
-                    <td>{% if a.suggested_address %}{{ a.suggested_address }}<br><small>{{ a.suggestion_confidence }} confidence</small>{% else %}—{% endif %}</td>
-                    <td>{% if a.diagnostic_code %}<code>{{ a.diagnostic_code }}</code>{% endif %} {{ a.diagnostic_text }}</td>
-                    <td>{{ a.checked_at|ts }}</td>
+                    <td>{% if a.suggested_address %}{{ a.suggested_address }} <small class="muted">({{ a.suggestion_confidence }})</small>{% else %}—{% endif %}</td>
+                    <td class="tipcell">{{ ui.tip('Normalised ' ~ (a.normalized_address ?? '—') ~ ' · syntax ' ~ (a.syntax_status ?? '—') ~ ' · domain ' ~ (a.domain_status ?? '—') ~ ' · SMTP ' ~ (a.smtp_status ?? '—') ~ (a.diagnostic_code ? ' · ' ~ a.diagnostic_code : '') ~ (a.diagnostic_text ? ' ' ~ a.diagnostic_text : '') ~ (a.external_address_reference ? ' · ref ' ~ a.external_address_reference : '') ~ ' · checked ' ~ (a.checked_at|ts)) }}</td>
                 </tr>
             {% endfor %}
             </tbody>

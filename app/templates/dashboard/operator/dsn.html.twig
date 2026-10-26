@@ -1,21 +1,66 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
-{% block title %}Unmatched DSN{% endblock %}
+{% block title %}Unmatched bounce{% endblock %}
+{% block crumb_tail %}Bounce report{% endblock %}
 {% block body %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_dsns') }}">Unmatched DSNs</a> › DSN</p>
+{% set can_act = dsn.status.value == 'open' and is_granted('PLATFORM.DSN.MANAGE') %}
 <div class="pagehead">
     <div>
-        <div class="titleline"><h1>Unmatched DSN received {{ dsn.receivedAt|ts }}</h1>{{ ui.status(dsn.status.value, 'dsn_status') }}</div>
-        <p class="sub">{{ dsn.classification.value|replace({'_': ' '})|capitalize }} · {{ dsn.finalRecipient ?? dsn.originalRecipient ?? 'no recipient reported' }}</p>
+        <div class="titleline"><h1>Bounce for {{ dsn.finalRecipient ?? dsn.originalRecipient ?? 'an unknown recipient' }}</h1>{{ ui.status(dsn.status.value, 'dsn_status') }}</div>
+        <p class="lead">{{ dsn.classification.value|replace({'_': ' '})|capitalize }}{% if dsn.enhancedStatusCode %} ({{ dsn.enhancedStatusCode }}){% endif %}, received {{ dsn.receivedAt|when }}{% if dsn.reportingMta %} from {{ dsn.reportingMta }}{% endif %}.</p>
     </div>
+    {% if can_act %}
+    <div class="actionrow">
+        <details class="actionform"><summary class="btn">Request a match</summary>
+            <form method="post" action="{{ path('dashboard_operator_dsn_match', {id: dsn.id.toRfc4122}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Request this match? The delivery daemon will apply the bounce to that message, which may create a suppression.">
+                {{ ui.csrf() }}
+                <label>Message id <input type="text" name="message_id" required pattern="[0-9a-fA-F-]{36}" list="candidate-ids" autocomplete="off"></label>
+                <datalist id="candidate-ids">{% for m in candidates %}<option value="{{ m.id }}">{{ m.company_name }} – {{ m.recipient_address }}</option>{% endfor %}</datalist>
+                <label>Note (optional) <input type="text" name="note"></label>
+                <button type="submit">Request match</button>
+                <p class="small muted">The delivery daemon applies it and records the outcome; this page never creates message events.</p>
+            </form>
+        </details>
+        <details class="actionform"><summary class="btn btn-secondary">Dismiss</summary>
+            <form method="post" action="{{ path('dashboard_operator_dsn_dismiss', {id: dsn.id.toRfc4122}) }}" class="stack">
+                {{ ui.csrf() }}
+                <label>Why? <textarea name="reason" required minlength="3" rows="2"></textarea></label>
+                <button type="submit">Dismiss the bounce</button>
+            </form>
+        </details>
+    </div>
+    {% endif %}
 </div>
 
-<div class="grid">
-    <section class="card g-col-4 lg:g-col-2" aria-labelledby="evidence-h">
-        <h2 id="evidence-h">Parsed evidence</h2>
+{% if dsn.status.value != 'open' %}
+<section class="card" aria-labelledby="resolution-h">
+    <h2 id="resolution-h">Resolution</h2>
+    <dl class="rows">
+        <dt>Requested</dt><dd>{{ dsn.resolutionRequestedBy ? dsn.resolutionRequestedBy.email ~ ', ' : '' }}{{ dsn.resolutionRequestedAt|when }}</dd>
+        <dt>Resolved</dt><dd>{{ dsn.resolvedAt|when }}</dd>
+        <dt>Note</dt><dd>{{ dsn.resolutionNote ?? '—' }}</dd>
+        <dt>Matched message</dt><dd>{% if matched %}<a href="{{ path('dashboard_client_message', {clientId: matched.client_id, messageId: matched.id}) }}">{{ matched.recipient_address }}</a> ({{ matched.current_status|label('message_status') }}){% else %}—{% endif %}</dd>
+    </dl>
+    {% if failures is not empty %}<details><summary>Earlier match attempts the daemon could not apply ({{ failures|length }})</summary><ul class="plain">{% for f in failures %}<li>{{ f is iterable ? f|json_encode : f }}</li>{% endfor %}</ul></details>{% endif %}
+</section>
+{% endif %}
+
+<section class="card card-flush" aria-labelledby="cand-h">
+    <div class="card-head"><h2 id="cand-h">Candidate messages</h2>{{ ui.tip('Recent messages to the same recipient, recorded by the delivery daemon as hints only. A recipient address (even with a matching sender) is never enough to apply a bounce automatically.') }}</div>
+    {% if candidates is empty %}<p class="empty">No candidates were recorded.</p>{% else %}
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">Recipient</th><th scope="col">Client</th><th scope="col">Sender</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col"><span class="sr">Details</span></th></tr></thead>
+        <tbody>{% for m in candidates %}
+            <tr><td>{{ m.recipient_address }}</td><td>{{ m.company_name }}</td><td>{{ m.sender_email }}</td><td>{{ ui.status(m.current_status, 'message_status') }}</td><td>{{ m.created_at|when }}</td><td class="tipcell">{{ ui.tip('Message ' ~ m.id ~ ' · Postfix queue id ' ~ (m.postfix_queue_id ?? '—')) }}</td></tr>
+        {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
+
+<details class="morefilters">
+    <summary>Everything the bounce report says</summary>
+    <div class="card">
         <dl class="rows">
-            <dt>Status</dt><dd>{{ ui.status(dsn.status.value, 'dsn_status') }}</dd>
-            <dt>Classification</dt><dd>{{ dsn.classification.value|replace({'_': ' '})|capitalize }}</dd>
             <dt>Original recipient</dt><dd>{{ dsn.originalRecipient ?? '—' }}</dd>
             <dt>Final recipient</dt><dd>{{ dsn.finalRecipient ?? '—' }}</dd>
             <dt>Enhanced status code</dt><dd>{{ dsn.enhancedStatusCode ?? '—' }}</dd>
@@ -24,66 +69,7 @@
             <dt>VERP token present</dt><dd>{{ dsn.verpToken ? 'Yes (names no message)' : 'No' }}</dd>
             {% for k, v in detail %}<dt>{{ k|replace({'_': ' '})|capitalize }}</dt><dd>{{ v is iterable ? v|json_encode : v }}</dd>{% endfor %}
         </dl>
-    </section>
-    <section class="card g-col-4 lg:g-col-2" aria-labelledby="resolution-h">
-        <h2 id="resolution-h">Resolution</h2>
-        <dl class="rows">
-            <dt>Requested by</dt><dd>{{ dsn.resolutionRequestedBy ? dsn.resolutionRequestedBy.email : '—' }}</dd>
-            <dt>Requested at</dt><dd>{{ dsn.resolutionRequestedAt|ts }}</dd>
-            <dt>Resolved at</dt><dd>{{ dsn.resolvedAt|ts }}</dd>
-            <dt>Note / reason</dt><dd>{{ dsn.resolutionNote ?? '—' }}</dd>
-            <dt>Matched message</dt><dd>{% if matched %}<a href="{{ path('dashboard_client_message', {clientId: matched.client_id, messageId: matched.id}) }}">{{ matched.recipient_address }}</a> ({{ matched.current_status|label('message_status') }}){% else %}—{% endif %}</dd>
-        </dl>
-        {% if failures is not empty %}
-            <h3>Earlier match attempts the daemon could not apply</h3>
-            <ul class="plain">{% for f in failures %}<li>{{ f is iterable ? f|json_encode : f }}</li>{% endfor %}</ul>
-        {% endif %}
-    </section>
-</div>
-
-{% set can_act = dsn.status.value == 'open' and is_granted('PLATFORM.DSN.MANAGE') %}
-<div class="grid">
-    <section class="card card-flush {{ can_act ? 'g-col-4 2xl:g-col-2' : 'g-col-4' }}" aria-labelledby="cand-h">
-        <div class="card-head"><div><h2 id="cand-h">Candidate messages</h2>
-            <p class="muted small">Recent messages to the same recipient, recorded by the delivery daemon as hints only. A recipient address (even with a matching sender) is never enough to apply a DSN automatically.</p></div>
-            <span class="count count-dark">{{ candidates|length }}</span></div>
-        {% if candidates is empty %}<p class="empty">No candidates were recorded.</p>{% else %}
-        <div class="scroll"><table>
-            <thead><tr><th scope="col">Message</th><th scope="col">Client</th><th scope="col">Sender</th><th scope="col">Status</th><th scope="col">Queue id</th><th scope="col">Created</th></tr></thead>
-            <tbody>{% for m in candidates %}
-                <tr><td><code>{{ m.id }}</code><br><small>{{ m.recipient_address }}</small></td><td>{{ m.company_name }}</td><td>{{ m.sender_email }}</td><td>{{ ui.status(m.current_status, 'message_status') }}</td><td>{{ m.postfix_queue_id ?? '—' }}</td><td>{{ m.created_at|ts }}</td></tr>
-            {% endfor %}</tbody>
-        </table></div>
-        {% endif %}
-    </section>
-
-    {% if can_act %}
-    <section class="card card-accent g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="match-h">
-        <h2 id="match-h">Request a match</h2>
-        <form method="post" action="{{ path('dashboard_operator_dsn_match', {id: dsn.id.toRfc4122}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Request this match? The delivery daemon will apply the DSN to that message, which may create a suppression.">
-            {{ ui.csrf() }}
-            <label>Message id <input type="text" name="message_id" required pattern="[0-9a-fA-F-]{36}" list="candidate-ids" autocomplete="off"></label>
-            <datalist id="candidate-ids">{% for m in candidates %}<option value="{{ m.id }}">{{ m.company_name }} – {{ m.recipient_address }}</option>{% endfor %}</datalist>
-            <label>Note (optional) <input type="text" name="note"></label>
-            <button type="submit">Request match</button>
-        </form>
-        <p class="muted small">The request is queued for the delivery daemon, which re-reads the stored DSN and records the outcome. This page never creates message events.</p>
-    </section>
-    <section class="card card-danger g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="dismiss-h">
-        <h2 id="dismiss-h">Dismiss</h2>
-        <form method="post" action="{{ path('dashboard_operator_dsn_dismiss', {id: dsn.id.toRfc4122}) }}" class="stack">
-            {{ ui.csrf() }}
-            <label>Reason (required) <textarea name="reason" required minlength="3" rows="3"></textarea></label>
-            <button type="submit" class="secondary">Dismiss DSN</button>
-        </form>
-    </section>
-    {% endif %}
-</div>
-
-<section class="card" aria-labelledby="raw-h">
-    <details>
-        <summary id="raw-h">Raw DSN as received</summary>
-        <pre class="raw">{{ dsn.rawMessage }}</pre>
-    </details>
-</section>
+        <details><summary>The raw report as received</summary><pre class="raw">{{ dsn.rawMessage }}</pre></details>
+    </div>
+</details>
 {% endblock %}

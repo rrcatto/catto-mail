@@ -1,7 +1,7 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% block title %}Reconciliation {{ client.companyName }}{% endblock %}
+{% block crumb_tail %}Reconciliation: {{ client.companyName }}{% endblock %}
 {% block body %}
-<p class="crumbs"><a href="{{ path('dashboard_operator_usage') }}">Usage and billing</a> › Reconciliation</p>
 <div class="pagehead">
     <div>
         <div class="titleline"><h1>Usage reconciliation: {{ client.companyName }}</h1><span class="st st-{{ r.status == 'consistent' ? 'completed' : 'failed' }}">{{ r.status|label('reconciliation_status') }}</span></div>

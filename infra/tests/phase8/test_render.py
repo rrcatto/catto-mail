@@ -22,6 +22,7 @@ def write_env(values: dict[str, str], directory: Path) -> Path:
 class ProductionRulesTest(unittest.TestCase):
     def test_a_complete_production_configuration_is_valid(self) -> None:
         self.assertEqual([], render.validate(production_values()))
+        self.assertEqual([], render.validate(production_values(ACME_EXTRA_DOMAINS="www.cattomail-ops.net, mail2.cattomail-ops.net")))
 
     def test_unsafe_production_configurations_fail_clearly(self) -> None:
         cases = {
@@ -57,6 +58,7 @@ class ProductionRulesTest(unittest.TestCase):
             "service alias": ({"SMARTHOST_DB_HOST": "db.internal"}, "SMARTHOST_DB_HOST must be 'postgres'"),
             "connect timeout": ({"APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS": "30"}, "APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS"),
             "placeholder sign-in sender": ({"APP_MAIL_FROM": "no-reply@example.com"}, "APP_MAIL_FROM"),
+            "extra certificate name not a host name": ({"ACME_EXTRA_DOMAINS": "www.cattomail-ops.net, not_a_name"}, "ACME_EXTRA_DOMAINS: 'not_a_name'"),
         }
         for name, (override, expected) in cases.items():
             with self.subTest(name):
@@ -133,7 +135,7 @@ class ProductionRenderingTest(unittest.TestCase):
     def test_the_script_is_valid_bash_with_rendered_values(self) -> None:
         self.assertEqual(0, subprocess.run(["bash", "-n", str(self.out / "podman/smarthost-production.sh")]).returncode)
         self.assertIn("I=smarthost\n", self.script)
-        self.assertIn("TAG=0.2.8\n", self.script)
+        self.assertIn("TAG=0.2.9\n", self.script)
         self.assertIn("EGRESS_ENABLED=true\n", self.script)
         self.assertNotRegex(self.script, r"\$\{[A-Z][A-Z0-9_]*\}", "every contract placeholder is rendered")
 

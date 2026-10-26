@@ -33,6 +33,12 @@ final class SettingCatalog
         return $this->entries;
     }
 
+    /** The id of a group on System › Settings (?group=…), also used by the menu. */
+    public static function slug(string $group): string
+    {
+        return 'g-'.trim(strtolower((string) preg_replace('/[^A-Za-z]+/', '-', $group)), '-');
+    }
+
     /** @return array<string, array<string, array<string, mixed>>> group => name => entry, for this environment */
     public function grouped(string $environment): array
     {

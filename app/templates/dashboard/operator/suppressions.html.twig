@@ -3,68 +3,72 @@
 {% block title %}Suppressions{% endblock %}
 {% block body %}
 {% set manage = is_granted('PLATFORM.SUPPRESSION.MANAGE') %}
+{% set views = {active: ['Active', {state: 'active'}], global: ['Global (every client)', {state: 'active', scope: 'global'}], lifted: ['Lifted', {state: 'lifted'}], expired: ['Expired', {state: 'expired'}], all: ['Everything', {state: 'all'}]} %}
 <div class="pagehead">
     <div>
         <h1>Suppressions</h1>
-        <p class="sub">Hard-bounce, complaint and repeated-soft-bounce suppressions are created by the delivery daemon, and recipient global opt-outs by trusted clients. Suppressions are lifted, never deleted.</p>
+        <p class="lead">Addresses and domains that mail is never sent to.{{ ui.tip('Hard bounces, complaints and repeated soft bounces are suppressed by the delivery daemon; recipient global opt-outs come from trusted clients; operators add blocks. A suppression is lifted, never deleted.') }}</p>
     </div>
-    {% if manage %}<div class="actions"><a class="btn" href="#create-block">Create an operator block</a></div>{% endif %}
+    {% if manage %}
+    <details class="actionform actionform-end"><summary class="btn">Add a block</summary>
+        <form method="post" action="{{ path('dashboard_operator_suppression_create') }}" class="stack">
+            {{ ui.csrf() }}
+            <label>Address or domain <input type="text" name="value" required></label>
+            <label>Type <select name="scope_type"><option value="address">Address</option><option value="domain">Domain</option></select></label>
+            <label>Reason <select name="reason">{% for r in operator_reasons %}<option value="{{ r.value }}">{{ r.value|label('suppression_reason') }}</option>{% endfor %}</select></label>
+            <label>Client id (empty: every client) <input type="text" name="client_id" pattern="[0-9a-fA-F-]{36}"></label>
+            <label>Expires in days (empty: never) <input type="number" name="expires_in_days" min="1"></label>
+            <label>Why? (kept in the audit log) <input type="text" name="note" required minlength="3"></label>
+            <button type="submit">Add the block</button>
+        </form>
+    </details>
+    {% endif %}
 </div>
 
-<form method="get" class="filters" role="search" aria-label="Filter suppressions">
-    <label>Address or domain (exact, normalised) <input type="text" name="address" value="{{ filters.address }}" autocomplete="off"></label>
-    {{ ui.select('reason', 'Reason', label_options('suppression_reason'), filters.reason) }}
-    {{ ui.select('state', 'State', {active: 'Active', lifted: 'Lifted', expired: 'Expired'}, filters.state, 'All') }}
-    {{ ui.select('scope', 'Scope', {global: 'Global', client: 'Client-scoped'}, filters.scope, 'All') }}
-    <button type="submit">Apply</button>
-    <a href="{{ path('dashboard_operator_suppressions') }}">Reset</a>
+<form method="get" class="searchline" role="search" aria-label="Find an address or domain">
+    <label class="sr" for="sup-q">Address or domain</label>
+    <input id="sup-q" type="search" name="address" value="{{ filters.address }}" placeholder="Is this address or domain suppressed?" autocomplete="off">
+    <input type="hidden" name="state" value="all">
+    <button type="submit">Find</button>
 </form>
+<nav class="chips" aria-label="Views of the suppressions">
+    {% for key, v in views %}{% set on = not filters.address and filters.state == v[1].state and (v[1].scope ?? '') == filters.scope %}<a class="chip-link" href="{{ path('dashboard_operator_suppressions', v[1]) }}"{% if on %} aria-current="page"{% endif %}>{{ v[0] }}</a>{% endfor %}
+</nav>
+<details class="morefilters"{% if filters.reason %} open{% endif %}>
+    <summary>More filters: reason, scope</summary>
+    <form method="get" class="filters" role="search" aria-label="Filter suppressions">
+        <input type="hidden" name="address" value="{{ filters.address }}">
+        {{ ui.select('reason', 'Reason', label_options('suppression_reason'), filters.reason) }}
+        {{ ui.select('state', 'State', {active: 'Active', lifted: 'Lifted', expired: 'Expired'}, filters.state, 'All') }}
+        {{ ui.select('scope', 'Scope', {global: 'Every client', client: 'One client'}, filters.scope, 'All') }}
+        <button type="submit">Apply</button>
+    </form>
+</details>
 
 <section class="card card-flush" aria-labelledby="sup-list-h">
-    <div class="card-head"><h2 id="sup-list-h">Matching suppressions</h2><span class="count count-dark">{{ page.rows|length }}</span></div>
-    {% if page.rows is empty %}<p class="empty">No suppressions match.</p>{% else %}
-    <div class="scroll"><table>
-        <thead><tr><th scope="col">Address or domain</th><th scope="col">Scope</th><th scope="col">Reason</th><th scope="col">State</th><th scope="col">Provenance</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th><th scope="col">Expires / lifted</th><th scope="col">Lift</th></tr></thead>
+    <div class="card-head"><h2 id="sup-list-h">{{ filters.address ? 'Suppressions of ' ~ filters.address : 'Suppressions' }}</h2></div>
+    {% if page.rows is empty %}<p class="empty">{{ filters.address ? filters.address ~ ' is not suppressed.' : 'No suppressions match.' }}</p>{% else %}
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">Address or domain</th><th scope="col">Reason</th><th scope="col">For</th><th scope="col">{{ ui.sort(listing, 'created', 'Since') }}</th><th scope="col">State</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
         <tbody>{% for s in page.rows %}
             <tr>
                 <td class="url"><strong>{{ s.address_or_domain }}</strong></td>
-                <td>{{ s.client_id ? 'Client: ' ~ s.scope_client : 'Global' }} <small>({{ s.scope_type }})</small></td>
-                <td>{{ s.reason|label('suppression_reason') }}</td>
+                <td>{{ s.reason|label('suppression_reason') }} {{ ui.tip((s.source_client ? 'Reported by ' ~ s.source_client ~ (s.external_reference ? ' (ref ' ~ s.external_reference ~ ')' : '') : (s.source_message_id ? 'From message ' ~ s.source_message_id : (s.reason in ['operator_block', 'client_abuse_block'] ? 'Added by an operator' : 'Recorded by the system'))) ~ ' · ' ~ s.scope_type ~ ' · ' ~ (s.lifted_at ? 'lifted ' ~ (s.lifted_at|ts) : (s.expires_at ? 'expires ' ~ (s.expires_at|ts) : 'never expires'))) }}</td>
+                <td>{{ s.client_id ? s.scope_client : 'Every client' }}</td>
+                <td class="nowrap" title="{{ s.created_at|ts }}">{{ s.created_at|when }}</td>
                 <td>{{ ui.status(s.state, 'none') }}</td>
-                <td>{% if s.source_client %}Reported by {{ s.source_client }}{% if s.external_reference %} (ref {{ s.external_reference }}){% endif %}{% elseif s.source_message_id %}Message <code>{{ s.source_message_id }}</code>{% elseif s.reason in ['operator_block', 'client_abuse_block'] %}Operator{% else %}—{% endif %}</td>
-                <td>{{ s.created_at|ts }}</td>
-                <td>{% if s.lifted_at %}Lifted {{ s.lifted_at|ts }}{% elseif s.expires_at %}Expires {{ s.expires_at|ts }}{% else %}Never expires{% endif %}</td>
                 <td>{% if s.state == 'active' and manage %}
-                    <form method="post" action="{{ path('dashboard_operator_suppression_lift', {id: s.id}) }}" class="formrow" data-controller="confirm" data-confirm-message-value="Lift this suppression of {{ s.address_or_domain }}? The row is kept as history.">
+                    <details class="actionform rowaction"><summary class="btn btn-secondary">Lift</summary>
+                    <form method="post" action="{{ path('dashboard_operator_suppression_lift', {id: s.id}) }}" class="stack" data-controller="confirm" data-confirm-message-value="Lift this suppression of {{ s.address_or_domain }}? The row is kept as history.">
                         {{ ui.csrf() }}<input type="hidden" name="return_address" value="{{ filters.address }}">
-                        <label class="sr" for="note-{{ s.id }}">Reason for lifting</label>
-                        <input id="note-{{ s.id }}" type="text" name="note" required minlength="3" placeholder="Reason (required)">
-                        <button type="submit" class="secondary">Lift</button>
-                    </form>
-                {% else %}—{% endif %}</td>
+                        <label>Why? (kept in the audit log) <input type="text" name="note" required minlength="3"></label>
+                        <button type="submit">Lift the suppression</button>
+                    </form></details>
+                {% endif %}</td>
             </tr>
         {% endfor %}</tbody>
     </table></div>
     {% endif %}
 </section>
 {{ ui.pager(page, 'suppressions') }}
-
-{% if manage %}
-<div class="grid">
-    <section class="card g-col-4 lg:g-col-2" id="create-block" aria-labelledby="block-h">
-        <h2 id="block-h">Create an operator block</h2>
-        <p class="muted small">An operator block stops all mail to an address or a whole domain, globally or for one client. The note is kept in the audit log.</p>
-        <form method="post" action="{{ path('dashboard_operator_suppression_create') }}" class="form-grid">
-            {{ ui.csrf() }}
-            <label>Address or domain <input type="text" name="value" required></label>
-            <label>Type <select name="scope_type"><option value="address">Address</option><option value="domain">Domain</option></select></label>
-            <label>Reason <select name="reason">{% for r in operator_reasons %}<option value="{{ r.value }}">{{ r.value|label('suppression_reason') }}</option>{% endfor %}</select></label>
-            <label>Client id (empty = global) <input type="text" name="client_id" pattern="[0-9a-fA-F-]{36}"></label>
-            <label>Expires in days (empty = never) <input type="number" name="expires_in_days" min="1"></label>
-            <label>Reason note (required) <input type="text" name="note" required minlength="3"></label>
-            <div class="form-actions span-all"><button type="submit">Create block</button></div>
-        </form>
-    </section>
-</div>
-{% endif %}
 {% endblock %}

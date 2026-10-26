@@ -25,9 +25,10 @@ catto-mail does the mail infrastructure work:</p>
 </ol>
 <h2>Finding your way in the dashboard</h2>
 <ul>
-<li><strong>The round buttons in the top bar</strong>, next to the logo, are the areas: Overview, Mail flow (Delivery, Suppressions, Unmatched DSNs, Webhooks), Clients (Clients, Abuse &amp; reputation, Usage &amp; billing, Address batches), System (System setup, Diagnostics, Audit log) and Access (Users, Roles &amp; permissions), then Help. Point at a button to see its name. A number on a button counts what needs a look there. You see only the areas and pages your permissions allow.</li>
-<li><strong>The pills</strong> after them (on a smaller screen, on a second row) are the pages of the current area. On an overview they choose the period instead: 24 hours, 7, 30 or 90 days, compared with the period before.</li>
-<li><strong>At the top right</strong>: search (an ID, an email address, a domain, an external reference or a name), the delivery mode, the red <em>Stop sending</em> button, what needs attention, and your account.</li>
+<li><strong>The menu bar</strong> at the top holds the areas: Overview, Mail flow, Clients, System, Access and Help. Point at an area (or move to it with the keyboard) and its pages open: Mail flow has Delivery, Suppressions, Unmatched bounces and Webhooks, for example. Pages with a small arrow open their own views one step further, such as <em>Failed deliveries</em> under Webhooks, every step of System setup, or <em>Sign-in emails</em> under the Audit log. A number counts what needs a look. On a narrow screen the bar folds behind the <em>Menu</em> button. You see only the areas, pages and views your permissions allow.</li>
+<li><strong>Above every page title</strong>, a breadcrumb says where you are (for example System › Audit log).</li>
+<li><strong>On a page</strong>, what needs you comes first. The <strong>ⓘ</strong> buttons explain a figure or a column when you point at them; the chips under the title switch between ready-made views, and <em>More filters</em> opens the full filter form.</li>
+<li><strong>At the top right</strong>: search (an ID, an email address, a domain, an external reference or a name), the delivery mode, the <em>Stop sending</em> button and your account.</li>
 <li><strong>A client's workspace</strong> (its Overview, Sending, Validation, Settings and Usage) is what the client's own users see; operators open it from the client's page.</li>
 <li><strong>Times</strong> are shown in the installation's time zone ({{ time_zone_label() }}, set by <code>SMARTHOST_TIMEZONE</code>), and quotas, usage and billing count its calendar days and months.</li>
 </ul>

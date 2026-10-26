@@ -46,26 +46,19 @@ final class OperatorOverview
         $complaint = $this->thresholds->of(ClientAlertMetric::ComplaintRate);
         $health = $this->health();
 
+        // The overview shows what needs attention and the key figures (owner decision 2026-10-25);
+        // workers and queues, the submission rate and suppressions are on their own pages.
         return [
             'period' => $period,
             'periods' => array_map(static fn (array $p): string => $p[0], OverviewPeriod::PERIODS),
-            'o' => $o,
             'kpis' => TrendCharts::kpis($t, $period),
             'flow' => TrendCharts::flow($t, $period),
-            'rate' => $this->submissionChart($period),
-            'scatter' => $this->scatter($t['jobs'], $period, $hard),
-            'validation' => TrendCharts::validation($t['validation']),
             'rates' => $this->rates($t['rates'], $hard, $complaint),
             'thresholds' => ['hard' => $hard, 'complaint' => $complaint],
             'health' => $health,
             'attention' => $this->attention($o, $health),
-            'activity' => $this->security->isGranted('PLATFORM.AUDIT.VIEW') ? $this->activity() : null,
         ];
     }
-
-
-
-
 
     /**
      * Messages submitted to Postfix per minute in each bucket of the period (typical and peak),
@@ -98,51 +91,6 @@ final class OperatorOverview
                 'ceiling' => $ceiling > 0 ? $ceiling : null],
         ];
     }
-
-    /**
-     * Send jobs of the period by hard-bounce rate; the four clients with the most mail get
-     * their own colour, the others share one.
-     *
-     * @param array{warning: float, critical: float} $hard
-     *
-     * @return array<string, mixed>
-     */
-    private function scatter(array $jobs, OverviewPeriod $p, array $hard): array
-    {
-        $volume = [];
-        foreach ($jobs as $j) {
-            $volume[$j['client_id']] = ['name' => $j['company_name'], 'n' => ($volume[$j['client_id']]['n'] ?? 0) + (int) $j['reached_postfix']];
-        }
-        uasort($volume, static fn (array $a, array $b): int => $b['n'] <=> $a['n']);
-        $series = [];
-        $map = [];
-        $rank = 0;
-        foreach ($volume as $clientId => $v) {
-            $own = $rank < \count(self::CLIENT_COLOURS);
-            $key = $own ? (string) $clientId : 'other';
-            [$colour, $edge] = $own ? self::CLIENT_COLOURS[$rank] : self::OTHER_COLOUR;
-            $series[$key] ??= ['label' => $own ? $v['name'] : 'Other clients', 'colour' => $colour, 'edge' => $edge, 'points' => []];
-            $map[$clientId] = $key;
-            ++$rank;
-        }
-        $above = 0;
-        foreach ($jobs as $j) {
-            $rate = 100.0 * (int) $j['hard_bounced'] / (int) $j['reached_postfix'];
-            $above += $rate >= $hard['warning'] ? 1 : 0;
-            $series[$map[$j['client_id']]]['points'][] = ['x' => (new \DateTimeImmutable((string) $j['created_at']))->getTimestamp() * 1000,
-                'y' => round($rate, 2), 'ref' => (string) $j['external_reference'], 'n' => (int) $j['reached_postfix'], 'client' => $j['company_name']];
-        }
-        $end = $p->since->modify(\sprintf('+%d %s', $p->buckets, $p->unit));
-
-        return [
-            'legend' => array_map(static fn (array $s): array => ['label' => $s['label'], 'colour' => $s['colour'], 'edge' => $s['edge']], array_values($series)),
-            'jobs' => \count($jobs),
-            'above' => $above,
-            'chart' => ['series' => array_values($series), 'min' => $p->since->getTimestamp() * 1000, 'max' => $end->getTimestamp() * 1000,
-                'warning' => $hard['warning'], 'critical' => $hard['critical'], 'hourly' => 'hour' === $p->unit, 'timeZone' => $p->zone->getName()],
-        ];
-    }
-
 
     /**
      * @param array{warning: float, critical: float} $hard
@@ -243,7 +191,7 @@ final class OperatorOverview
         }
         if ($can('PLATFORM.DSN.VIEW') && ($o['unmatched_dsns']['open'] ?? 0) > 0) {
             $n = $o['unmatched_dsns']['open'];
-            $add('info', 'inbox', \sprintf('%d unmatched DSN%s to review', $n, 1 === $n ? '' : 's'), 'Bounces not tied to a message', $url('dashboard_operator_dsns'));
+            $add('info', 'inbox', \sprintf('%d unmatched bounce%s to review', $n, 1 === $n ? '' : 's'), 'Mail flow › Unmatched bounces', $url('dashboard_operator_dsns'));
         }
         if ($can('PLATFORM.CLIENT.VIEW') && $o['new_sign_ups'] > 0) {
             $n = $o['new_sign_ups'];
@@ -263,21 +211,5 @@ final class OperatorOverview
         usort($items, static fn (array $a, array $b): int => $order[$a['tone']] <=> $order[$b['tone']]);
 
         return $items;
-    }
-
-    /** @return list<array{who: string, actor: string, action: string, target: string, at: mixed}> */
-    private function activity(): array
-    {
-        return array_map(static function (array $a): array {
-            $actor = match ($a['actor_type']) {
-                'user' => (string) ($a['actor_email'] ?? 'A user'),
-                'api_key' => 'An API key',
-                default => 'System',
-            };
-
-            return ['who' => 'user' === $a['actor_type'] ? DashboardTwigExtension::initials(strtok($actor, '@') ?: $actor) : ('api_key' === $a['actor_type'] ? 'API' : 'SY'),
-                'actor' => $actor, 'action' => ucfirst(str_replace(['.', '_'], [': ', ' '], (string) $a['action'])),
-                'target' => str_replace('_', ' ', (string) $a['target_type']), 'at' => $a['occurred_at']];
-        }, $this->read->recentActivity(5));
     }
 }

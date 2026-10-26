@@ -7,39 +7,33 @@
 <div class="pagehead">
     <div>
         <h1>API keys</h1>
-        <p class="sub">Your applications authenticate to the API with these keys (<code>Authorization: Bearer shk_…</code>). Smarthost stores only a hash: a key is shown once, when it is created. Revoked and expired keys fail with 401.</p>
+        <p class="lead">{{ keys|filter(k => k.usable)|length }} usable key{{ keys|filter(k => k.usable)|length == 1 ? '' : 's' }} of at most {{ max.effective }}.{{ ui.tip('Your applications authenticate with these keys (Authorization: Bearer shk_…). Only a hash is stored: a key is shown once, when it is created. Revoked and expired keys fail with 401. To rotate without downtime: create the replacement, deploy it, check that its last-used time appears, then revoke the old key.') }}</p>
     </div>
-    <div class="actions"><a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a></div>
-</div>
-
-{% set side = not may_manage or client.status.value != 'closed' %}
-<div class="grid">
-    <section class="card card-flush {{ side ? 'g-col-4 2xl:g-col-3' : 'g-col-4' }}" aria-labelledby="keys-h">
-        <div class="card-head"><h2 id="keys-h">Keys</h2><p class="muted small">Usable keys: {{ keys|filter(k => k.usable)|length }} of at most {{ max.effective }}.</p></div>
-        {% if keys is empty %}<p class="empty">No API keys yet.</p>{% else %}
-        <div class="scroll">
-        <table>
-            <thead><tr><th scope="col">Name</th><th scope="col">Prefix</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">State</th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
-            <tbody>{% for k in keys %}<tr><td><strong>{{ k.name ?? '—' }}</strong></td><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.created_at|ts }}</td><td>{{ k.last_used_at|ts }}</td><td>{{ k.expires_at|ts }}</td>
-                <td>{% if k.revoked_at %}<span class="st st-disabled">Revoked</span> <small>{{ k.revoked_at|ts }}</small>{% elseif k.usable %}<span class="st st-active">Usable</span>{% else %}<span class="st st-pending">Expired</span>{% endif %}</td>
-                {% if may_manage %}<td>{% if k.usable %}<form method="post" action="{{ path('dashboard_client_api_key_revoke', {clientId: cid, keyId: k.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Revoke {{ k.key_prefix }}…? Requests with it fail at once.">{{ ui.csrf() }}<button type="submit" class="danger">Revoke</button></form>{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody>
-        </table>
-        </div>
+    <div class="actionrow">
+        <a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a>
+        {% if may_manage and client.status.value != 'closed' %}
+        <details class="actionform"><summary class="btn">Create an API key</summary>
+            <form method="post" action="{{ path('dashboard_client_api_key_create', {clientId: cid}) }}" class="stack">
+                {{ ui.csrf() }}
+                <label>Descriptive name <input type="text" name="name" maxlength="100" placeholder="e.g. production server, rotation 2026-10"></label>
+                <label>Expires after (optional; the key stops working at the end of that day, {{ time_zone_abbreviation() }}) <input type="date" name="expires_on"></label>
+                <button type="submit">Create key (shown once)</button>
+            </form>
+        </details>
         {% endif %}
-    </section>
-    {% if may_manage and client.status.value != 'closed' %}
-    <section class="card card-accent g-col-4 2xl:g-col-1" aria-labelledby="create-h">
-        <h2 id="create-h">Create an API key</h2>
-        <form method="post" action="{{ path('dashboard_client_api_key_create', {clientId: cid}) }}" class="stack">
-            {{ ui.csrf() }}
-            <label>Descriptive name <input type="text" name="name" maxlength="100" placeholder="e.g. production server, rotation 2026-10"></label>
-            <label>Expires after (optional; the key stops working at the end of that day, {{ time_zone_abbreviation() }}) <input type="date" name="expires_on"></label>
-            <button type="submit">Create key (shown once)</button>
-        </form>
-        <p class="muted small">Rotation without downtime: create the replacement, deploy it, check that its “last used” time appears, then revoke the old key.</p>
-    </section>
-    {% elseif not may_manage %}
-    <section class="card g-col-4 2xl:g-col-1"><p class="muted">Client admins create and revoke keys.</p></section>
-    {% endif %}
+    </div>
 </div>
+{% set usable = keys|filter(k => k.usable) %}{% set old = keys|filter(k => not k.usable) %}
+<section class="card card-flush" aria-labelledby="keys-h">
+    <div class="card-head"><h2 id="keys-h">Keys</h2>{% if not may_manage %}{{ ui.tip('Client admins create and revoke keys.') }}{% endif %}</div>
+    {% if usable is empty %}<p class="empty">No usable API key yet.</p>{% else %}
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Last used</th><th scope="col">Expires</th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
+        <tbody>{% for k in usable %}<tr><td><strong>{{ k.name ?? '—' }}</strong></td><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.last_used_at ? k.last_used_at|when : 'never' }}</td><td>{{ k.expires_at ? k.expires_at|when : 'never' }}</td>
+            {% if may_manage %}<td><form method="post" action="{{ path('dashboard_client_api_key_revoke', {clientId: cid, keyId: k.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Revoke {{ k.key_prefix }}…? Requests with it fail at once.">{{ ui.csrf() }}<button type="submit" class="secondary">Revoke</button></form></td>{% endif %}</tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% if old is not empty %}<details class="card-foot"><summary>{{ old|length }} revoked or expired key{{ old|length == 1 ? '' : 's' }}</summary>
+        <div class="scroll"><table class="list"><tbody>{% for k in old %}<tr><td>{{ k.name ?? '—' }}</td><td><code>{{ k.key_prefix }}…</code></td><td>{{ k.revoked_at ? 'revoked ' ~ k.revoked_at|when : 'expired ' ~ k.expires_at|when }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+</section>
 {% endblock %}

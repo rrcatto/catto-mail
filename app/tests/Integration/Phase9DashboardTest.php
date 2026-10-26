@@ -26,9 +26,15 @@ final class Phase9DashboardTest extends DashboardTestCase
         $id = $client->getId()->toRfc4122();
         $this->signIn($this->newUser(true));
         $page = '/dashboard/operator/clients/'.$id;
-        $html = self::text($this->page($page));
-        foreach (['Lifecycle', 'Service policy', 'Limits and quotas', 'Reputation', 'API keys', 'Private notes', 'Audit history', 'Approve', 'Reject and close'] as $needle) {
-            self::assertStringContainsString($needle, $html);
+        // The client's page is split into tabs (owner decision 2026-10-25); each holds its part.
+        $tabs = ['' => ['Summary', 'Limits & usage', 'Reputation', 'Domains & webhooks', 'Keys & members', 'Policy & opt-outs', 'History', 'Status', 'Private notes', 'Approve', 'Reject and close'],
+            'limits' => ['Limits', 'Quotas and usage'], 'reputation' => ['Last evaluation', 'Alerts'], 'sending' => ['Sending domains', 'Webhook endpoints'],
+            'access' => ['API keys', 'Members'], 'policy' => ['Service policy', 'Recipient global opt-outs'], 'history' => ['History']];
+        foreach ($tabs as $tab => $needles) {
+            $html = self::text($this->page($tab ? "$page?tab=$tab" : $page));
+            foreach ($needles as $needle) {
+                self::assertStringContainsString($needle, $html, $tab ?: 'summary');
+            }
         }
         self::assertStringContainsString('pending approval', strtolower(self::text($this->page('/dashboard/operator/clients?status=pending_approval&sort=status_changed&dir=asc'))));
 
@@ -40,21 +46,21 @@ final class Phase9DashboardTest extends DashboardTestCase
         self::assertSame('suspended', Db::owner()->fetchOne('SELECT status FROM clients WHERE id = ?', [$id]));
         self::assertSame(['client.approved', 'client.suspended'], Db::owner()->fetchFirstColumn(
             "SELECT action FROM audit_log WHERE target_id = ? AND action IN ('client.approved', 'client.suspended') ORDER BY occurred_at", [$id]));
-        $html = self::text($this->page($page));
+        $html = self::text($this->page("$page?tab=history"));
         self::assertStringContainsString('complaint spike', $html, 'the reason appears in the audit history');
 
         // Limits, notes and the key lifecycle.
-        $this->submit($page, "/dashboard/operator/clients/$id/limits", ['send_recipients_per_day' => '5000', 'max_api_keys' => '3', 'note' => 'plan S']);
+        $this->submit("$page?tab=limits", "/dashboard/operator/clients/$id/limits", ['send_recipients_per_day' => '5000', 'max_api_keys' => '3', 'note' => 'plan S']);
         self::assertSame(5000, (int) Db::owner()->fetchOne('SELECT send_recipients_per_day FROM client_limits WHERE client_id = ?', [$id]));
         $this->submit($page, "/dashboard/operator/clients/$id/notes", ['note' => 'Contract signed 2026-10-01; abuse contact verified by phone.']);
         self::assertStringContainsString('abuse contact verified by phone', self::text($this->page($page)));
-        $r = $this->submit($page, "/dashboard/operator/clients/$id/api-keys", ['name' => 'production server', 'expires_on' => date('Y-m-d', strtotime('+90 days'))]);
+        $r = $this->submit("$page?tab=access", "/dashboard/operator/clients/$id/api-keys", ['name' => 'production server', 'expires_on' => date('Y-m-d', strtotime('+90 days'))]);
         self::assertSame(200, $r->getStatusCode());
         self::assertSame(1, preg_match('/shk_[A-Za-z0-9_-]{43}/', (string) $r->getContent(), $m));
         self::assertStringContainsString('no-store', (string) $r->headers->get('Cache-Control'));
-        self::assertStringNotContainsString($m[0], (string) $this->page($page)->getContent(), 'shown once only');
+        self::assertStringNotContainsString($m[0], (string) $this->page("$page?tab=access")->getContent(), 'shown once only');
         $keyId = Db::owner()->fetchOne('SELECT id FROM api_keys WHERE client_id = ?', [$id]);
-        $this->submit($page, "/dashboard/operator/clients/$id/api-keys/$keyId/revoke");
+        $this->submit("$page?tab=access", "/dashboard/operator/clients/$id/api-keys/$keyId/revoke");
         self::assertNotNull(Db::owner()->fetchOne('SELECT revoked_at FROM api_keys WHERE id = ?', [$keyId]));
     }
 
@@ -67,7 +73,7 @@ final class Phase9DashboardTest extends DashboardTestCase
         $page = '/dashboard/operator/clients/'.$id;
         $html = self::text($this->page($page));
         self::assertStringContainsString('needs PLATFORM.CLIENT.RESTRICT', $html);
-        self::assertStringNotContainsString('Change limits', $html);
+        self::assertStringNotContainsString('Change limits', self::text($this->page("$page?tab=limits")));
         // The permission check answers 403 before the form (or its CSRF token) is even read.
         foreach (['/limits' => ['note' => 'x'], '/notes' => ['note' => 'x'], '/api-keys' => [], '/account' => []] as $suffix => $fields) {
             $this->browser->request('POST', $page.$suffix, $fields + ['_token' => 'any']);
@@ -104,7 +110,7 @@ final class Phase9DashboardTest extends DashboardTestCase
         self::assertSame(1, preg_match('/shk_[A-Za-z0-9_-]{43}/', (string) $r->getContent()));
         $html = self::text($this->page("/dashboard/c/$id/api-keys"));
         self::assertStringContainsString('ci', $html);
-        self::assertStringContainsString('Usable keys: 1 of at most 10', $html);
+        self::assertStringContainsString('1 usable key of at most 10', $html);
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'api_key.created' AND actor_id = ?", [$admin->getId()->toRfc4122()]));
     }
 
@@ -120,7 +126,7 @@ final class Phase9DashboardTest extends DashboardTestCase
         $this->submit('/dashboard/operator/alerts', '/dashboard/operator/alerts/evaluate');
         $html = self::text($this->page('/dashboard/operator/alerts?client='.$id));
         self::assertStringContainsString('Hard-bounce rate', $html);
-        self::assertStringContainsString('12.00 / 120.00', $html, 'numerator and denominator');
+        self::assertStringContainsString('12.00 of 120.00', $html, 'numerator and denominator');
         $alert = Db::owner()->fetchOne("SELECT id FROM client_alerts WHERE client_id = ? AND metric = 'hard_bounce_rate' AND window_hours = 24", [$id]);
         $this->submit('/dashboard/operator/alerts?client='.$id, "/dashboard/operator/alerts/$alert/acknowledge", ['note' => 'throttled the client']);
         self::assertSame('throttled the client', Db::owner()->fetchOne('SELECT acknowledgement_note FROM client_alerts WHERE id = ?', [$alert]));

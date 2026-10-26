@@ -11,8 +11,8 @@
 </div>
 <div class="grid">
 {% for group, topics in groups %}
-    <section class="card card-flush g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="help-g{{ loop.index }}">
-        <div class="card-head"><h2 id="help-g{{ loop.index }}" class="titleline">{{ icon.i(icons[group] ?? 'help', 20) }}{{ group }}</h2><span class="count count-dark">{{ topics|length }}</span></div>
+    <section class="card card-flush g-col-4 md:g-col-2 xl:g-col-1" aria-labelledby="{{ help_anchor(group) }}">
+        <div class="card-head"><h2 id="{{ help_anchor(group) }}" class="titleline">{{ icon.i(icons[group] ?? 'help', 20) }}{{ group }}</h2><span class="count count-dark">{{ topics|length }}</span></div>
         <ul class="result-list">{% for slug, title in topics %}<li><a href="{{ path('dashboard_operator_help_topic', {topic: slug}) }}"><span class="result-text"><span class="result-title">{{ title }}</span></span>{{ icon.i('chevron', 16) }}</a></li>{% endfor %}</ul>
     </section>
 {% endfor %}
