@@ -34,7 +34,7 @@
             <p>Open an account yourself: give your organisation and your email address, and confirm the link we send. New accounts start with low sending limits.</p>
             <p><a href="{{ path('dashboard_sign_up') }}">Sign up</a> · <a href="{{ path('dashboard_login') }}">Sign in</a></p>
             {% else %}
-            <p>There is no public sign-up. The administrator creates the accounts.</p>
+            <p>There is no public sign-up: accounts are opened by invitation.</p>
             <p><a href="{{ path('dashboard_login') }}">Sign in</a></p>
             {% endif %}
         </section>

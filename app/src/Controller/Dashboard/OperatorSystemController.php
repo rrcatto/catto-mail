@@ -263,13 +263,17 @@ final class OperatorSystemController extends AbstractController
             $steps[$key]['check_rows'] = $sel;
             $steps[$key]['problem'] = $problem;
             $steps[$key]['topic'] = $topics[0] ?? null;
-            // Ready to mark done: its checks pass (the welcome step has none to pass).
-            $steps[$key]['view'] = 'done' === $s['state'] ? 'done'
-                : (('pass' === $worst || ('none' === $worst && 'welcome' === $key)) ? 'ready' : 'todo');
+            $steps[$key]['needs_you'] = \in_array($key, SetupWizard::NEEDS_YOU, true);
+            // A step that needs the administrator is ready to mark done when its checks pass; one
+            // checked automatically is done while its checks pass (owner decision 2026-10-27).
+            $steps[$key]['view'] = $steps[$key]['needs_you']
+                ? ('done' === $s['state'] ? 'done' : ('pass' === $worst ? 'ready' : 'todo'))
+                : (('pass' === $worst || ('none' === $worst && 'welcome' === $key)) ? 'done' : ('none' === $worst ? 'waiting' : 'todo'));
         }
 
         return $this->render('dashboard/operator/setup/index.html.twig', [
-            'section' => 'setup', 'steps' => $steps, 'groups' => SetupWizard::GROUPS, 'current' => $this->wizard->current(),
+            'section' => 'setup', 'steps' => $steps, 'needs_you' => SetupWizard::NEEDS_YOU,
+            'automatic' => array_values(array_diff(array_keys(SetupWizard::STEPS), SetupWizard::NEEDS_YOU)), 'current' => $this->wizard->current(),
             'complete' => $this->wizard->isComplete(), 'agent_age' => $this->state->agentAge()]);
     }
 

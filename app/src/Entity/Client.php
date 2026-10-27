@@ -34,12 +34,6 @@ class Client
     #[ORM\Column(type: 'text', enumType: ClientOrigin::class)]
     private ClientOrigin $origin = ClientOrigin::Operator;
 
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $billingContactEmail = null;
-
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $abuseContactEmail = null;
-
     #[ORM\Column(type: 'timestamptz')]
     private \DateTimeImmutable $statusChangedAt;
 
@@ -53,6 +47,10 @@ class Client
     /** Whether approval needs an acceptance of the policy version in force (Phase 9). */
     #[ORM\Column(type: 'boolean')]
     private bool $policyAcceptanceRequired = true;
+
+    /** Created by an operator for a manager who must accept the policy: it opens when they accept (2026-10-27). */
+    #[ORM\Column(type: 'boolean')]
+    private bool $opensOnPolicyAcceptance = false;
 
     public function __construct(
         #[ORM\Column(type: 'text')]
@@ -75,26 +73,28 @@ class Client
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function canSubmitGlobalSuppressions(): bool { return $this->canSubmitGlobalSuppressions; }
     public function getOrigin(): ClientOrigin { return $this->origin; }
-    public function getBillingContactEmail(): ?string { return $this->billingContactEmail; }
-    public function getAbuseContactEmail(): ?string { return $this->abuseContactEmail; }
     public function getStatusChangedAt(): \DateTimeImmutable { return $this->statusChangedAt; }
     public function getApprovedAt(): ?\DateTimeImmutable { return $this->approvedAt; }
     public function getClosedAt(): ?\DateTimeImmutable { return $this->closedAt; }
     public function isPolicyAcceptanceRequired(): bool { return $this->policyAcceptanceRequired; }
+    public function opensOnPolicyAcceptance(): bool { return $this->opensOnPolicyAcceptance; }
 
     /** Only an operator changes this (smarthost:client:global-suppressions, audited). */
     public function setCanSubmitGlobalSuppressions(bool $allowed): void { $this->canSubmitGlobalSuppressions = $allowed; }
 
     public function setOrigin(ClientOrigin $origin): void { $this->origin = $origin; }
     public function setPolicyAcceptanceRequired(bool $required): void { $this->policyAcceptanceRequired = $required; }
+    public function setOpensOnPolicyAcceptance(bool $opens): void { $this->opensOnPolicyAcceptance = $opens; }
 
-    /** Account metadata (App\Client\ClientLifecycle::updateAccount, audited). */
-    public function updateAccount(string $companyName, string $contactEmail, ?string $billingContactEmail, ?string $abuseContactEmail, string $plan): void
+    /** The organisation's name (App\Client\ClientLifecycle::rename, audited). */
+    public function rename(string $companyName): void
     {
         $this->companyName = $companyName;
-        $this->contactEmail = $contactEmail;
-        $this->billingContactEmail = $billingContactEmail;
-        $this->abuseContactEmail = $abuseContactEmail;
+    }
+
+    /** The plan whose limits the client has (App\Client\PlanCatalog::assign, audited). */
+    public function setPlan(string $plan): void
+    {
         $this->plan = $plan;
     }
 

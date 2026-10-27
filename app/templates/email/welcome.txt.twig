@@ -1,0 +1,10 @@
+Your {{ site_name() }} account for {{ organisation }}
+
+The operator of {{ site_name() }} opened an account for {{ organisation }} and made you the person
+who manages it. There is no password: you sign in with a link like this one.{% if must_accept %} First you accept
+the service policy; then the account opens.{% endif %} The dashboard then shows the next steps.
+The link works once and expires in {{ minutes }} minutes:
+
+{{ url }}
+
+When it has expired, ask for a new one at {{ sign_in }} with this address.

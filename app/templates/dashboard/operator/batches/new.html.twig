@@ -1,0 +1,33 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Upload a list{% endblock %}
+{% block crumb_tail %}Upload a list{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Upload a list</h1>
+    <p class="lead">The next page shows what will be imported before anything is stored: duplicates and rows that are not addresses are listed, never dropped silently. {{ ui.help('uploading-lists', 'Help: uploading lists') }}</p>
+    <form method="post" action="{{ path('dashboard_operator_batch_preview') }}" enctype="multipart/form-data" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">File</span>
+            <span class="field-help">TXT (one address per line) or CSV (with a header row): at most 10 MiB and {{ max|number_format }} addresses.</span>
+            <input type="file" name="file" accept=".txt,.csv,text/plain,text/csv" required></label>
+        <label class="field"><span class="field-label">For which client</span>
+            <span class="field-help">Its quotas, sending domains and suppressions apply.</span>
+            <select name="client" required><option value="">Choose…</option>{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.status }})</option>{% endfor %}</select></label>
+        <label class="field"><span class="field-label">Name of the list</span>
+            <input name="name" required maxlength="200"></label>
+        <fieldset class="field"><legend>What it is for</legend>
+            <label class="choice"><input type="radio" name="purpose" value="validation" checked><span class="choice-text"><span class="choice-title">Check the addresses</span><span class="choice-help">Validation, and test sends.</span></span></label>
+            <label class="choice"><input type="radio" name="purpose" value="repermission"><span class="choice-text"><span class="choice-title">Ask an old list again</span><span class="choice-help">Re-permission: ask whether they still want mail.</span></span></label>
+        </fieldset>
+        <label class="field"><span class="field-label">List identifier <span class="muted">(needed to ask again, and for any send beyond a test)</span></span>
+            <span class="field-help">The List-Id the messages carry, for example news.example.org.</span>
+            <input name="list_id" maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"></label>
+        <label class="field"><span class="field-label">Where the list comes from <span class="muted">(optional)</span></span>
+            <input name="source" maxlength="500" placeholder="e.g. export of the 2019 newsletter list"></label>
+        <label class="field"><span class="field-label">Description <span class="muted">(optional)</span></span>
+            <textarea name="description" maxlength="2000" rows="2"></textarea></label>
+        <div class="form-actions"><button type="submit">Preview</button> <a class="btn btn-secondary" href="{{ path('dashboard_operator_batches') }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

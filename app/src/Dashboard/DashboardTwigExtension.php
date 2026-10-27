@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Dashboard;
 
+use App\Help\HelpCatalog;
 use App\Util\InstallationTime;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Twig\Attribute\AsTwigFilter;
@@ -37,6 +38,13 @@ final class DashboardTwigExtension
     }
 
     /** Whether the public sign-up page exists (APP_PUBLIC_ONBOARDING_ENABLED, owner decision 2026-10-11). */
+    /** A help topic's title, for links to it ("Help: DNS", not the topic's address). */
+    #[AsTwigFunction('help_title')]
+    public function helpTitle(string $topic): string
+    {
+        return HelpCatalog::title($topic) ?? str_replace('-', ' ', $topic);
+    }
+
     #[AsTwigFunction('public_sign_up_open')]
     public function publicSignUpOpen(): bool
     {

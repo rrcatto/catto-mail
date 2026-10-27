@@ -342,7 +342,7 @@ final class ClientReadModel
     {
         $where = ['(s.client_id = ? OR (s.client_id IS NULL AND s.source_client_id = ?))'];
         $params = [$clientId, $clientId];
-        self::filterEquals($where, $params, 's.address_or_domain', self::normalizedFilter($address));
+        self::filterCovering($where, $params, self::normalizedFilter($address));
         if ($activeOnly) {
             $where[] = 's.lifted_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())';
         }
@@ -374,7 +374,7 @@ final class ClientReadModel
     }
 
     /** @return list<array<string, mixed>> */
-    public function sendingDomains(string $clientId): array
+    public function sendingDomains(string $clientId, ?string $domainId = null): array
     {
         return $this->connection->fetchAllAssociative(<<<'SQL'
             SELECT d.id::text AS id, d.domain, d.status, d.verification_token, d.verified_at, d.last_checked_at, d.last_check_error,
@@ -385,8 +385,8 @@ final class ClientReadModel
                    SELECT action, status, requested_at, finished_at FROM system_requests
                     WHERE action IN ('dkim.generate', 'dkim.activate') AND params_json->>'sending_domain_id' = d.id::text
                     ORDER BY requested_at DESC LIMIT 1) r ON true
-             WHERE d.client_id = ? ORDER BY d.domain
-            SQL, [$clientId]);
+             WHERE d.client_id = ? AND (?::uuid IS NULL OR d.id = ?::uuid) ORDER BY d.domain
+            SQL, [$clientId, $domainId, $domainId]);
     }
 
     /**
@@ -574,6 +574,27 @@ final class ClientReadModel
      * "Reader@Example.COM" finds "Reader@example.com". Unusable input is kept as
      * typed (it then simply matches nothing).
      */
+    /**
+     * An address or domain filter on suppressions: the value itself, and for an address also the
+     * domain row that covers it, so searching an address shows every block that stops it.
+     *
+     * @param list<string> $where
+     * @param list<mixed>  $params
+     */
+    public static function filterCovering(array &$where, array &$params, ?string $value): void
+    {
+        if (null === $value) {
+            return;
+        }
+        if (str_contains($value, '@')) {
+            $where[] = "(s.address_or_domain = ? OR (s.scope_type = 'domain' AND s.address_or_domain = ?))";
+            array_push($params, $value, AddressNormalizer::domainOf($value));
+        } else {
+            $where[] = 's.address_or_domain = ?';
+            $params[] = $value;
+        }
+    }
+
     public static function normalizedFilter(?string $value): ?string
     {
         if (null === $value || '' === trim($value)) {

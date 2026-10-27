@@ -24,107 +24,134 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 final class Navigation
 {
     /**
-     * Operator areas: key => [label, icon, pages]. A page is [section, label, route, permission
+     * Operator areas: key => [label, icon, pages]. A page is [section, label, icon, route, permission
      * (null: every operator), views]. A view is [label, route (null: the page's), parameters
-     * (`_fragment` for a place on the page), permission (null: the page's)]. The System setup
-     * steps and the Help topics are added by build().
+     * (`_fragment` for a place on the page), permission (null: the page's), icon]. The System setup
+     * steps and the Help topics are added by build(). Every area, page and view has its Bootstrap
+     * Icons icon (owner decision 2026-10-27; dashboard/_icons.html.twig).
      */
     private const OPERATOR = [
         'overview' => ['Overview', 'overview', [
-            ['overview', 'Dashboard', 'dashboard_operator_overview', 'PLATFORM.OVERVIEW.VIEW', [
-                ['Needs attention', null, ['_fragment' => 'attention'], null],
+            ['overview', 'Dashboard', 'speedometer2', 'dashboard_operator_overview', 'PLATFORM.OVERVIEW.VIEW', [
+                ['Needs attention', null, ['_fragment' => 'attention'], null, 'exclamation-circle'],
             ]],
-            ['search', 'Search', 'dashboard_search', null, []],
+            ['search', 'Search', 'search', 'dashboard_search', null, []],
         ]],
         'mail' => ['Mail flow', 'mail', [
-            ['system', 'Delivery', 'dashboard_operator_system', 'PLATFORM.SYSTEM.VIEW', [
-                ['Delivery mode and emergency stop', null, ['_fragment' => 'delivery-h'], null],
-                ['Postfix queue', null, ['_fragment' => 'queue-h'], null],
-                ['Host requests', 'dashboard_operator_system_requests', [], null],
+            ['system', 'Delivery', 'truck', 'dashboard_operator_system', 'PLATFORM.SYSTEM.VIEW', [
+                ['Delivery mode and emergency stop', null, ['_fragment' => 'delivery-h'], null, 'toggles'],
+                ['Postfix queue', null, ['_fragment' => 'queue-h'], null, 'stack'],
+                ['Host requests', 'dashboard_operator_system_requests', [], null, 'hdd-network'],
             ]],
-            ['suppressions', 'Suppressions', 'dashboard_operator_suppressions', 'PLATFORM.SUPPRESSION.VIEW', [
-                ['Active', null, ['state' => 'active'], null],
-                ['Global (every client)', null, ['state' => 'active', 'scope' => 'global'], null],
-                ['Lifted', null, ['state' => 'lifted'], null],
-                ['Expired', null, ['state' => 'expired'], null],
+            ['suppressions', 'Suppressions', 'slash-circle', 'dashboard_operator_suppressions', 'PLATFORM.SUPPRESSION.VIEW', [
+                ['Active', null, ['state' => 'active'], null, 'check-circle'],
+                ['Global (every client)', null, ['state' => 'active', 'scope' => 'global'], null, 'globe2'],
+                ['Lifted', null, ['state' => 'lifted'], null, 'arrow-counterclockwise'],
+                ['Expired', null, ['state' => 'expired'], null, 'clock-history'],
             ]],
-            ['dsns', 'Unmatched bounces', 'dashboard_operator_dsns', 'PLATFORM.DSN.VIEW', [
-                ['Open', null, ['status' => 'open'], null],
-                ['Match requested', null, ['status' => 'match_requested'], null],
-                ['Matched', null, ['status' => 'matched'], null],
-                ['Dismissed', null, ['status' => 'dismissed'], null],
+            ['dsns', 'Unmatched bounces', 'envelope-exclamation', 'dashboard_operator_dsns', 'PLATFORM.DSN.VIEW', [
+                ['Open', null, ['status' => 'open'], null, 'envelope-open'],
+                ['Match requested', null, ['status' => 'match_requested'], null, 'hourglass-split'],
+                ['Matched', null, ['status' => 'matched'], null, 'link-45deg'],
+                ['Dismissed', null, ['status' => 'dismissed'], null, 'x-circle'],
             ]],
-            ['webhooks', 'Webhooks', 'dashboard_operator_webhooks', 'PLATFORM.WEBHOOK.VIEW', [
-                ['Failed deliveries', null, ['status' => 'failed'], null],
-                ['Retrying', null, ['status' => 'retrying'], null],
-                ['Delivered', null, ['status' => 'delivered'], null],
-                ['Events awaiting fan-out', null, ['state' => 'awaiting_fanout'], null],
+            ['webhooks', 'Webhooks', 'broadcast', 'dashboard_operator_webhooks', 'PLATFORM.WEBHOOK.VIEW', [
+                ['Failed deliveries', null, ['status' => 'failed'], null, 'x-octagon'],
+                ['Retrying', null, ['status' => 'retrying'], null, 'arrow-repeat'],
+                ['Delivered', null, ['status' => 'delivered'], null, 'check2-all'],
+                ['Events not yet sent out', null, ['state' => 'awaiting_fanout'], null, 'hourglass'],
             ]],
         ]],
         'clients' => ['Clients', 'clients', [
-            ['clients', 'Clients', 'dashboard_operator_clients', 'PLATFORM.CLIENT.VIEW', [
-                ['Waiting for approval', null, ['status' => 'pending_approval'], null],
-                ['Active', null, ['status' => 'active'], null],
-                ['Throttled', null, ['status' => 'throttled'], null],
-                ['Suspended', null, ['status' => 'suspended'], null],
-                ['Closed', null, ['status' => 'closed'], null],
-                ['Public sign-ups', null, ['origin' => 'public_application'], null],
+            ['clients', 'Clients', 'building', 'dashboard_operator_clients', 'PLATFORM.CLIENT.VIEW', [
+                ['Waiting for approval', 'dashboard_operator_clients_view', ['view' => 'waiting'], null, 'hourglass-split'],
+                ['Active', 'dashboard_operator_clients_view', ['view' => 'active'], null, 'check-circle'],
+                ['Throttled', 'dashboard_operator_clients_view', ['view' => 'throttled'], null, 'speedometer'],
+                ['Suspended', 'dashboard_operator_clients_view', ['view' => 'suspended'], null, 'pause-circle'],
+                ['Closed', 'dashboard_operator_clients_view', ['view' => 'closed'], null, 'x-circle'],
+                ['Opened by invitation', 'dashboard_operator_clients_view', ['view' => 'invited'], null, 'envelope-paper'],
+                ['Public sign-ups', 'dashboard_operator_clients_view', ['view' => 'sign-ups'], null, 'person-plus'],
             ]],
-            ['alerts', 'Abuse & reputation', 'dashboard_operator_alerts', 'PLATFORM.ABUSE.VIEW', [
-                ['Open alerts', null, [], null],
-                ['Resolved alerts', null, ['state' => 'resolved'], null],
-                ['Every alert', null, ['state' => 'all'], null],
+            ['client_new', 'New client', 'building-add', 'dashboard_operator_client_new', 'PLATFORM.CLIENT.APPROVE', []],
+            ['invitations', 'Invitations', 'envelope-paper', 'dashboard_operator_invitations', 'PLATFORM.CLIENT.APPROVE', [
+                ['Invite someone', 'dashboard_operator_invitation_new', [], null, 'envelope-plus'],
             ]],
-            ['usage', 'Usage & billing', 'dashboard_operator_usage', 'PLATFORM.USAGE.VIEW', [
-                ['This month', null, ['period' => 'current_month'], null],
-                ['Last month', null, ['period' => 'previous_month'], null],
+            ['plans', 'Plans', 'layers', 'dashboard_operator_plans', 'PLATFORM.CLIENT.VIEW', [
+                ['New plan', 'dashboard_operator_plan_new', [], 'PLATFORM.CLIENT_LIMIT.MANAGE', 'plus-lg'],
             ]],
-            ['batches', 'Address batches', 'dashboard_operator_batches', 'SYSTEM.ADDRESS_BATCH.MANAGE', []],
+            ['alerts', 'Abuse & reputation', 'shield-exclamation', 'dashboard_operator_alerts', 'PLATFORM.ABUSE.VIEW', [
+                ['Open alerts', null, [], null, 'exclamation-triangle'],
+                ['Resolved alerts', null, ['state' => 'resolved'], null, 'check-circle'],
+                ['Every alert', null, ['state' => 'all'], null, 'list-ul'],
+            ]],
+            ['usage', 'Usage & billing', 'receipt', 'dashboard_operator_usage', 'PLATFORM.USAGE.VIEW', [
+                ['This month', null, ['period' => 'current_month'], null, 'calendar-day'],
+                ['Last month', null, ['period' => 'previous_month'], null, 'calendar-minus'],
+            ]],
+            ['batches', 'Address batches', 'collection', 'dashboard_operator_batches', 'SYSTEM.ADDRESS_BATCH.MANAGE', []],
         ]],
         'system' => ['System', 'system', [
-            ['setup', 'System setup', 'dashboard_operator_setup', 'SYSTEM.SETUP.MANAGE', []],
-            ['diagnostics', 'Diagnostics', 'dashboard_operator_diagnostics', 'PLATFORM.SYSTEM.VIEW', [
-                ['Latest checks', null, [], null],
-                ['History', 'dashboard_operator_diagnostics_history', [], null],
+            ['setup', 'System setup', 'list-check', 'dashboard_operator_setup', 'SYSTEM.SETUP.MANAGE', []],
+            ['diagnostics', 'Diagnostics', 'heart-pulse', 'dashboard_operator_diagnostics', 'PLATFORM.SYSTEM.VIEW', [
+                ['Latest checks', null, [], null, 'clipboard-check'],
+                ['History', 'dashboard_operator_diagnostics_history', [], null, 'clock-history'],
             ]],
-            ['settings', 'Settings', 'dashboard_operator_settings', 'PLATFORM.SYSTEM.VIEW', []],
-            ['audit', 'Audit log', 'dashboard_operator_audit', 'PLATFORM.AUDIT.VIEW', []],
+            ['settings', 'Settings', 'gear', 'dashboard_operator_settings', 'PLATFORM.SYSTEM.VIEW', []],
+            ['audit', 'Audit log', 'journal-text', 'dashboard_operator_audit', 'PLATFORM.AUDIT.VIEW', []],
         ]],
         'access' => ['Access', 'access', [
-            ['users', 'Users', 'dashboard_operator_users', 'PLATFORM.USER.VIEW', [
-                ['Active users', null, ['status' => 'active'], null],
-                ['Disabled users', null, ['status' => 'disabled'], null],
+            ['users', 'Users', 'person-badge', 'dashboard_operator_users', 'PLATFORM.USER.VIEW', [
+                ['Active users', 'dashboard_operator_users_view', ['status' => 'active'], null, 'person-check'],
+                ['Disabled users', 'dashboard_operator_users_view', ['status' => 'disabled'], null, 'person-slash'],
             ]],
-            ['roles', 'Roles & permissions', 'dashboard_operator_roles', 'SYSTEM.ROLE.VIEW', []],
+            ['roles', 'Roles & permissions', 'key', 'dashboard_operator_roles', 'SYSTEM.ROLE.VIEW', []],
         ]],
     ];
 
-    /** Client workspace areas: key => [label, icon, pages]; a page is [section, label, route, views], a view [label, parameters]. */
+    /** Client workspace areas: key => [label, icon, pages]; a page is [section, label, icon, route, views], a view [label, parameters, icon]. */
     private const CLIENT = [
-        'overview' => ['Overview', 'overview', [['overview', 'Overview', 'dashboard_client_overview', []]]],
+        'overview' => ['Overview', 'overview', [['overview', 'Overview', 'speedometer2', 'dashboard_client_overview', []]]],
         'sending' => ['Sending', 'send', [
-            ['sending', 'Send jobs', 'dashboard_client_send_jobs', [
-                ['In progress', ['status' => 'processing']],
-                ['Completed', ['status' => 'completed']],
-                ['Failed', ['status' => 'failed']],
+            ['sending', 'Send jobs', 'send', 'dashboard_client_send_jobs', [
+                ['In progress', ['status' => 'processing'], 'hourglass-split'],
+                ['Completed', ['status' => 'completed'], 'check-circle'],
+                ['Failed', ['status' => 'failed'], 'x-circle'],
             ]],
-            ['suppressions', 'Suppressions', 'dashboard_client_suppressions', []],
+            ['suppressions', 'Suppressions', 'slash-circle', 'dashboard_client_suppressions', []],
         ]],
-        'validation' => ['Validation', 'check', [['validation', 'Validation jobs', 'dashboard_client_validation_jobs', [
-            ['In progress', ['status' => 'processing']],
-            ['Completed', ['status' => 'completed']],
-            ['Failed', ['status' => 'failed']],
+        'validation' => ['Validation', 'check', [['validation', 'Validation jobs', 'list-check', 'dashboard_client_validation_jobs', [
+            ['In progress', ['status' => 'processing'], 'hourglass-split'],
+            ['Completed', ['status' => 'completed'], 'check-circle'],
+            ['Failed', ['status' => 'failed'], 'x-circle'],
         ]]]],
         'settings' => ['Settings', 'settings', [
-            ['domains', 'Sending domains', 'dashboard_client_domains', []],
-            ['api_keys', 'API keys', 'dashboard_client_api_keys', []],
-            ['webhooks', 'Webhooks', 'dashboard_client_webhooks', [
-                ['Failed deliveries', ['status' => 'failed']],
-                ['Retrying', ['status' => 'retrying']],
+            ['domains', 'Sending domains', 'globe2', 'dashboard_client_domains', []],
+            ['api_keys', 'API keys', 'key', 'dashboard_client_api_keys', []],
+            ['webhooks', 'Webhooks', 'broadcast', 'dashboard_client_webhooks', [
+                ['Failed deliveries', ['status' => 'failed'], 'x-octagon'],
+                ['Retrying', ['status' => 'retrying'], 'arrow-repeat'],
             ]],
-            ['connections', 'Connected applications', 'dashboard_client_connections', []],
+            ['connections', 'Connected applications', 'plug', 'dashboard_client_connections', []],
         ]],
-        'usage' => ['Usage', 'usage', [['usage', 'Usage & limits', 'dashboard_client_usage', []]]],
+        'usage' => ['Usage', 'usage', [['usage', 'Usage & limits', 'bar-chart-line', 'dashboard_client_usage', []]]],
+    ];
+
+    /** Icons of the setting groups (System › Settings) and the audit log's views; others get the page's. */
+    private const SETTING_GROUP_ICONS = [
+        'Installation' => 'house-gear', 'Mail server and domains' => 'hdd-network', 'Dashboard sign-in' => 'box-arrow-in-right',
+        'Delivery pacing' => 'speedometer', 'Bounces and reconciliation' => 'arrow-return-left', 'Email validation' => 'patch-check',
+        'API and client limits' => 'sliders2', 'Webhooks' => 'broadcast', 'Reputation alerts' => 'shield-exclamation',
+        'Data retention' => 'archive', "Certificates (Let's Encrypt)" => 'lock', 'Backups' => 'database-down',
+    ];
+    private const AUDIT_VIEW_ICONS = [
+        '' => 'list-ul', 'sign-in-emails' => 'envelope-at', 'sign-ins' => 'box-arrow-in-right', 'sign-up-emails' => 'envelope-plus',
+        'server-links' => 'terminal', 'delivery' => 'truck', 'setup' => 'gear', 'clients' => 'building', 'lists' => 'collection',
+        'suppressions' => 'slash-circle', 'access' => 'people',
+    ];
+    /** The Help groups' icons, as on the Help index. */
+    public const HELP_GROUP_ICONS = [
+        'Start here' => 'overview', 'Validation and lists' => 'check', 'Sending and results' => 'send', 'Mail identity (DNS)' => 'mail',
+        'The components in depth' => 'system', 'Clients and integration' => 'clients', 'Operations' => 'settings',
     ];
 
     /** @var array<string, int>|null */
@@ -160,16 +187,16 @@ final class Navigation
             $params = ['clientId' => $client->getId()->toRfc4122()];
             foreach (self::CLIENT as $key => [$label, $icon, $pages]) {
                 $items = [];
-                foreach ($pages as [$s, $l, $route, $views]) {
+                foreach ($pages as [$s, $l, $pageIcon, $route, $views]) {
                     $href = $this->urls->generate($route, $params);
-                    $items[] = $this->item($s, $l, $href, $section, null, null, array_map(
-                        fn (array $v): array => $this->view($v[0], $this->urls->generate($route, $params + $v[1])), $views));
+                    $items[] = $this->item($s, $l, $pageIcon, $href, $section, null, null, array_map(
+                        fn (array $v): array => $this->view($v[0], $this->urls->generate($route, $params + $v[1]), icon: $v[2]), $views));
                 }
                 $this->addMenu($nav, $key, $label, $icon, $items, null);
             }
             $nav['switch'] = $platform
                 ? ['href' => $this->urls->generate('dashboard_operator_overview'), 'label' => 'Back to the operator console']
-                : ['href' => $this->urls->generate('dashboard_home'), 'label' => 'Switch client'];
+                : ['href' => $this->urls->generate('dashboard_home'), 'label' => 'Switch account'];
 
             return $nav;
         }
@@ -180,14 +207,14 @@ final class Navigation
         $nav['context'] = 'operator';
         foreach (self::OPERATOR as $key => [$label, $icon, $pages]) {
             $items = [];
-            foreach ($pages as [$s, $l, $route, $permission, $views]) {
+            foreach ($pages as [$s, $l, $pageIcon, $route, $permission, $views]) {
                 if (null !== $permission && !$this->security->isGranted($permission)) {
                     continue;
                 }
                 $built = [];
-                foreach ($views as [$vl, $vroute, $vparams, $vpermission]) {
+                foreach ($views as [$vl, $vroute, $vparams, $vpermission, $vicon]) {
                     if (null === $vpermission || $this->security->isGranted($vpermission)) {
-                        $built[] = $this->view($vl, $this->urls->generate($vroute ?? $route, $vparams));
+                        $built[] = $this->view($vl, $this->urls->generate($vroute ?? $route, $vparams), icon: $vicon);
                     }
                 }
                 $note = null;
@@ -195,25 +222,25 @@ final class Navigation
                     [$built, $note] = $this->setupViews();
                 } elseif ('settings' === $s) {
                     foreach (array_keys($this->settings->grouped($this->environment)) as $group) {
-                        $built[] = $this->view($group, $this->urls->generate($route, ['group' => SettingCatalog::slug($group)]));
+                        $built[] = $this->view($group, $this->urls->generate($route, ['group' => SettingCatalog::slug($group)]), icon: self::SETTING_GROUP_ICONS[$group] ?? $pageIcon);
                     }
                 } elseif ('audit' === $s) {
                     foreach (OperatorReadModel::AUDIT_VIEWS as $view => [$vl]) {
-                        $built[] = $this->view($vl, $this->urls->generate($route, '' === $view ? [] : ['view' => $view]));
+                        $built[] = $this->view($vl, $this->urls->generate($route, '' === $view ? [] : ['view' => $view]), icon: self::AUDIT_VIEW_ICONS[$view] ?? $pageIcon);
                     }
                 }
-                $items[] = $this->item($s, $l, $this->urls->generate($route), $section, $badges["$key.$s"] ?? null, $note, $built);
+                $items[] = $this->item($s, $l, $pageIcon, $this->urls->generate($route), $section, $badges["$key.$s"] ?? null, $note, $built);
             }
             $this->addMenu($nav, $key, $label, $icon, $items, $badges[$key] ?? null);
         }
         if ($this->security->isGranted('PLATFORM.HELP.VIEW')) {
-            $items = [$this->item('help', 'All topics', $this->urls->generate('dashboard_operator_help'), $section, null, null, [])];
+            $items = [$this->item('help', 'All topics', 'book', $this->urls->generate('dashboard_operator_help'), $section, null, null, [])];
             foreach (HelpCatalog::GROUPS as $group => $topics) {
                 $views = [];
                 foreach ($topics as $slug => $title) {
-                    $views[] = $this->view($title, $this->urls->generate('dashboard_operator_help_topic', ['topic' => $slug]));
+                    $views[] = $this->view($title, $this->urls->generate('dashboard_operator_help_topic', ['topic' => $slug]), icon: 'file-earmark-text');
                 }
-                $items[] = $this->item('help:'.$group, $group, $this->urls->generate('dashboard_operator_help', ['_fragment' => self::anchor($group)]), $section, null, null, $views);
+                $items[] = $this->item('help:'.$group, $group, self::HELP_GROUP_ICONS[$group] ?? 'help', $this->urls->generate('dashboard_operator_help', ['_fragment' => self::anchor($group)]), $section, null, null, $views);
             }
             $this->addMenu($nav, 'help', 'Help', 'help', $items, null);
         }
@@ -257,41 +284,38 @@ final class Navigation
      *
      * @return array<string, mixed>
      */
-    private function item(string $s, string $label, string $href, string $section, ?array $badge, ?string $note, array $views): array
+    private function item(string $s, string $label, string $icon, string $href, string $section, ?array $badge, ?string $note, array $views): array
     {
-        return ['label' => $label, 'href' => $href, 'current' => $s === $section, 'badge' => $badge, 'note' => $note, 'views' => $views];
+        return ['label' => $label, 'icon' => $icon, 'href' => $href, 'current' => $s === $section, 'badge' => $badge, 'note' => $note, 'views' => $views];
     }
 
     /** @return array<string, mixed> */
-    private function view(string $label, ?string $href, ?string $state = null, ?string $note = null): array
+    private function view(string $label, ?string $href, ?string $state = null, ?string $note = null, ?string $icon = null): array
     {
-        return ['label' => $label, 'href' => $href, 'header' => null === $href, 'state' => $state, 'note' => $note];
+        return ['label' => $label, 'href' => $href, 'header' => null === $href, 'state' => $state, 'note' => $note, 'icon' => $icon];
     }
 
     /**
-     * The setup steps as views (a group heading, then each step with its state) and the
-     * "n of 19" note while setup is not complete.
+     * The setup steps that need the administrator as views, each with its state, then the steps
+     * checked automatically as one link; the "n of 6" note while those are not all done.
      *
      * @return array{0: list<array<string, mixed>>, 1: ?string}
      */
     private function setupViews(): array
     {
         $steps = $this->wizard->steps();
-        $views = [$this->view('All steps', $this->urls->generate('dashboard_operator_setup'))];
-        foreach (SetupWizard::GROUPS as $group => $keys) {
-            if (['welcome'] === $keys) {
-                continue;
-            }
-            $views[] = $this->view($group, null);
-            foreach ($keys as $k) {
-                $state = $steps[$k]['state'] ?? null;
-                $views[] = $this->view($steps[$k]['title'], $this->urls->generate('dashboard_operator_setup_step', ['step' => $k]),
-                    $state ?? 'todo', match ($state) { 'done' => 'done', 'skipped' => 'skipped', default => 'to do' });
-            }
+        $views = [$this->view('All steps', $this->urls->generate('dashboard_operator_setup'), icon: 'list-check'), $this->view('Needs you', null)];
+        foreach (SetupWizard::NEEDS_YOU as $k) {
+            $state = $steps[$k]['state'] ?? null;
+            // A step's icon is its state: done, skipped or still to do.
+            $views[] = $this->view($steps[$k]['title'], $this->urls->generate('dashboard_operator_setup_step', ['step' => $k]),
+                $state ?? 'todo', match ($state) { 'done' => 'done', 'skipped' => 'skipped', default => 'to do' },
+                match ($state) { 'done' => 'check-circle-fill', 'skipped' => 'dash-circle', default => 'circle' });
         }
-        $done = \count(array_filter($steps, static fn (array $s): bool => 'done' === $s['state']));
+        $views[] = $this->view('Checked automatically', $this->urls->generate('dashboard_operator_setup', ['_fragment' => 'sg-auto']), icon: 'gear-wide-connected');
+        $done = \count(array_filter(SetupWizard::NEEDS_YOU, static fn (string $k): bool => 'done' === ($steps[$k]['state'] ?? null)));
 
-        return [$views, $done < \count($steps) ? $done.' of '.\count($steps) : null];
+        return [$views, $done < \count(SetupWizard::NEEDS_YOU) ? $done.' of '.\count(SetupWizard::NEEDS_YOU) : null];
     }
 
     /**

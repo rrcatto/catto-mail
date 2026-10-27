@@ -1,6 +1,6 @@
 # Smarthost Project Specification
 
-**Specification version:** 2.12. This is a documentation revision, not a software release version.
+**Specification version:** 2.13. This is a documentation revision, not a software release version.
 **Revision date:** 11 October 2026 (original: 8 September 2026)
 **Status:** Canonical architecture and development plan
 
@@ -1106,8 +1106,9 @@ infrastructure failures, general domain deferrals, ambiguous outcomes, `outcome_
 validation results alone, or a DSN or complaint that is not confidently correlated.
 
 A suppression is active while it is not lifted and not expired. Address suppressions match the
-exact normalised address (the local part is never case-folded); domain suppressions, which only an
-operator creates, match the lower-cased domain. Any active applicable suppression stops
+exact normalised address (the local part is never case-folded); domain suppressions, which an
+operator creates (or an account for itself, §13.6), match exactly the lower-cased domain, not its
+subdomains. Any active applicable suppression stops
 submission: Go checks when it creates a message and again just before submitting it, and records
 `message_suppressed`. Mail that Postfix has already accepted is not recalled. Independent
 suppressions (different reasons or reporters) coexist as separate rows; lifting one never makes
@@ -1150,7 +1151,27 @@ Suppressions are never deleted to unsuppress an address; `lifted_at` is set and 
 The reporting client may lift its own opt-out (`POST /v1/global-suppressions/{id}/lift`) when the
 recipient withdraws it; this is idempotent and audited, and does not affect any other suppression of
 the address. An operator may lift any suppression with an audited console command and a written
-note.
+note. An account may lift its own blocks (§13.6).
+
+## 13.6 Account blocks (specification 2.13)
+
+An account can block an address or a whole domain for its own mail (owner decision 2026-10-27): for
+example someone who complained to it directly, or who asked for their whole domain to be left
+alone. Its applications then need no block list of their own. A block is a `suppressions` row with
+reason `account_block` and `client_id` the account: it stops that account's mail only, from every
+application sending through it, and never affects other accounts; an installation-wide block stays
+an operator's (§13.5). It matches like any suppression (the exact address, or every address at
+exactly the domain) and Go applies it when it creates each message and again before submission,
+so mail already waiting is stopped too.
+
+The account's admins add one in the dashboard (Sending › Suppressions › *Block an address or a
+domain*, one field: an address or a domain) and lift one from that list; a connected application
+uses `POST /v1/blocks` (exactly one of `address` and `domain`, `Idempotency-Key`, 201 created or
+200 already blocked), `GET /v1/blocks` (only the account's own blocks, never other suppressions),
+`GET /v1/blocks/{id}` and `POST /v1/blocks/{id}/lift`. Creating a block is a do-not-contact
+operation, allowed in every account status that authenticates; lifting one needs an active or
+throttled account. API requests are recorded like opt-out requests (D-38, operation
+`create_account_block`); every change is in the audit log with the user or API key.
 
 ---
 
@@ -1276,6 +1297,54 @@ An application such as a mailing-list application can be connected with one appr
 Every approval, connection and revocation is audited. Codes, code verifiers, keys and secrets are never logged. The global-opt-out capability is never granted by connecting: it stays an operator's decision.
 
 `GET /v1/sending-domains` lists the client's sending domains with their verification and DKIM status and `can_send`, the submit rule applied to the domain as it is now, so that an application can warn before it sends from a domain that cannot send yet.
+
+## Guided account setup (specification 2.13)
+
+Owner decisions of 27 October 2026, after the owner set up the first account by hand: the setup
+is a sequence of guided steps in plain words, and nothing dead-ends.
+
+**How accounts open.** An *account* is what a customer calls a client; the operator console
+keeps the word client.
+
+- **New client** (Clients › New client, its own page): the organisation's name, the email address
+  of the person who manages it, a plan and the service policy. The manager becomes the account's
+  admin and is emailed a sign-in link. With the policy *exempt* the account is active at once;
+  with *must accept* it opens by itself when the manager accepts the policy on their first visit.
+  Creating it is the approval, so the operator approves nothing afterwards.
+- **Invitations** (Clients › Invitations): the operator makes a link, choosing the plan and
+  whether the policy must be accepted. It is shown once (only its hash is kept), works once and
+  expires after 7 days. Whoever opens it names their organisation, confirms their email address
+  and opens the account, active at once. It works while the public sign-up stays closed, which
+  is how accounts open for now: no public registration and no waiting list.
+- **Plans** (Clients › Plans): named sets of limits defined once. Starter (the plan of public
+  sign-ups, which replaces the `APP_STARTER_*` settings) and Standard (no limits beyond the
+  installation's own) are built in. A client on a plan has its limits and changes with it; a
+  client whose limits were changed by hand is shown as *Custom*.
+
+**Connecting from an application.** The connect page never dead-ends. Someone signed in without
+an account opens one there with the organisation's name alone, where the installation allows it
+(the public sign-up is open, or the person is an operator); anyone else is told that accounts are
+opened by invitation. An application may name the domain it sends from (`sending_domain`), and
+approving adds that domain to the account.
+
+**A sending domain, step by step.** Each domain has its own page: prove it is yours (the TXT
+record), publish its signing key (the DKIM record), ready to send. Every record has copy buttons
+and a sentence on what it is for. The page checks every 30 seconds and moves on by itself, and
+the account's admins are emailed when the domain is ready. An existing DMARC record is
+recognised ("keep yours"); otherwise `v=DMARC1; p=none` is suggested, without a made-up report
+address. The API's sending domains carry `setup_url`, this page, so an application can link to
+it and get a link back.
+
+**The account's start page** lists the steps to the first message until they are done: accept
+the service policy (when required), make a sending domain ready, connect an application (a key
+and a webhook made by hand count too), send a test message.
+
+**Pages.** Every create form is its own centred page asking only for what is used; lists take
+the full width; ready-made views have plain addresses; the breadcrumb appears on detail pages
+only; values to copy have copy buttons; the installation's own self-test client is labelled
+*internal: self-tests*. The operator's System setup lists first the steps that need the
+administrator (DNS, backups, the seed, bounce and reboot tests, readiness) and folds the steps
+the system checks by itself, showing only those that fail.
 
 ## Idempotency
 
@@ -2471,6 +2540,7 @@ At that point, Smarthost will be a real infrastructure component rather than mer
 |---|---|---|
 | 2.0 | 8 September 2026 | Canonical architecture and development plan. |
 | 2.12 | 11 October 2026 | Application connect (section 15, *Connecting an application*): an application is connected with one approval in an authorisation-code flow with PKCE instead of a copied API key and webhook secret. The connect page `/dashboard/connect` (sign-in, or account creation while `APP_PUBLIC_ONBOARDING_ENABLED` is true, returning to the connect step); approval by a client admin of an active client within its key and endpoint limits; a single-use code of 10 minutes; `POST /v1/connect/exchange`, which creates the API key and the webhook endpoint and returns the credentials once; `DELETE /v1/connection`; the client's Connected applications page; `GET /v1/sending-domains`. Schema: `application_connections`, and `webhook_endpoints.status` gains the terminal value `removed`. The global-opt-out capability stays operator-only. The acceptable use policy is published at `/acceptable-use-policy` from `docs/AUP.md` and linked from every footer. OpenAPI 1.0.0-draft.10; status vocabulary 2.7.0. No existing `/v1` operation changes. |
+| 2.13 | 27 October 2026 | Guided account setup (section *Guided account setup*): the connect page never dead-ends and can name the application's sending domain, which the approval adds; each sending domain has its own steps page (`setup_url` in the API), checked every 30 seconds, with an email when it is ready; the account's start page is a checklist; plans (named limit sets; the `APP_STARTER_*` settings become the built-in Starter plan); invitations; *New client* on its own page; the self-test client is tagged; the billing and abuse contact addresses go; plain addresses; the operator setup page split into "needs you" and "checked automatically". Schema: `plans`, `client_invitations`, `clients.opens_on_policy_acceptance`, `auth_login_tokens.invitation_id`. OpenAPI 1.0.0-draft.11; status vocabulary 2.8.0. |
 | 2.11 | 7 October 2026 | Operator self-service (section 19, *Operator self-service*; Phase 10): the one-command installer for Ubuntu Server 26.04 LTS from an exact release tag, the bootstrap sign-in link, the host agent, the setup wizard, diagnostics with history and system health, the delivery modes and the web emergency stop, Let's Encrypt DNS-01 automation, scheduled, encrypted, off-host backups and the restore rehearsal, log shortcuts, help and tutorials, administrator address batches with separate address state dimensions, staged sends and re-permission with `repermission.responded`; the ctnlist integration document. |
 | 2.10 | 7 October 2026 | Phase 9 repository-side public SaaS hardening (section 16, *SaaS operations*): client lifecycle with approval, throttling, suspension and closure (reasons, permissions, audit); disabled public-onboarding gate; service-policy acceptance; contact metadata and private notes; per-client limits with installation ceilings and concurrency-safe quotas (`429 quota-exceeded`); API-key names and expiry; usage summaries, reconciliation, provider-neutral billing statements and export; reputation metrics and alerts without automatic action; webhook endpoint health; the public integration guide at `/docs/api`. |
 | 2.9 | 6 October 2026 | Phase 8 repository-side production readiness: production topology (standalone containers on internal and egress networks, network matrix, firewall), `smarthostctl prod`, the production configuration profile and safety rules, capture/held/live/paused delivery states with an audited, preflight-gated activation (`SYSTEM.DELIVERY.CONTROL`), the production preflight (host, runtime, exposure, ingress, TLS, DNS identity, SPF, DKIM, DMARC, bounce domain, Postfix, delivery), the socket-activated ingress that preserves client addresses (no published ports; SMTP to Postfix with the PROXY protocol; `TRUSTED_PROXIES` empty), the checked low-port host prerequisite, the launch decisions (IPv4 only, validator probing off, retention unset), production DKIM keys, Postfix submission sender ownership, the installation-wide warm-up ceiling and the throttled-client rate, emergency pause, `delivery_heartbeats` (Postfix queue depth), backups, upgrades, seed testing and the runbook; `APP_WEBHOOK_CONNECT_TIMEOUT_SECONDS` and a response-header bound. |

@@ -6,7 +6,7 @@
 <div class="pagehead">
     <div>
         <h1>Usage</h1>
-        <p class="lead">What you have used, and your limits.{{ ui.tip('Units are counted separately: a validation address is metered when it reaches a final result, a message when Postfix accepts it. Days and months are those of ' ~ time_zone_label() ~ '. Usage is recorded for billing; pricing and payment happen elsewhere.') }}</p>
+        <p class="lead">What you have used, and your limits: {{ custom_limits ? 'limits set for your account' : 'the ' ~ plan ~ ' plan' }}.{{ ui.tip('Units are counted separately: an address checked is counted when its result is final, a message when this installation\'s mail server accepts it. Days and months are those of ' ~ time_zone_label() ~ '. Usage is recorded for billing; pricing and payment happen elsewhere. The operator of this installation can change your limits.') }}</p>
     </div>
 </div>
 

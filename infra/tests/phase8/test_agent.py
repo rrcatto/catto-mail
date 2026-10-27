@@ -233,6 +233,28 @@ class RequestsTest(unittest.TestCase):
         ok, why, _ = self.agent(host).handle(req)   # DNS without the record: never activated
         self.assertFalse(ok)
 
+    def test_the_development_stand_in_uses_the_pods_opendkim(self) -> None:
+        """smarthostctl dev-agent (2026-10-27): only DKIM requests, claimed by action, carried out with the
+        pod's own key tool and a reload instead of `smarthostctl prod`, which refuses a development pod."""
+        host = AgentHost(self.values, exec_={("opendkim", "smarthost-dkim-key", "pubkey"): (0, "MIIBkey\n"),
+                                             ("opendkim", "smarthost-dkim-key", "activate"): (0, "activated")})
+        host.claim_answer = [{"id": "r1", "action": "dkim.activate", "params": {"domain": "news.example.org", "selector": "s1",
+                                                                              "sending_domain_id": "01920000-0000-7000-8000-000000000001"},
+                              "requested_by": None, "note": None}]
+        agent = self.agent(host, {("s1._domainkey.news.example.org", "TXT"): ["v=DKIM1; k=rsa; p=MIIBkey"]})
+        dev = dict(self.values, SMARTHOST_ENV="development")
+        agent.v = dev
+        self.assertEqual(0, ag.dev_dkim(agent, once=True, poll=0))
+        claims = [c for c in host.calls if "claim" in c]
+        self.assertEqual(("claim", "--only=dkim.generate", "--only=dkim.activate"), claims[0][claims[0].index("claim"):])
+        self.assertIn(("opendkim", "smarthost-dkim-key", "activate", "news.example.org", "s1"), host.execs)
+        self.assertFalse([c for c in host.calls if c and c[0] == ag.PROD], "never the production tooling")
+        self.assertIn(("podman", "kill", "--signal", "USR1", f"{self.values['SMARTHOST_INSTANCE']}-opendkim"), host.calls)
+        self.assertTrue([c for c in host.calls if "smarthost:system:agent" in c and c[-1] == "domains"])
+        prod = self.agent(AgentHost(self.values))
+        prod.v = dict(self.values, SMARTHOST_ENV="production")
+        self.assertEqual(2, ag.dev_dkim(prod, once=True, poll=0), "refused on a production configuration")
+
     def test_tick_asks_the_application_about_waiting_domains(self) -> None:
         host = AgentHost(self.values)
         agent = self.agent(host)

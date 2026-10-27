@@ -1,0 +1,14 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Invitation link{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Send this link</h1>
+    <p class="lead">Copy it now: it is shown only this once. Send it to {{ note ?: 'the person you invite' }}, for example by email.</p>
+    <section class="card guide-card" aria-label="The invitation link">
+        {{ ui.copy(url, 'the invitation link', true) }}
+        <p class="card-note">It opens one account on the {{ plan }} plan and works for {{ days }} days. You are emailed when it is used. If it goes astray, withdraw it under Invitations.</p>
+    </section>
+    <p class="form-actions"><a class="btn" href="{{ path('dashboard_operator_invitations') }}">Done</a> <a class="btn btn-secondary" href="{{ path('dashboard_operator_invitation_new') }}">Invite someone else</a></p>
+</div>
+{% endblock %}

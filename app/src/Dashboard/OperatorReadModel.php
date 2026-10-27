@@ -370,7 +370,7 @@ final class OperatorReadModel
             $where[] = 'c.status = ?';
             $params[] = $filters['status'];
         }
-        if (\in_array($filters['origin'] ?? '', ['operator', 'public_application'], true)) {
+        if (\in_array($filters['origin'] ?? '', ['operator', 'public_application', 'invitation', 'system'], true)) {
             $where[] = 'c.origin = ?';
             $params[] = $filters['origin'];
         }
@@ -381,8 +381,8 @@ final class OperatorReadModel
         }
 
         return $this->keyset->page(<<<'SQL'
-            c.id::text AS id, c.company_name, c.contact_email, c.status, c.plan, c.created_at, c.can_submit_global_suppressions,
-            c.origin, c.status_changed_at, c.approved_at,
+            c.id::text AS id, c.company_name, c.contact_email, c.status, c.plan, (SELECT p.name FROM plans p WHERE p.id = c.plan) AS plan_name,
+            c.created_at, c.can_submit_global_suppressions, c.origin, c.status_changed_at, c.approved_at, c.opens_on_policy_acceptance,
             (SELECT count(*) FROM sending_domains d WHERE d.client_id = c.id AND d.status = 'verified') AS verified_domains,
             (SELECT count(*) FROM client_alerts a WHERE a.client_id = c.id AND a.resolved_at IS NULL) AS open_alerts,
             (SELECT CASE WHEN bool_or(a.severity = 'critical') THEN 'critical' WHEN count(*) > 0 THEN 'warning' END FROM client_alerts a WHERE a.client_id = c.id AND a.resolved_at IS NULL) AS worst_alert
@@ -397,8 +397,9 @@ final class OperatorReadModel
         }
         $c = $this->connection;
         $client = $c->fetchAssociative(<<<'SQL'
-            SELECT id::text AS id, company_name, contact_email, status, plan, created_at, can_submit_global_suppressions,
-                   origin, billing_contact_email, abuse_contact_email, status_changed_at, approved_at, closed_at, policy_acceptance_required
+            SELECT id::text AS id, company_name, contact_email, status, plan, (SELECT p.name FROM plans p WHERE p.id = clients.plan) AS plan_name,
+                   created_at, can_submit_global_suppressions, origin, status_changed_at, approved_at, closed_at, policy_acceptance_required,
+                   opens_on_policy_acceptance
               FROM clients WHERE id = ?
             SQL, [$clientId]);
         if (false === $client) {
@@ -567,10 +568,7 @@ final class OperatorReadModel
     {
         $where = [];
         $params = [];
-        if (null !== ($address = ClientReadModel::normalizedFilter($filters['address'] ?? null))) {
-            $where[] = 's.address_or_domain = ?';
-            $params[] = $address;
-        }
+        ClientReadModel::filterCovering($where, $params, ClientReadModel::normalizedFilter($filters['address'] ?? null));
         if ('' !== ($filters['reason'] ?? '')) {
             $where[] = 's.reason = ?';
             $params[] = $filters['reason'];

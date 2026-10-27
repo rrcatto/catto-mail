@@ -164,7 +164,7 @@ final class ConnectTest extends DashboardTestCase
         self::assertSame(1, $signIn->count());
         self::assertStringStartsWith('/dashboard/login?return_to=', (string) $signIn->attr('href'));
         self::assertStringNotContainsString('/dashboard/sign-up', (string) $this->browser->getResponse()->getContent(), 'no account creation while public sign-up is off');
-        self::assertStringContainsString('created by its operator', $page->text());
+        self::assertStringContainsString('Accounts on this installation are opened by invitation', $page->text());
         self::assertSame(0, $page->filter('form')->count(), 'a visitor cannot approve anything');
         self::assertSame(0, self::rows('SELECT count(*) FROM application_connections'), 'looking stores nothing');
 
@@ -185,7 +185,7 @@ final class ConnectTest extends DashboardTestCase
         $approve = $this->crawler($returnTo);
         self::assertSame(1, $approve->filter('input[type="radio"][name="client_id"][value="'.$cid.'"][checked]')->count());
         self::assertStringContainsString("form-action 'self' https://lists.example.org;", (string) $this->browser->getResponse()->headers->get('Content-Security-Policy'));
-        self::assertStringContainsString('No key or secret is in that address', $approve->text());
+        self::assertStringContainsString('No key or password travels through your browser', $approve->text());
         foreach (self::EVENTS as $event) {
             self::assertStringContainsString($event, $approve->text());
         }
@@ -221,7 +221,7 @@ final class ConnectTest extends DashboardTestCase
         self::assertSame(self::WEBHOOK, $credentials['webhook']['url']);
         self::assertSame(self::EVENTS, $credentials['webhook']['events']);
         self::assertSame([['id' => $domain->getId()->toRfc4122(), 'domain' => $domain->getDomain(), 'status' => 'verified', 'dkim_status' => 'not_configured',
-            'can_send' => true]], array_map(static fn (array $d): array => array_diff_key($d, ['verified_at' => 1]), $credentials['sending_domains']));
+            'can_send' => true, 'setup_url' => "https://smarthost.localhost/dashboard/c/$cid/sending-domains/".$domain->getId()->toRfc4122()]], array_map(static fn (array $d): array => array_diff_key($d, ['verified_at' => 1]), $credentials['sending_domains']));
 
         // The API key (named after the application) works, and the endpoint signs with the returned secret.
         $key = Db::owner()->fetchAssociative('SELECT id::text AS id, name, key_hash, revoked_at, expires_at FROM api_keys WHERE client_id = ?', [$cid]);
@@ -471,7 +471,7 @@ final class ConnectTest extends DashboardTestCase
             $this->setClientStatus($client, $status);
             $page = $this->crawler($uri);
             self::assertSame(0, $page->filter('input[name="client_id"]')->count());
-            self::assertStringContainsString('only to an active client', $page->text());
+            self::assertStringContainsString('only to an active account', $page->text());
             self::assertSame(422, $this->decide($page, 'approve', $cid)->getStatusCode());
             self::assertSame(0, $none());
             $this->setClientStatus($client, ClientStatus::Active);
@@ -491,7 +491,7 @@ final class ConnectTest extends DashboardTestCase
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Member));
         $this->fromThisAddress();
         $page = $this->crawler(self::uri(self::params($challenge)));
-        self::assertStringContainsString('Only a client admin can connect an application; you are a member of', $page->text());
+        self::assertStringContainsString('Only an admin of the account can connect an application; you are a member of', $page->text());
         self::assertSame(0, $page->filter('button[value="approve"]')->count(), 'nothing to approve');
         self::assertSame(1, $page->filter('button[value="deny"]')->count());
     }
@@ -560,7 +560,7 @@ final class ConnectTest extends DashboardTestCase
         $this->fromThisAddress();
         [$verifier, $challenge] = self::pkce();
         $page = $this->crawler(self::uri(self::params($challenge)));
-        self::assertStringContainsString('Replaces the connection of '.self::APPLICATION, $page->text());
+        self::assertStringContainsString('It replaces the connection of '.self::APPLICATION, $page->text());
         $answer = self::answer($this->decide($page, 'approve', $cid));
         // Until the new credentials are collected, the earlier connection keeps working.
         self::assertSame(200, $this->api('GET', '/v1/sending-domains', $first['api_key'])->getStatusCode());
@@ -665,9 +665,122 @@ final class ConnectTest extends DashboardTestCase
     }
 
     /** A valid CSRF token of the client's dashboard actions, as its admin has it on any form (here: create an API key). */
+    /** Specification 2.13: someone signed in without an account is never left at a dead end. */
+    public function testSomeoneSignedInWithoutAnAccountOpensOneOrIsToldHow(): void
+    {
+        [, $challenge] = self::pkce();
+        $uri = self::uri(self::params($challenge));
+
+        // Neither an operator nor while public sign-up is open: one sentence, and nothing to press but Cancel.
+        $this->signIn($this->newUser(false, null));
+        $this->fromThisAddress();
+        $page = $this->crawler($uri);
+        self::assertStringContainsString('Accounts on this installation are opened by invitation', $page->text());
+        self::assertSame(0, $page->filter('form[action="/dashboard/connect/account"]')->count());
+        self::assertSame(1, $page->filter('button[value="deny"]')->count(), 'the way back to the application');
+        $fields = [];
+        foreach ($page->filter('form[action="/dashboard/connect"] input[type="hidden"]') as $input) {
+            $fields[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
+        $this->browser->request('POST', '/dashboard/connect/account', $fields + ['organisation' => 'Sneaky Ltd']);
+        self::assertSame(422, $this->browser->getResponse()->getStatusCode());
+        self::assertSame(0, self::rows("SELECT count(*) FROM clients WHERE company_name = 'Sneaky Ltd'"));
+
+        // An operator opens the account there and then, and comes straight back with it chosen.
+        $this->browser->getCookieJar()->clear();
+        $operator = $this->newUser(true, null);
+        $this->signIn($operator);
+        $this->fromThisAddress();
+        $page = $this->crawler($uri);
+        $form = $page->filter('form[action="/dashboard/connect/account"]');
+        self::assertSame(1, $form->count(), 'one field and a button');
+        self::assertSame(['organisation'], $form->filter('input:not([type="hidden"])')->each(static fn (Crawler $i): string => (string) $i->attr('name')));
+        $fields = [];
+        foreach ($form->filter('input[type="hidden"]') as $input) {
+            $fields[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
+        $this->browser->request('POST', '/dashboard/connect/account', ['organisation' => 'Operator Lists'] + $fields);
+        self::assertSame(303, $this->browser->getResponse()->getStatusCode(), (string) $this->browser->getResponse()->getContent());
+        self::assertStringStartsWith('/dashboard/connect?', (string) $this->browser->getResponse()->headers->get('Location'));
+        $client = Db::owner()->fetchAssociative("SELECT id::text AS id, status, plan, origin, policy_acceptance_required FROM clients WHERE company_name = 'Operator Lists'");
+        self::assertSame(['active', 'standard', 'operator', false], [$client['status'], $client['plan'], $client['origin'], $client['policy_acceptance_required']]);
+        self::assertSame('admin', Db::owner()->fetchOne('SELECT role FROM client_memberships WHERE client_id = ? AND user_id = ?', [$client['id'], $operator->getId()->toRfc4122()]));
+        $approve = $this->crawler((string) $this->browser->getResponse()->headers->get('Location'));
+        self::assertStringContainsString('The account of Operator Lists is open', $approve->text());
+        self::assertSame(1, $approve->filter('input[name="client_id"][value="'.$client['id'].'"][checked]')->count());
+    }
+
+    public function testWhilePublicSignUpIsOpenTheAccountOpensOnTheStarterPlan(): void
+    {
+        $this->withEnv(['APP_PUBLIC_ONBOARDING_ENABLED' => 'true'], function (): void {
+            [, $challenge] = self::pkce();
+            $user = $this->newUser(false, null);
+            $this->signIn($user);
+            $this->fromThisAddress();
+            $page = $this->crawler(self::uri(self::params($challenge)));
+            $form = $page->filter('form[action="/dashboard/connect/account"]');
+            self::assertSame(1, $form->filter('input[name="accept_policy"][required]')->count(), 'the policy in force is accepted on the same form');
+            $fields = [];
+            foreach ($form->filter('input[type="hidden"]') as $input) {
+                $fields[$input->getAttribute('name')] = $input->getAttribute('value');
+            }
+            $this->browser->request('POST', '/dashboard/connect/account', ['organisation' => 'Starter Lists'] + $fields);
+            self::assertSame(422, $this->browser->getResponse()->getStatusCode());
+            self::assertStringContainsString('Accept the service policy', self::text($this->browser->getResponse()));
+            $this->browser->request('POST', '/dashboard/connect/account', ['organisation' => 'Starter Lists', 'accept_policy' => '1'] + $fields);
+            self::assertSame(303, $this->browser->getResponse()->getStatusCode());
+            $client = Db::owner()->fetchAssociative("SELECT id::text AS id, status, plan, origin FROM clients WHERE company_name = 'Starter Lists'");
+            self::assertSame(['active', 'starter', 'public_application'], [$client['status'], $client['plan'], $client['origin']]);
+            self::assertSame(2, self::rows('SELECT max_api_keys FROM client_limits WHERE client_id = ?', [$client['id']]), 'the Starter plan\'s limits');
+            self::assertSame(1, self::rows('SELECT count(*) FROM client_policy_acceptances WHERE client_id = ?', [$client['id']]));
+        });
+    }
+
+    /** Specification 2.13: an application names the domain it sends from; the approval adds it, and its page leads back. */
+    public function testTheApprovalAddsTheApplicationsSendingDomainAndItsPageLeadsBack(): void
+    {
+        [$client, $admin] = $this->clientWithAdmin('Domain Co');
+        $cid = $client->getId()->toRfc4122();
+        [$verifier, $challenge] = self::pkce();
+        $this->signIn($admin);
+        $this->fromThisAddress();
+
+        self::assertSame(400, $this->get(self::uri(self::params($challenge, ['sending_domain' => 'not a domain'])))->getStatusCode());
+        $page = $this->crawler(self::uri(self::params($challenge, ['sending_domain' => 'Lists.Example.org.'])));
+        self::assertStringContainsString('lists.example.org is added to this account as a sending domain', $page->text());
+        self::assertSame('lists.example.org', $page->filter('form[action="/dashboard/connect"] input[name="sending_domain"]')->attr('value'), 'canonical, carried with the decision');
+        $answer = self::answer($this->decide($page, 'approve', $cid));
+        $domain = Db::owner()->fetchAssociative('SELECT id::text AS id, status FROM sending_domains WHERE client_id = ? AND domain = ?', [$cid, 'lists.example.org']);
+        self::assertSame('pending', $domain['status'], 'added, waiting for its TXT record');
+        self::assertSame(['user', $admin->getId()->toRfc4122()], array_values(Db::owner()->fetchAssociative(
+            "SELECT actor_type, actor_id FROM audit_log WHERE action = 'sending_domain.created' AND target_id = ?", [$domain['id']])));
+
+        $credentials = $this->assertContract($this->exchange($answer['code'], $verifier), 200, '/connect/exchange', 'post');
+        $setup = "https://smarthost.localhost/dashboard/c/$cid/sending-domains/{$domain['id']}";
+        self::assertSame($setup, $credentials['sending_domains'][0]['setup_url']);
+        self::assertSame($setup, $this->assertContract($this->api('GET', '/v1/sending-domains', $credentials['api_key']), 200, '/sending-domains', 'get')['data'][0]['setup_url']);
+
+        // The domain's page offers the way back to the application, and to no other site.
+        $path = substr($setup, \strlen('https://smarthost.localhost'));
+        $back = 'https://lists.example.org/delivery/setup';
+        self::assertSame('Back to '.self::APPLICATION, $this->crawler("$path?back=".rawurlencode($back))->filter("a[href=\"$back\"]")->text());
+        foreach (['https://evil.example.net/delivery/setup', 'https://lists.example.org:8443/x', 'javascript:alert(1)'] as $other) {
+            self::assertStringNotContainsString('Back to', $this->crawler("$path?back=".rawurlencode($other))->filter('.pagehead')->text(), $other);
+        }
+
+        // Connecting again: the domain is already there. With no room, the page says so and the approval adds nothing.
+        [, $challenge] = self::pkce();
+        self::assertStringContainsString('It already has lists.example.org', $this->crawler(self::uri(self::params($challenge, ['sending_domain' => 'lists.example.org'])))->text());
+        $this->limit($client, ['max_sending_domains' => 1]);
+        $page = $this->crawler(self::uri(self::params($challenge, ['sending_domain' => 'other.example.org'])));
+        self::assertStringContainsString('has no room for another sending domain', $page->text());
+        self::answer($this->decide($page, 'approve', $cid));
+        self::assertSame(1, self::rows('SELECT count(*) FROM sending_domains WHERE client_id = ?', [$cid]));
+    }
+
     private function dashboardToken(string $clientId): string
     {
-        return (string) $this->crawler("/dashboard/c/$clientId/api-keys")->filter('form input[name="_token"]')->first()->attr('value');
+        return (string) $this->crawler("/dashboard/c/$clientId/api-keys/new")->filter('form input[name="_token"]')->first()->attr('value');
     }
 
     public function testTheExchangeIsRateLimitedPerAddress(): void

@@ -21,7 +21,7 @@ final class WebhookDashboardTest extends DashboardTestCase
         $base = '/dashboard/c/'.$client->getId()->toRfc4122().'/webhooks';
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
 
-        $r = $this->submit($base, $base, ['url' => 'https://app.example.test/hooks/smarthost', 'event_types' => ['send.completed', 'message.hard_bounced']]);
+        $r = $this->submit("$base/new", $base, ['url' => 'https://app.example.test/hooks/smarthost', 'event_types' => ['send.completed', 'message.hard_bounced']]);
         self::assertSame(200, $r->getStatusCode());
         self::assertSame(1, preg_match('/whsec_[A-Za-z0-9_-]{43}/', (string) $r->getContent(), $m), 'the new secret is shown');
         self::assertStringContainsString('no-store', (string) $r->headers->get('Cache-Control'));
@@ -51,8 +51,10 @@ final class WebhookDashboardTest extends DashboardTestCase
         }
         self::assertStringNotContainsString($m2[0], (string) Db::owner()->fetchOne("SELECT string_agg(detail_json::text, ' ') FROM audit_log WHERE target_id = ?", [$id]));
 
-        $this->submit($base, $base, ['url' => 'ftp://nope', 'event_types' => ['send.completed']]);
-        self::assertStringContainsString('The webhook URL must be an absolute', self::text($this->page($base)), 'the service rule is reported');
+        $r = $this->submit("$base/new", $base, ['url' => 'ftp://nope', 'event_types' => ['send.completed']]);
+        self::assertSame(422, $r->getStatusCode());
+        self::assertStringContainsString('The webhook URL must be an absolute', self::text($r), 'the service rule is reported, on the form');
+        self::assertStringContainsString('value="ftp://nope"', (string) $r->getContent(), 'what was typed is kept');
         self::assertSame(1, (int) Db::owner()->fetchOne('SELECT count(*) FROM webhook_endpoints WHERE client_id = ?', [$client->getId()->toRfc4122()]));
     }
 

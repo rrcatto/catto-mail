@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Smarthost API
-  version: 1.0.0-draft.10
-  summary: Email validation and tracked delivery API (specification 2.12 contract).
+  version: 1.0.0-draft.11
+  summary: Email validation and tracked delivery API (specification 2.13 contract).
   description: |
     Public Smarthost API contract. Normative elaboration of
-    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.12), which wins on
+    `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.13), which wins on
     any conflict. A client-facing integration guide is `docs/api/integration-guide.md`
     (served by an installation at `/docs/api`). Status and event values are defined in
     `docs/contracts/status-vocabulary.yaml`.
@@ -60,14 +60,17 @@ info:
        | `state` | 1 to 512 printable ASCII characters without spaces; returned unchanged. |
        | `code_challenge` | `BASE64URL(SHA-256(code verifier))` without padding (43 characters). |
        | `code_challenge_method` | `S256`. |
+       | `sending_domain` | Optional (specification 2.13): the domain the application sends from, the part after `@` of its From address. Approving adds it to the chosen account when the account does not have it yet and has room for it, so the person can go straight on to its DNS steps (`setup_url` of `GET /sending-domains`). |
 
        Plain `http` URLs are accepted only by a development installation. A request
        that is incomplete or refused is explained on the page; the person is never
        redirected to a URL that was not accepted.
     2. The person signs in (or, where the installation offers public sign-up, opens
-       an account there and then), chooses one of their client workspaces and
-       approves. Only a client admin can approve, and only for an `active` client
-       with room under its limits on usable API keys and webhook endpoints.
+       an account there and then; signed in without an account, they may open one
+       on the page with the organisation's name where the installation allows it),
+       chooses one of their accounts and approves. Only an admin of the account can
+       approve, and only for an `active` account with room under its limits on
+       usable API keys and webhook endpoints.
     3. The person is sent back with `303 See Other` to
        `redirect_uri?code=<code>&state=<state>`, or, after declining, to
        `redirect_uri?error=access_denied&error_description=…&state=<state>`. The
@@ -153,6 +156,11 @@ tags:
     description: >-
       Recipient global opt-outs reported by trusted clients (D-30). Requires the
       operator-granted global-opt-out capability.
+  - name: Blocks
+    description: >-
+      The account's own blocks (specification 2.13, owner decision 2026-10-27): an
+      address or a whole domain the account never sends to. A block stops this
+      account's mail only; it never affects other accounts.
   - name: Connect
     description: >-
       Connecting an application with one approval (specification 2.12): the code
@@ -530,6 +538,129 @@ paths:
               schema: {$ref: '#/components/schemas/GlobalOptOut'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/GlobalSuppressionForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /blocks:
+    get:
+      tags: [Blocks]
+      operationId: listAccountBlocks
+      summary: The account's blocks, newest first.
+      description: >-
+        Only this account's own blocks (reason `account_block`): never the
+        installation's suppressions (bounces, complaints, opt-outs, operator
+        blocks), so the list is not a lookup of other suppressions.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          description: '`active` (the default), `lifted` or `all`.'
+          schema: {type: string, enum: [active, lifted, all], default: active}
+        - name: value
+          in: query
+          required: false
+          description: >-
+            Only the blocks of exactly this address or domain (normalised like a
+            new block). An address does not also return the block of its domain:
+            ask for the domain too.
+          schema: {type: string, minLength: 1, maxLength: 320}
+      responses:
+        '200':
+          description: One page of blocks, newest first.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountBlockPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+    post:
+      tags: [Blocks]
+      operationId: createAccountBlock
+      summary: Block an address or a whole domain for this account.
+      description: >-
+        Give exactly one of `address` or `domain`. The value is normalised like
+        recipients (an address keeps its local part; a domain is lower-cased) and
+        from then on this account's messages to it, or to any address at the
+        domain (exactly that domain, not its subdomains), are suppressed before
+        submission, also those already queued. Like an opt-out it is a
+        do-not-contact operation, accepted in every account status that
+        authenticates. Returns 201 with the new block, or 200 with the existing
+        one when the value is already blocked. Each accepted request is recorded
+        durably: replaying the same Idempotency-Key with the same body returns
+        that request's original status and block with `Idempotent-Replayed:
+        true`, even after the block was lifted.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AccountBlockCreateRequest'}
+      responses:
+        '200':
+          description: The value was already blocked; the active block is returned unchanged (or an idempotent replay).
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountBlock'}
+        '201':
+          description: Block created (or an idempotent replay).
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountBlock'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/IdempotencyInProgress'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableEntity'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /blocks/{id}:
+    get:
+      tags: [Blocks]
+      operationId: getAccountBlock
+      summary: Retrieve one of the account's blocks.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: The block.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountBlock'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /blocks/{id}/lift:
+    post:
+      tags: [Blocks]
+      operationId: liftAccountBlock
+      summary: Lift one of the account's blocks.
+      description: >-
+        Sets `lifted_at`; the record is kept. Naturally idempotent: lifting a
+        lifted block returns it unchanged. Only this block is lifted: any other
+        suppression of the address (a bounce, a complaint, an opt-out, an
+        operator block, or the account's block of the address's domain) still
+        prevents sending. Lifting makes mail sendable again, so it needs an
+        `active` or `throttled` account (403 otherwise).
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: The block, now lifted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountBlock'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
 
@@ -1363,11 +1494,61 @@ components:
         lifted_at:
           oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
 
+    AccountBlockCreateRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Exactly one of `address` and `domain` (422 otherwise). A domain blocks
+        every address at exactly that domain.
+      properties:
+        address:
+          type: string
+          minLength: 3
+          maxLength: 320
+          description: An email address, normalised like recipients.
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          description: A domain name such as `example.org` (no `@`), lower-cased.
+        external_reference:
+          $ref: '#/components/schemas/ExternalReference'
+          description: Optional opaque client reference (for example the application's own record of the block).
+
+    AccountBlock:
+      type: object
+      additionalProperties: false
+      required: [id, scope, value, status, external_reference, created_at, lifted_at]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        scope:
+          type: string
+          enum: [address, domain]
+        value: {type: string, description: The normalised address or the lower-cased domain.}
+        status:
+          type: string
+          enum: [active, lifted]
+        external_reference:
+          oneOf: [{$ref: '#/components/schemas/ExternalReference'}, {type: 'null'}]
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        lifted_at:
+          oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+
+    AccountBlockPage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/AccountBlock'}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+
     # ---- sending domains and connect (specification 2.12) -----------------
     SendingDomain:
       type: object
       additionalProperties: false
-      required: [id, domain, status, dkim_status, verified_at, can_send]
+      required: [id, domain, status, dkim_status, verified_at, can_send, setup_url]
       properties:
         id: {$ref: '#/components/schemas/Uuid'}
         domain: {type: string, description: Lower-case domain name.}
@@ -1388,6 +1569,15 @@ components:
             the domain is verified and not disabled and, on a production installation,
             its DKIM status is `active`. False does not stop a job from being created
             or filled; its submit answers 422 `submit-rejected` until this is true.
+        setup_url:
+          type: string
+          format: uri
+          description: >-
+            The page of the account's dashboard where a person publishes this domain's
+            DNS records, one step at a time, and follows the domain until it can send
+            (specification 2.13). An application may link a client admin there. It may
+            add a `back` query parameter, an absolute URL on the origin of its own
+            connection's `redirect_uri`, and the page then offers a link back to it.
 
     SendingDomainList:
       type: object

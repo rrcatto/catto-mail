@@ -27,6 +27,32 @@ final class ClientLimitAdministration
     }
 
     /**
+     * The rules every limit value follows, for a client and for a plan (App\Client\PlanCatalog):
+     * known columns only, the minimum of each, the contract ceiling of recipients per send job,
+     * and never above an installation ceiling.
+     *
+     * @param array<string, ?int> $values column => value (null = no limit)
+     */
+    public function validate(array $values): void
+    {
+        $fields = array_flip(ClientLimits::FIELDS);
+        foreach ($values as $column => $value) {
+            if (!isset($fields[$column])) {
+                throw new DomainRuleViolation("Unknown limit $column.");
+            }
+            $label = \App\Dashboard\Labels::label($column, 'limit');
+            $minimum = 'api_requests_per_minute' === $column || 'max_recipients_per_send_job' === $column ? 1 : 0;
+            if (null !== $value && $value < $minimum) {
+                throw new DomainRuleViolation(\sprintf('%s must be at least %d.', $label, $minimum));
+            }
+            if ('max_recipients_per_send_job' === $column && null !== $value && $value > 10000) {
+                throw new DomainRuleViolation(\sprintf('%s may not be more than 10,000 (the API\'s own limit).', $label));
+            }
+            $this->policy->assertWithinCeiling($column, $value);
+        }
+    }
+
+    /**
      * @param array<string, ?int> $values column => value (null = no client limit); unknown columns are refused
      *
      * @return array<string, array{before: ?int, after: ?int}> the changes made
@@ -34,19 +60,7 @@ final class ClientLimitAdministration
     public function set(Client $client, array $values, AuditActor $actor, string $note): array
     {
         $fields = array_flip(ClientLimits::FIELDS);
-        foreach ($values as $column => $value) {
-            if (!isset($fields[$column])) {
-                throw new DomainRuleViolation("Unknown limit $column.");
-            }
-            $minimum = 'api_requests_per_minute' === $column || 'max_recipients_per_send_job' === $column ? 1 : 0;
-            if (null !== $value && $value < $minimum) {
-                throw new DomainRuleViolation(\sprintf('%s must be at least %d.', $column, $minimum));
-            }
-            if ('max_recipients_per_send_job' === $column && null !== $value && $value > 10000) {
-                throw new DomainRuleViolation('max_recipients_per_send_job may not exceed the contract ceiling of 10000.');
-            }
-            $this->policy->assertWithinCeiling($column, $value);
-        }
+        $this->validate($values);
         $limits = $this->em->find(ClientLimits::class, $client->getId()) ?? new ClientLimits($client);
         $changes = [];
         foreach ($values as $column => $value) {

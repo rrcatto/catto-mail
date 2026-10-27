@@ -63,7 +63,8 @@ final class Presenter
      *
      * @return array<string, mixed> OpenAPI SendingDomain
      */
-    public static function sendingDomain(SendingDomain $domain, bool $canSend): array
+    /** @param string $setupUrl the dashboard page where the domain is set up (specification 2.13) */
+    public static function sendingDomain(SendingDomain $domain, bool $canSend, string $setupUrl): array
     {
         return [
             'id' => $domain->getId()->toRfc4122(),
@@ -72,6 +73,7 @@ final class Presenter
             'dkim_status' => $domain->getDkimStatus()->value,
             'verified_at' => Clock::rfc3339($domain->getVerifiedAt()),
             'can_send' => $canSend,
+            'setup_url' => $setupUrl,
         ];
     }
 
@@ -130,6 +132,20 @@ final class Presenter
             'id' => $s->getId()->toRfc4122(),
             'email_address' => $s->getAddressOrDomain(),
             'reason' => $s->getReason()->value,
+            'status' => null === $s->getLiftedAt() ? 'active' : 'lifted',
+            'external_reference' => $s->getExternalReference(),
+            'created_at' => Clock::rfc3339($s->getCreatedAt()),
+            'lifted_at' => Clock::rfc3339($s->getLiftedAt()),
+        ];
+    }
+
+    /** @return array<string, mixed> OpenAPI AccountBlock */
+    public static function accountBlock(Suppression $s): array
+    {
+        return [
+            'id' => $s->getId()->toRfc4122(),
+            'scope' => $s->getScopeType()->value,
+            'value' => $s->getAddressOrDomain(),
             'status' => null === $s->getLiftedAt() ? 'active' : 'lifted',
             'external_reference' => $s->getExternalReference(),
             'created_at' => Clock::rfc3339($s->getCreatedAt()),

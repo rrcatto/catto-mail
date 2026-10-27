@@ -1,6 +1,6 @@
 # Integrating ctnlist with catto-mail
 
-Specification 2.12. This describes the integration of the ctnlist mailing-list application with
+Specification 2.13. This describes the integration of the ctnlist mailing-list application with
 catto-mail: what each side owns, the API calls and webhook events, what ctnlist already does,
 and the **ctnlist-side work that is still outstanding**. The ctnlist repository
 (`github.com/rrcatto/ctnlist`) is maintained separately, with its own instructions, tests and
@@ -19,7 +19,7 @@ catto-mail  = validation, sending, suppression, delivery events, bounces, compla
 They never share a database. ctnlist uses catto-mail only through the authenticated API
 (`/v1`, an API key of the ctnlist client) and receives signed webhooks.
 
-## What ctnlist already does (read from its repository, release 6.0.11)
+## What ctnlist already does (read from its repository: release 6.1.4, and its guided setup, not yet released)
 
 | Concern | catto-mail API / event | ctnlist |
 |---|---|---|
@@ -27,46 +27,60 @@ They never share a database. ctnlist uses catto-mail only through the authentica
 | Send a campaign | `POST /v1/send-jobs`, `POST /v1/send-jobs/{id}/recipients` (≤ 500 per batch), `POST /v1/send-jobs/{id}/submit` | `CattoMailSender`, `OutgoingMessageFactory` (List-Id `Name <shortcode.domain>`, per-recipient unsubscribe URL) |
 | Follow results | `GET /v1/send-jobs/{id}`, `GET /v1/send-jobs/{id}/messages`, `GET /v1/messages/{id}/events` | `SendJobSync` (polling fallback) |
 | Recipient global opt-out | `POST /v1/global-suppressions`, `GET /v1/global-suppressions/{id}`, `POST /v1/global-suppressions/{id}/lift` | `GlobalOptOut` |
-| Connect and disconnect | the connect page `/dashboard/connect`, `POST /v1/connect/exchange`, `DELETE /v1/connection` | `ConnectFlow`, `ConnectionStore`, `Admin\DeliveryConnectionController` (Delivery page) |
-| Whether its From domain can send | `GET /v1/sending-domains` (`can_send`), and `sending_domains` in the exchange answer | `SendingDomainCheck` (a warning on the Delivery page) |
+| Connect and disconnect | the connect page `/dashboard/connect` (with `sending_domain`: its From domain), `POST /v1/connect/exchange`, `DELETE /v1/connection` | `ConnectFlow`, `ConnectionStore`, `Admin\DeliveryConnectionController` (Delivery page, Set up sending) |
+| Whether its From domain can send | `GET /v1/sending-domains` (`can_send`, `setup_url`), and `sending_domains` in the exchange answer | `SendingDomainCheck` (a warning on the Delivery page; Set up sending's step 3 links to `setup_url` with `back=`) |
+| A test message to its administrator | `POST /v1/send-jobs` and its recipients and submit, like a proof | `SendingSetup` (Set up sending's step 4) |
+| An administrator's block of an address or a whole domain | `POST /v1/blocks`, `POST /v1/blocks/{id}/lift` (account blocks, 2.13) | `AccountBlocks`, `Subscriber\Blocking` (a subscriber's Actions menu, Bulk unsubscribe's domain, bounce and spam scopes); kept in `cattomail_blocks` with its key, retried by the worker, and enforced in ctnlist too |
 | Webhooks | `validation.completed/failed`, `send.completed/failed`, `message.hard_bounced`, `message.complained`, `webhook.test`; signature `Smarthost-Signature`, de-duplication by `Smarthost-Event-Id` | `WebhookProcessor`, `WebhookSignature`; unknown event types are recorded and ignored |
 
 Ordinary list unsubscribes stay in ctnlist (its unsubscribe links), as catto-mail requires: they
-are never reported to catto-mail as global opt-outs.
+are never reported to catto-mail as global opt-outs, and a subscriber's own unsubscribe never
+becomes a block. Only an administrator's block does (owner decision 2026-10-27).
 
 ctnlist tests this against its own hand-written fake of the `/v1` API, which follows OpenAPI
-1.0.0-draft.10. The two development stacks have been run together (2026-10-12, both on one
+1.0.0-draft.11 (with ctnlist's guided setup; see below). The two development stacks have been run together (2026-10-12, both on one
 workstation): connect with ctnlist's button, a proof and a validation job (`bin/dev
 test-cattomail`), the signed `send.completed` and `validation.completed` webhooks, a declined
 request, disconnect and reconnect. Where ctnlist is behind the contract is listed under
 *Outstanding ctnlist work*. Neither application is in production.
 
-## Connecting ctnlist with one approval (both sides implemented, specification 2.12)
+## Connecting ctnlist with one approval (both sides implemented, specification 2.12; guided, 2.13)
 
 An administrator of ctnlist no longer copies catto-mail's API key and webhook signing secret into
 ctnlist's `.env` (`CATTOMAIL_API_KEY`, `CATTOMAIL_WEBHOOK_SECRET`; that still works, and a value
-there wins). They enter catto-mail's address on ctnlist's Delivery page and press Connect: an
-authorisation-code flow with PKCE (integration guide, section 15):
+there wins). catto-mail's address comes from ctnlist's configuration (`CATTOMAIL_API_BASE_URL` in
+its `.env`, which its Settings page can change; the installers take it as an option), so nobody
+types it; the administrator presses Connect: an authorisation-code flow with PKCE (integration
+guide, section 15):
 
 1. ctnlist sends its administrator's browser to `https://<catto-mail>/dashboard/connect` with
    `application_name`, `redirect_uri` (a ctnlist route), `webhook_url`
    (`<APP_BASE_URL>cattomail/webhook`), `state`, `code_challenge` and
-   `code_challenge_method=S256`.
-2. The administrator signs in to catto-mail (or opens an account, where public sign-up is on),
-   chooses the client workspace and approves.
+   `code_challenge_method=S256`, and `sending_domain`: the domain of ctnlist's From address.
+2. The administrator signs in to catto-mail and approves for their account. Someone without an
+   account opens one there where public sign-up is on (or an operator may); otherwise the page
+   says that accounts are opened by invitation (an operator's invitation link, Clients ›
+   Invitations), and never leaves them at a dead end. Approving adds the sending domain to the
+   account when it is not there yet.
 3. catto-mail redirects back with `code` and `state`; ctnlist exchanges the code with
    `POST /v1/connect/exchange` and receives the API key, the webhook signing secret, the API
    base URL and the client's sending domains, once.
 4. ctnlist stores the API base URL, and the key and the secret encrypted, in its Settings store.
    Its Disconnect ends the connection with `DELETE /v1/connection` and then clears them, and it
    reads `GET /v1/sending-domains` (`can_send`) to warn when the domain of its From address
-   cannot send.
+   cannot send. Each sending domain carries `setup_url`, the account's page of that domain's DNS
+   steps: ctnlist links to it with `back=<its own page>` (its origin is the connection's
+   `redirect_uri` origin), so the page offers "Back to <ctnlist's name>".
 
 What ctnlist relies on beyond the schemas: `409` from the exchange means "refused for now, the
 code stays usable" (it lets the administrator finish again), every other `4xx` means "start
 again"; `401` from `DELETE /v1/connection` means the connection is already ended. ctnlist is
 named in catto-mail by its list name (`application_name`), and connecting again from the same
 site replaces the earlier connection, because the webhook address is the same.
+
+ctnlist's *Set up sending* page (Delivery) takes an administrator through it in four steps: an
+account at the mail service, Connect, the sending domain ready (its DNS steps here), and a test
+message to themself; administration pages show a notice until all four are done.
 
 The webhook endpoint this creates is subscribed to the six events ctnlist handles today, not to
 `repermission.responded`: a client admin adds that event in catto-mail (Settings › Webhooks)
@@ -125,7 +139,7 @@ ones. Delivery is at least once: de-duplicate by the event id, as for every even
 ### Re-permission
 
 1. **Subscribe the endpoint to the event.** In catto-mail, a ctnlist client admin adds
-   `repermission.responded` to the ctnlist webhook endpoint's events (client workspace: Settings › Webhooks).
+   `repermission.responded` to the ctnlist webhook endpoint's events (the account's Settings › Webhooks).
 2. **Handle `repermission.responded` in `WebhookProcessor`** (today it is "ignored unknown event
    type"):
    - find the subscriber by `data.address` (catto-mail normalises only the domain to lower
@@ -161,7 +175,9 @@ The stacks are separate; the route between them is the internal Podman network `
    and `CATTOMAIL_WEBHOOK_URL=http://ctnlist-web/cattomail/webhook`.
 2. Here: `APP_WEBHOOK_ALLOWED_PRIVATE_HOSTS=webhook-receiver,ctnlist-web` in `infra/.env`, then
    `smarthostctl install` and `recreate` (the pod joins `cattomail-dev` as `catto-mail`).
-3. In ctnlist: Admin → Settings → Delivery, the address `https://localhost:8443`, Connect; approve
-   as a client admin of a client whose sending domain is the domain of ctnlist's From address.
+3. In ctnlist: the mail service address `https://localhost:8443` (Settings, or
+   `CATTOMAIL_API_BASE_URL`), then Delivery › Set up sending, Connect; approve as an admin of an
+   account here (approving adds the domain of ctnlist's From address; `smarthostctl dev-agent`
+   makes and switches on its DKIM key on this pod).
 4. `bin/dev test-cattomail` in ctnlist sends a proof and a validation job through this pod; the
    mail lands in this pod's Mailpit and the webhooks go to `http://ctnlist-web/cattomail/webhook`.

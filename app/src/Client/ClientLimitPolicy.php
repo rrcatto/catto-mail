@@ -146,7 +146,7 @@ final class ClientLimitPolicy
         $ceiling = $this->ceiling($column);
         if (null !== $value && null !== $ceiling && $value > $ceiling) {
             throw new \App\Domain\DomainRuleViolation(\sprintf(
-                '%s may not exceed the installation ceiling of %d (a client limit may only lower it).', $column, $ceiling));
+                '%s may not be more than %d, the most this installation allows (a limit can only lower it).', \App\Dashboard\Labels::label($column, 'limit'), $ceiling));
         }
     }
 

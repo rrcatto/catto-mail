@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Read `AGENTS.md` first; everything there applies. This file adds Claude-specific working notes.
 
 ## Authority
-1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.12) is authoritative.
+1. `docs/20260908-1644-smarthost-llm-spec.yaml` (specification 2.13) is authoritative.
 2. The normative contracts it lists (`instruction_for_llm.normative_contracts`) elaborate it:
    - `docs/contracts/status-vocabulary.yaml`
    - `docs/api/openapi.v1.yaml`
@@ -189,6 +189,16 @@ points span components and need several files to see:
   `APP_SITE_NAME`, `APP_ORGANISATION_NAME`, the host of the public address, `APP_ADMIN_EMAIL`; Twig
   `site_name()`). `docs/AUP.md` holds placeholders only, and `APP_ACCEPTABLE_USE_POLICY_VERSION`
   is the version it states in the development example and the production profile.
+- **Guided account setup** (unreleased, owner decisions 2026-10-27, spec 2.13; migration
+  `Version20261027000100`, OpenAPI 1.0.0-draft.11): plans (`App\Client\PlanCatalog`, Clients ›
+  Plans), invitations (`App\Client\Invitations`, `InvitationController`, Clients › Invitations),
+  New client on its own page (`App\Client\AccountOpening`), the connect page that never dead-ends
+  and takes `sending_domain`, `SendingDomain.setup_url`, each sending domain's steps page
+  (`ClientDomainController`, `dnscheck_controller.js`, `DomainReadyMail`), the account's start-page
+  checklist (`ClientAccountReadModel::nextSteps`), copy buttons (`ui.copy`,
+  `copy_controller.js`), System setup split into "needs you" and "checked automatically"
+  (`SetupWizard::NEEDS_YOU`), and `smarthostctl dev-agent` (the development pod's stand-in for the
+  host agent's DKIM work). Tests: `AccountSetupTest`, `ConnectTest`, `ClientDomainSetupTest`.
 - Do not start Phase 11 or later work unless the user explicitly asks for it.
 
 ## ctnlist, the first client application
@@ -340,6 +350,13 @@ This is a public repository. Documentation, comments, examples, tests, configura
     `footer()` after `main` (version, administrator's address, time zone). A new standalone page
     does the same and gets a line in `PageFrameTest`.
   - When pages change visibly, retake the affected `docs/screenshots/` images (test data only).
+  - Guided setup (owner decisions 2026-10-27): the customer's screens say *account*, never
+    *workspace* or *client* (the operator console keeps *client*); a create form is a page of its
+    own (`.formpage`, centred, each field with its `field-help`), never a `details.actionform`
+    beside a title; the breadcrumb shows on detail pages only (`crumb_tail`); ready-made views of a
+    list have plain addresses (`/dashboard/operator/clients/waiting`), never internal values in the
+    query; every value a person copies elsewhere gets `ui.copy()`; no internal name (host agent,
+    fan-out, origin) on a customer's screen.
 - **Every time is in the installation's time zone** (`SMARTHOST_TIMEZONE`, default
   `Africa/Johannesburg`; owner decision). Never write UTC or a `Z` suffix:
   - PHP: the kernel sets the default zone on boot; use `Clock::now()` and `Clock::rfc3339()` (offset
@@ -419,7 +436,17 @@ This is a public repository. Documentation, comments, examples, tests, configura
     policy acceptance and the starter limits (`APP_STARTER_*`, capped by the ceilings) and
     activates the client. Keep it: GET never changes state, every POST has CSRF, the answer never
     reveals whether an address has an account, the rate limits and the honeypot stay, tokens are
-    stored only as hashes and never logged. No other public route may create clients.
+    stored only as hashes and never logged. The only other public route that creates clients is an
+    operator's invitation (owner decision 2026-10-27, `App\Client\Invitations`, origin
+    `invitation`): single use, hash only, the same limits and honeypot, open while the sign-up is
+    closed. Accounts open by invitation for now: no public registration and no waiting list.
+  - Plans (`plans`, `App\Client\PlanCatalog`): a client's limits are its plan's, copied into
+    `client_limits` (enforcement reads only `client_limits`); changed by hand they are custom.
+    `standard` and `starter` are built in. Never re-add the `APP_STARTER_*` settings.
+  - New client (`App\Client\AccountOpening`) is the operator's approval: exempt → active at once;
+    must accept → `pending_approval` with `opens_on_policy_acceptance`, opened by
+    `ClientLifecycle::openAfterAcceptance` when the account's admin accepts. The billing and abuse
+    contact addresses are gone; `contact_email` is the address the account was opened for.
   - Create clients and change their status only through `ClientLifecycle`, never by setting
     `clients.status`. Every transition has its permission and a reason, and is audited.
   - Volume quotas are admitted only through `QuotaEnforcer::admit`, inside the transaction that
@@ -459,6 +486,12 @@ This is a public repository. Documentation, comments, examples, tests, configura
     change both together). Do not add another.
   - The connect page is `PUBLIC_ACCESS`; sign-in and sign-up accept `return_to` only when it is a
     connect path (`ConnectRequest::returnPath`, which also makes it canonical). Never widen it.
+  - It never dead-ends (2.13): signed in without an account, `POST /dashboard/connect/account`
+    opens one with the organisation's name (public sign-up open: Starter, policy accepted on the
+    form; an operator with `PLATFORM.CLIENT.APPROVE`: Standard, exempt); anyone else is told that
+    accounts are opened by invitation. `sending_domain` (optional) is added to the account by the
+    approval within its limit. A domain's steps page shows "Back to <application>" only for a
+    `back` URL on the redirect origin of one of the account's active connections.
   - Ending a connection revokes its key and sets its endpoint to `removed` (terminal:
     `WebhookEndpointService::remove`, called only from `ConnectService`). A removed endpoint is
     never listed, changed or counted against a limit; its row stays for the delivery history.
@@ -469,6 +502,14 @@ This is a public repository. Documentation, comments, examples, tests, configura
   `complaint` and `repeated_soft_bounce`, through the one policy in `delivery/internal/store/policy.go`;
   only `failure_scope = recipient` counts. Unsuppress by setting `lifted_at`, never by deleting.
   An ordinary unsubscribe is never Smarthost state.
+- **Account blocks (spec 2.13, owner decision 2026-10-27).** An account blocks an address or a whole
+  domain for its own mail: reason `account_block`, `client_id` the account, never global, no
+  expiry (`suppressions_account_block_scoped`), one active per account, scope and value. Its admins
+  add and lift them on Sending › Suppressions; its application uses `/v1/blocks` (idempotent through
+  `global_suppression_requests`, operation `create_account_block`). `GET /v1/blocks` lists only the
+  account's own blocks, never other suppressions: keep it that way (no lookup oracle). Creating is
+  allowed in every status that authenticates; lifting needs active or throttled. Go needs nothing:
+  it already applies every active client-scoped address or domain row.
 - **Never commit secrets.** `infra/.env` and `infra/.generated/` (env files, rendered units,
   development TLS material) are gitignored. Development DKIM private keys live only in the
   `smarthost-opendkim-keys` Podman volume.

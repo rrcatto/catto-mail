@@ -46,6 +46,9 @@ erDiagram
     clients ||--o{ usage_records : "metered"
     clients ||--o{ webhook_endpoints : "registers"
     clients ||--o{ application_connections : "connects"
+    plans ||--o{ clients : "limits of"
+    plans ||--o{ client_invitations : "plan offered"
+    client_invitations |o--o| clients : "opened"
     application_connections |o--o| api_keys : "key (from the exchange)"
     application_connections |o--o| webhook_endpoints : "endpoint (from the exchange)"
     clients ||--o{ webhook_events : "outbox"
@@ -90,6 +93,7 @@ erDiagram
     roles ||--o{ user_roles : "granted by"
     roles ||--o{ role_permissions : "permission keys"
     users |o--o{ auth_login_tokens : "sign-in links"
+    client_invitations |o--o{ auth_login_tokens : "sign-up links of an invitation"
     client_memberships {
         uuid id PK
         uuid user_id FK
@@ -272,19 +276,21 @@ erDiagram
 | Table | Ownership | Scoping path |
 |---|---|---|
 | `clients` | tenant root | `id` |
-| `global_suppression_requests` | tenant | `client_id` (the reporting client; D-38) |
+| `global_suppression_requests` | tenant | `client_id` (the requesting client: opt-outs, D-38, and account blocks, 2.13) |
 | `client_memberships`, `sending_domains`, `api_keys`, `validation_jobs`, `send_jobs`, `usage_records`, `webhook_endpoints`, `webhook_events`, `webhook_deliveries` | tenant | `client_id` |
 | `client_limits`, `client_quota_usage`, `client_policy_acceptances`, `billing_statements` | tenant (Phase 9) | `client_id` |
 | `application_connections` | tenant (2.12) | `client_id`. Client members see the connected applications; client admins revoke them. The code hash and the code challenge are never shown. |
 | `billing_statement_lines` | tenant (Phase 9) | via `billing_statements.client_id` |
 | `client_notes`, `client_reputation_metrics`, `client_alerts` | operator only (Phase 9) | `client_id`, but never shown to the client (private notes, inferred risk) |
+| `plans` | installation-wide (2.13) | none: the named limit sets operators define. A client sees its own plan's name and limits on its Usage page, never the list of plans. |
+| `client_invitations` | operator only (2.13) | none until used (then `client_id`, the account it opened); the token hash is never shown |
 | `validation_addresses`, `validation_evidence` | tenant | via `validation_jobs.client_id` |
 | `send_job_recipient_batches`, `send_job_recipients`, `messages` | tenant | via `send_jobs.client_id` |
 | `message_links`, `message_events` | tenant | via `messages → send_jobs.client_id` |
 | `users` | global identity | client data is reached only through `client_memberships`, or through installation-wide permissions (`PLATFORM.CLIENT.*`) |
 | `roles`, `role_permissions`, `user_roles` | installation-wide access control | none (administered with `SYSTEM.ROLE.MANAGE` / `PLATFORM.USER.MANAGE`) |
 | `auth_login_tokens` | authentication | none (never readable through the dashboard) |
-| `suppressions` | tenant or global | `client_id`, where NULL = global. A tenant sees its own client-scoped rows and the global opt-outs it reported (`source_client_id`); other global rows are not tenant data (D-30). |
+| `suppressions` | tenant or global | `client_id`, where NULL = global. A tenant sees its own client-scoped rows (its account blocks and the operator's blocks of it) and the global opt-outs it reported (`source_client_id`); other global rows are not tenant data (D-30). |
 | `domain_reputation` | tenant or platform | `client_id`, where NULL = platform |
 | `disposable_domains` | global reference data | none |
 | `unmatched_dsns` | operator only | none until matched |
@@ -315,6 +321,7 @@ grant (`roles`, `role_permissions`, `user_roles`; ADMIN holds every permission).
 | `suppressions.global_address_reason_active_unique` | `suppressions_global_address_reason_active_uq` (partial: global, address, not lifted, hard_bounce/complaint). One active row per address and reason under concurrent evidence (D-30). |
 | `global_suppression_requests.client_id_operation_idempotency_key_unique` | `global_suppression_requests_client_operation_key_uq`. Durable opt-out request idempotency per reporting client (D-38). |
 | `suppressions.source_client_id_address_active_opt_out_unique` | `suppressions_source_client_address_active_uq` (partial: active opt-outs). One active opt-out per reporting client and address. |
+| `suppressions.account_block_active_unique` | `suppressions_account_block_active_uq` (partial: active account blocks). One active block per account, scope and value (2.13). |
 | `messages.recipient_address` | `messages_recipient_address_idx`. Global repeated-soft-bounce evaluation and recipient-based DSN correlation (D-30). |
 | `api_keys.key_hash_unique` | `api_keys_key_hash_uq` |
 | `send_jobs.client_id_status` | `send_jobs_client_status_idx` |
@@ -375,9 +382,11 @@ Other indexes:
 | `suppressions` | D-18 normalisation (local part never case-folded). A `recipient_global_opt_out` row, and only it, carries `source_client_id` (and may carry `external_reference`), and is global and address-scoped; its requests and their idempotency keys are in `global_suppression_requests`. `hard_bounce`, `complaint` and `recipient_global_opt_out` never expire; `repeated_soft_bounce` is the temporary reason. `source_event_id` requires `source_message_id`. |
 | `global_suppression_requests` | One row per (`client_id`, `operation`, `idempotency_key`); `operation` from the vocabulary (`create_global_opt_out`); `response_status` is 201 (created) or 200 (already active). |
 | `validation_addresses` | A suggestion has both a reason code and a confidence. A claimed row has a lease. |
-| `auth_login_tokens` | `purpose` is `sign_in` or `sign_up`. A `sign_up` link (public sign-up) carries the organisation's name and belongs to no user; a `sign_in` link carries no organisation. Only the token's SHA-256 is stored. |
+| `auth_login_tokens` | `purpose` is `sign_in` or `sign_up`. A `sign_up` link (public sign-up or an invitation) carries the organisation's name and belongs to no user; a `sign_in` link carries no organisation. Only a `sign_up` link may name an invitation (`invitation_id`). Only the token's SHA-256 is stored. |
 | `sending_domains` | `verified` requires `verified_at`. A DKIM status other than `not_configured` requires a selector. `dkim_public_key`, when set, is base64 (at most 2000 characters): the public half of the key the host agent generated for the client dashboard, never a private key. |
-| `clients` | `closed` requires `closed_at`; `origin` is `operator` or `public_application`. |
+| `clients` | `closed` requires `closed_at`; `origin` is `operator`, `public_application`, `invitation` or `system` (the installation's self-test client); `plan` names a row of `plans`. |
+| `plans` | `id` is a lower-case key (2–40 characters); names are unique case-insensitively; the limits follow the rules of `client_limits`. `standard` and `starter` are built in and never deleted; a plan named by a client or an invitation is never deleted. |
+| `client_invitations` | The token is stored as its SHA-256. `used_at` and `client_id` are set together, when the account opens; a used invitation is never revoked; `expires_at` is after `created_at`. |
 | `api_keys` | `expires_at`, when set, is after `created_at`. |
 | `webhook_endpoints` | `status` is `enabled`, `disabled` or `removed`. `removed` (2.12) is terminal and set only when an application connection ends: the endpoint receives nothing, counts against no limit and keeps its delivery history. |
 | `application_connections` | `status` from the vocabulary (`pending`, `active`, `revoked`). `exchanged_at`, `api_key_id` and `webhook_endpoint_id` are set together, at the exchange: `pending` has none of them and `active` all of them. `revoked` has `revoked_at`, and only it. The code is stored as its SHA-256, the code challenge as 43 base64url characters (PKCE S256); `code_expires_at` is after `created_at`. Both URLs are `http(s)` and at most 2000 characters. |
@@ -407,6 +416,8 @@ grants below. No runtime role has DDL rights.
 | api_keys | S I U | – | – | – |
 | application_connections | S I U D⁶ | – | – | – |
 | client_limits, client_quota_usage | S I U | – | – | – |
+| plans | S I U D | – | – | – |
+| client_invitations | S I U | – | – | – |
 | client_notes, client_policy_acceptances | S I | – | – | – |
 | validation_jobs | S I U | S | S U | – |
 | validation_addresses | S I D¹ | – | S U | – |

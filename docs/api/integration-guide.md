@@ -266,6 +266,17 @@ webhook, an outage or at regular intervals, read the job (`GET /v1/send-jobs/{id
   `POST /v1/global-suppressions` (idempotent), and later `POST /v1/global-suppressions/{id}/lift`
   if the recipient withdraws it. Lifting removes only your opt-out; other suppressions of the
   address stay.
+- **Your account's blocks** (specification 2.13): block an address or a whole domain your account
+  must never mail, for example someone who complained to you, or asked you to leave their whole
+  domain alone. `POST /v1/blocks` with exactly one of `address` or `domain` (and an
+  `Idempotency-Key`; an optional `external_reference`) returns 201 with the block, or 200 when it
+  was already blocked. From then on every message of your account to it is suppressed, also those
+  already queued; other accounts are not affected. A domain block covers exactly that domain, not
+  its subdomains. `GET /v1/blocks` lists your blocks (newest first; `status` `active`, `lifted` or
+  `all`; `value` for one address or domain, which does not also return the domain's block of an
+  address), `GET /v1/blocks/{id}` reads one, and `POST /v1/blocks/{id}/lift` lifts it (an active
+  or throttled account; any other suppression of the address still applies). Use these instead
+  of keeping a block list of your own: catto-mail enforces it at send time.
 
 ## 14. Tracking
 
@@ -293,6 +304,7 @@ https://<your Smarthost host>/dashboard/connect
     &state=6f1c0b…
     &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
     &code_challenge_method=S256
+    &sending_domain=lists.example.com
 ```
 
 | Parameter | Value |
@@ -303,13 +315,16 @@ https://<your Smarthost host>/dashboard/connect
 | `state` | 1 to 512 printable ASCII characters without spaces. It comes back unchanged; check it. |
 | `code_challenge` | `BASE64URL(SHA-256(code verifier))` without `=` padding: 43 characters. |
 | `code_challenge_method` | `S256`. |
+| `sending_domain` | Optional: the domain your application sends from, the part after `@` of its From address. Approving adds it to the person's account when it is not there yet and the account has room, so they can set it up straight away (`setup_url`, below). |
 
 Plain `http` URLs are accepted only by a development installation. If a parameter is missing or
 refused, the page says which one and the person is **not** sent back to you.
 
 **2. The person signs in and approves.** They sign in to Smarthost, or, where the installation
 offers sign-up, open an account there and then; either way they return to the connect step.
-They choose the workspace (client) to connect and press *Connect*. Only a client admin can
+Someone signed in without an account can open one there with their organisation's name, where
+the installation allows it; otherwise the page tells them that accounts are opened by invitation.
+They choose the account to connect and press *Connect*. Only an admin of the account can
 approve, and only for an active account. If the account has no room for another API key or
 webhook endpoint, the page says so and nothing happens.
 
@@ -343,7 +358,8 @@ Content-Type: application/json
                         "send.failed", "validation.completed", "validation.failed"]},
  "sending_domains": [{"id": "0199…", "domain": "example.com", "status": "verified",
                       "dkim_status": "active", "verified_at": "2026-10-07T10:00:00.000000+02:00",
-                      "can_send": true}]}
+                      "can_send": true,
+                      "setup_url": "https://<your Smarthost host>/dashboard/c/0199…/sending-domains/0199…"}]}
 ```
 
 - **Store `api_key` and `webhook.signing_secret` at once.** They are shown this one time:
@@ -359,6 +375,10 @@ Content-Type: application/json
 - Connecting again with the same `webhook_url` replaces the earlier connection: at this
   exchange its key is revoked and its endpoint removed. Until then the earlier key keeps working.
 - A connection never includes global opt-out reporting (section 13); only the operator grants it.
+- `sending_domains[].setup_url` (also in `GET /v1/sending-domains`) is the domain's page in the
+  account's dashboard: its DNS records, one step at a time, checked by the page itself. While
+  `can_send` is false, link the person there. Add `back=<an address of your application>` (same
+  scheme, host and port as your `redirect_uri`) to give them a *Back to* link on that page.
 
 **5. Disconnect.** Your application ends its own connection with the key it received:
 

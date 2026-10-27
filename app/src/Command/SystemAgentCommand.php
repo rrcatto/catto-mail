@@ -22,7 +22,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * the host as the service user (`smarthostctl prod agent`) and calls these through
  * `podman exec` into the application container; JSON travels on stdin and stdout.
  *
- *   claim                       claim pending requests; prints them as JSON
+ *   claim [--only=<action>...]  claim pending requests (only those actions, when named); prints them as JSON
  *   finish <id> --failed?       record a request's outcome; stdin {"summary": "...", "result": {...}}
  *   report [--requested]        record checks and state; stdin {"checks": [...], "state": {"host_report": {...}, ...},
  *                               "complete": true when the checks are the full set (agent checks not in it are retired)}
@@ -52,7 +52,8 @@ final class SystemAgentCommand extends AdminCommand
         $this->addArgument('action', InputArgument::REQUIRED, 'claim | finish | report | diagnostics | domains')
             ->addArgument('request-id', InputArgument::OPTIONAL)
             ->addOption('failed', null, InputOption::VALUE_NONE, 'finish: the request failed')
-            ->addOption('requested', null, InputOption::VALUE_NONE, 'report/diagnostics: an administrator asked for this run (kept in the history)');
+            ->addOption('requested', null, InputOption::VALUE_NONE, 'report/diagnostics: an administrator asked for this run (kept in the history)')
+            ->addOption('only', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'claim: only requests of this action (dkim.generate, dkim.activate, ...)');
     }
 
     protected function handle(InputInterface $input, SymfonyStyle $io): int
@@ -61,7 +62,9 @@ final class SystemAgentCommand extends AdminCommand
         switch ((string) $input->getArgument('action')) {
             case 'claim':
                 $this->requests->expireStale();
-                $io->writeln(json_encode($this->requests->claim(), \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES));
+                $only = array_values(array_filter((array) $input->getOption('only'), static fn (mixed $a): bool => \is_string($a)
+                    && null !== \App\Enum\SystemRequestAction::tryFrom($a)));
+                $io->writeln(json_encode($this->requests->claim(10, $only), \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES));
 
                 return Command::SUCCESS;
             case 'finish':

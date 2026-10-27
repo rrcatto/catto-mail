@@ -154,7 +154,7 @@ Run `infra/bin/smarthostctl prod dns-checklist` for the exact records of this co
 | `_dmarc.send.example.com TXT` | `v=DMARC1; p=none; rua=mailto:dmarc@send.example.com` to start | the sending domain's DNS |
 
 Each client sending domain is also verified by Smarthost's TXT challenge. A client admin adds the
-domain and checks it in the client workspace (Settings › Sending domains, section 6a); the console
+domain and follows its steps in the account's dashboard (Settings › Sending domains, section 6a); the console
 equivalent is `smarthost:domain:add`, then `smarthost:domain:verify`. DMARC alignment comes from
 DKIM: `d=` is the sending domain. The return path is the bounce domain, so SPF aligns only within
 one organisational domain. The preflight validates and reports. It never rewrites DNS.
@@ -185,29 +185,31 @@ The domain of `APP_MAIL_FROM` needs a key too; it signs the sign-in mail.
 ## 6a. Client sending domains (client dashboard)
 
 Clients set up their own sending domains; no console work is needed. Under Settings › Sending
-domains in the client workspace:
+domains in the account's dashboard each domain has a page that shows one step at a time, with copy
+buttons, and looks at DNS by itself every 30 seconds (2.13):
 
-1. **Added.** A client admin adds the domain. The client's limit applies: its own
-   `max_sending_domains`, never above `APP_CLIENT_SENDING_DOMAIN_LIMIT`. Suspended and closed
-   clients cannot add domains.
-2. **TXT verified.** The client publishes `_smarthost-verification.<domain>` and presses *Check DNS
-   now*.
+1. **Added.** A client admin adds the domain (*Add a domain*), or connecting an application that
+   names its domain adds it. The client's limit applies: its own `max_sending_domains`, never above
+   `APP_CLIENT_SENDING_DOMAIN_LIMIT`. Suspended and closed clients cannot add domains.
+2. **TXT verified.** The client publishes `_smarthost-verification.<domain>`; the page finds it by
+   itself, or *Check now* looks at once.
 3. **DKIM key requested.** The dashboard asks the host agent for a key straight away, as the host
    request `dkim.generate`. The request names the sending domain and a new selector
    `cm<yyyymm><4 hex>`.
 4. **DKIM pending in DNS.** The agent runs `prod dkim generate` and returns only the public half.
    The application records `dkim_status = pending_dns` with the selector and the public key. The
-   page shows the DKIM record, a DMARC record to start with (`p=none`), and SPF guidance: nothing
-   to add, because the envelope sender is the bounce domain.
+   page shows the DKIM record to publish.
 5. **Active.** When the published record matches the key, the application queues `dkim.activate`.
-   This happens on *Check DNS now*, or when the agent calls `smarthost:system:agent domains`,
+   This happens on the page's own check or *Check now*, or when the agent calls `smarthost:system:agent domains`,
    every five minutes and at most every ten minutes per domain. The agent compares DNS with the
    private key again and runs `prod dkim activate` (OpenDKIM reloads its tables). When it finishes the
    request, the application records `dkim_status = active`, as `smarthost:domain:dkim … active`
-   records it.
+   records it. The account's admins are emailed that the domain is ready; the page then recognises
+   an existing DMARC record or suggests `v=DMARC1; p=none`, and says SPF needs nothing (the
+   envelope sender is the bounce domain).
 
 The requests appear under Mail flow › Delivery › Host requests, and every step is in the audit
-log. A failed generation shows *Request the DKIM key again* to the client admin. The dashboard
+log. A failed generation shows *Try again* to the client admin. The dashboard
 refuses to set up a key for a domain another client has also verified, because one key signs a
 domain for everyone; set that one up by hand (section 6). Rotation and retirement stay operator
 tasks (section 6).
@@ -546,19 +548,22 @@ Procedures for taking on a client, its limits, usage and billing statements, and
 alerts: [onboarding.md](onboarding.md). In short:
 
 ```sh
-prod console smarthost:client:create --company "Example Ltd" --contact-email ops@example.net \
-  --abuse-contact-email abuse@example.net --billing-contact-email billing@example.net   # pending_approval
+prod console smarthost:client:create --company "Example Ltd" --contact-email ops@example.net --plan standard   # pending_approval
 prod console smarthost:client:limits <client-id> --set send_recipients_per_day=5000 \
-  --operator admin@example.com --note "plan agreed"
+  --operator admin@example.com --note "agreed: custom limit"
 prod client-status <client-id> active --operator admin@example.com --note "reviewed: policy accepted, domain verified"
 prod console smarthost:reputation evaluate      # also every 15 minutes by <instance>-reputation-evaluate.timer
 prod console smarthost:usage:reconcile --client <client-id> --period previous_month
 prod console smarthost:billing:statement prepare --client <client-id> --period previous_month --operator admin@example.com
 ```
 
+In the dashboard, Clients › New client does it in one step (the manager made the account's admin
+and emailed; specification 2.13), and Clients › Invitations makes a link for someone to open
+their own account. Plans (Clients › Plans) hold the limits.
+
 **Public sign-up** (owner decision, off by default): with `APP_PUBLIC_ONBOARDING_ENABLED=true` in
-`infra/.env`, members of the public open accounts themselves into the starter tier (`APP_STARTER_*`,
-System › Settings). You are emailed for every sign-up and see them under Clients › Clients ›
+`infra/.env`, members of the public open accounts themselves on the Starter plan (Clients ›
+Plans). You are emailed for every sign-up and see them under Clients › Clients ›
 *Public sign-ups*; throttle, suspend or close as above. Details, defaults and the criteria before
 turning it on: [onboarding.md](onboarding.md#public-sign-up-owner-decision-2026-10-11).
 

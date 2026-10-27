@@ -1,6 +1,7 @@
 {# What the application asked for (ConnectRequest): shown before anyone signs in or approves. #}
 <dl class="facts facts-1">
     <div><dt>Application</dt><dd>{{ connect.applicationName }}</dd></div>
-    <div><dt>Returns you to</dt><dd class="url">{{ connect.redirectOrigin }}</dd></div>
-    <div><dt>Its webhooks go to</dt><dd class="url">{{ connect.webhookUrl }}</dd></div>
+    <div><dt>Its address</dt><dd class="url">{{ connect.redirectOrigin }}</dd></div>
+    <div><dt>Where it is told what happened</dt><dd class="url">{{ connect.webhookUrl }}</dd></div>
+    {% if connect.sendingDomain %}<div><dt>Sends from</dt><dd>{{ connect.sendingDomain }}</dd></div>{% endif %}
 </dl>

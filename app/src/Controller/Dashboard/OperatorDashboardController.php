@@ -55,18 +55,7 @@ final class OperatorDashboardController extends AbstractController
         return $this->page('overview.html.twig', 'overview', $overview->build($period));
     }
 
-    #[Route('/clients', name: 'dashboard_operator_clients', methods: ['GET'])]
-    #[IsGranted('PLATFORM.CLIENT.VIEW')]
-    public function clients(Request $request): Response
-    {
-        $filters = ClientDashboardController::filters($request, ['status', 'origin', 'q']);
-        $listing = Listing::fromRequest($request, array_keys(OperatorReadModel::CLIENT_SORTS), 'created');
-
-        return $this->page('clients.html.twig', 'clients', [
-            'page' => $this->read->clients($filters, $listing), 'filters' => $filters, 'listing' => $listing]);
-    }
-
-    #[Route('/clients/{id}/global-suppressions', name: 'dashboard_operator_client_capability', methods: ['POST'])]
+    #[Route('/clients/{id}/global-suppressions', name: 'dashboard_operator_client_capability', methods: ['POST'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     #[IsGranted('PLATFORM.CLIENT.MANAGE')]
     public function setCapability(string $id, Request $request, SuppressionAdministration $suppressions): RedirectResponse
     {

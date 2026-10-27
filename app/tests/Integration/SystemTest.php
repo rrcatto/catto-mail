@@ -188,19 +188,20 @@ final class SystemTest extends DashboardTestCase
         $this->browser->request('GET', '/dashboard');
         self::assertStringEndsWith('/dashboard/operator/setup', (string) $this->browser->getResponse()->headers->get('Location'), 'a new installation opens the wizard');
         $index = self::text($this->page('/dashboard/operator/setup'));
-        self::assertStringContainsString('Continue with step 1: Welcome', $index);
+        self::assertStringContainsString('Continue: DNS', $index, 'the first step that needs the administrator (2.13)');
         foreach (array_keys(SetupWizard::STEPS) as $step) {
             self::assertSame(200, $this->page("/dashboard/operator/setup/$step")->getStatusCode(), $step);
         }
         $r = $this->submit('/dashboard/operator/setup/welcome', '/dashboard/operator/setup/welcome/state', ['state' => 'done']);
         self::assertStringEndsWith('/dashboard/operator/setup/host', (string) $r->headers->get('Location'));
         $this->submit('/dashboard/operator/setup/host', '/dashboard/operator/setup/host/state', ['state' => 'skipped', 'note' => 'later']);
-        self::assertSame('web_identity', $this->container()->get(SetupWizard::class)->current(), 'resumes at the first step not handled');
+        self::assertSame('dns', $this->container()->get(SetupWizard::class)->current(), 'resumes at the first step that needs the administrator and is not handled');
         self::assertSame(['done', 'skipped'], Db::owner()->fetchFirstColumn("SELECT state FROM setup_steps WHERE step_key IN ('welcome', 'host') ORDER BY step_key = 'host'"));
         // A step can be marked done from the overview of the steps, which then shows that step again.
-        $r = $this->submit('/dashboard/operator/setup', '/dashboard/operator/setup/web_identity/state', ['state' => 'done', 'return' => 'index']);
-        self::assertStringEndsWith('/dashboard/operator/setup#step-web_identity', (string) $r->headers->get('Location'));
-        self::assertSame('done', Db::owner()->fetchOne("SELECT state FROM setup_steps WHERE step_key = 'web_identity'"));
+        $r = $this->submit('/dashboard/operator/setup', '/dashboard/operator/setup/dns/state', ['state' => 'done', 'return' => 'index']);
+        self::assertStringEndsWith('/dashboard/operator/setup#step-dns', (string) $r->headers->get('Location'));
+        self::assertSame('done', Db::owner()->fetchOne("SELECT state FROM setup_steps WHERE step_key = 'dns'"));
+        self::assertSame('backups', $this->container()->get(SetupWizard::class)->current());
         $this->container()->get(SetupWizard::class)->set('readiness', SetupStepState::Done, $this->reload($admin));
         $this->browser->request('GET', '/dashboard');
         self::assertStringNotContainsString('/setup', (string) $this->browser->getResponse()->headers->get('Location'), 'no redirect once complete');

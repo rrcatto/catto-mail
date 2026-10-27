@@ -1,0 +1,22 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Add a webhook endpoint{% endblock %}
+{% block crumb_tail %}Add an endpoint{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Add a webhook endpoint</h1>
+    <p class="lead">The address where your own code is told what happened to its jobs and messages. An application with a Connect button sets up its own: you need none here.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_client_webhook_create', {clientId: client.id.toRfc4122}) }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Address</span>
+            <span class="field-help">An https address of your application that accepts POST requests.</span>
+            <input type="url" name="url" value="{{ url }}" required maxlength="2000" placeholder="https://app.example/webhooks" autofocus></label>
+        <fieldset class="field"><legend>What it is told</legend>
+            {% for t in event_types %}<label class="checkline"><input type="checkbox" name="event_types[]" value="{{ t }}"{% if t in chosen %} checked{% endif %}> <code>{{ t }}</code></label>{% endfor %}
+        </fieldset>
+        <p class="field-help">Its signing secret is shown once, on the next page: copy it into your application's secret settings then.</p>
+        <div class="form-actions"><button type="submit">Add the endpoint</button> <a class="btn btn-secondary" href="{{ path('dashboard_client_webhooks', {clientId: client.id.toRfc4122}) }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

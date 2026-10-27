@@ -89,6 +89,20 @@ class Suppression
         return $s;
     }
 
+    /**
+     * An account's own block of an address or a whole domain (2.13): scoped to the account,
+     * never global, no expiry. The request that created it is in global_suppression_requests
+     * when it came through the API.
+     */
+    public static function accountBlock(Client $account, string $normalizedValue, SuppressionScopeType $scopeType, ?string $externalReference): self
+    {
+        $s = new self($normalizedValue, $scopeType, SuppressionReason::AccountBlock);
+        $s->client = $account;
+        $s->externalReference = $externalReference;
+
+        return $s;
+    }
+
     /** An operator block (operator_block or client_abuse_block), global when $scope is null. */
     public static function operatorBlock(?Client $scope, string $normalizedValue, SuppressionScopeType $scopeType, SuppressionReason $reason, ?\DateTimeImmutable $expiresAt): self
     {

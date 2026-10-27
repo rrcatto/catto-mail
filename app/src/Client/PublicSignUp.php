@@ -37,8 +37,8 @@ use Symfony\Component\Mime\Address;
  *              client is created through the gated entry point for public applications
  *              (ClientLifecycle::apply: origin public_application, pending_approval), the person
  *              becomes its client admin, the acceptance of APP_ACCEPTABLE_USE_POLICY_VERSION is
- *              recorded when one is in force (required), the starter limits are set
- *              (APP_STARTER_*, never above the installation ceilings) and the client is
+ *              recorded when one is in force (required), the client is put on the Starter plan
+ *              (App\Client\PlanCatalog: its limits, never above the installation ceilings) and is
  *              activated - the transition an operator would make, audited as this service. Then
  *              the operator is emailed (APP_ADMIN_EMAIL). The operator can throttle, suspend or
  *              close the client like any other.
@@ -46,23 +46,18 @@ use Symfony\Component\Mime\Address;
 final class PublicSignUp
 {
     public const ACTOR = 'public-sign-up';
-    public const PLAN = 'starter';
+    public const PLAN = PlanCatalog::STARTER;
 
-    /**
-     * @param array<string, int> $starterLimits client_limits column => value (app.starter_limits)
-     */
     public function __construct(
         private readonly ClientLifecycle $lifecycle,
         private readonly AccountAdministration $accounts,
-        private readonly ClientLimitAdministration $limitAdministration,
-        private readonly ClientLimitPolicy $limitPolicy,
+        private readonly PlanCatalog $plans,
         private readonly LoginLinkService $links,
         private readonly DashboardUserProvider $users,
         private readonly EntityManagerInterface $em,
         private readonly AuditLogger $audit,
         private readonly MailerInterface $mailer,
         private readonly LoggerInterface $logger,
-        #[Autowire('%app.starter_limits%')] private readonly array $starterLimits,
         #[Autowire('%app.admin_email%')] private readonly string $adminEmail,
         #[Autowire('%app.mail_from%')] private readonly string $mailFrom,
         #[Autowire('%app.public_base_url%')] private readonly string $publicBaseUrl,
@@ -104,24 +99,17 @@ final class PublicSignUp
     public function isTaken(string $email): bool
     {
         return null !== $this->users->findByEmail($email) || false !== $this->em->getConnection()->fetchOne(
-            'SELECT 1 FROM clients WHERE lower(contact_email) = lower(?) OR lower(billing_contact_email) = lower(?) OR lower(abuse_contact_email) = lower(?)',
-            [$email, $email, $email]);
+            'SELECT 1 FROM clients WHERE lower(contact_email) = lower(?)', [$email]);
     }
 
     /**
-     * The starter limits, each capped at its installation ceiling.
+     * The limits a new account gets: the Starter plan's, each capped at its installation ceiling.
      *
-     * @return array<string, int>
+     * @return array<string, ?int>
      */
     public function starterLimits(): array
     {
-        $out = [];
-        foreach ($this->starterLimits as $column => $value) {
-            $ceiling = $this->limitPolicy->ceiling($column);
-            $out[$column] = null === $ceiling ? (int) $value : min((int) $value, $ceiling);
-        }
-
-        return $out;
+        return $this->plans->effectiveLimits(self::PLAN);
     }
 
     /**
@@ -143,19 +131,11 @@ final class PublicSignUp
             throw new DomainRuleViolation(\sprintf('Accept the service policy (version %s) to open the account.', $policy));
         }
         $actor = AuditActor::system(self::ACTOR);
-        $limits = $this->starterLimits();
 
-        $result = $this->em->getConnection()->transactional(function () use ($token, $policy, $actor, $limits): array {
+        $result = $this->em->getConnection()->transactional(function () use ($token, $policy, $actor): array {
             $claimed = $this->links->claimSignUpLink($token) ?? throw new DomainRuleViolation('This confirmation link was used a moment ago.');
-            $client = $this->lifecycle->apply($claimed['organisation'], $claimed['email'], null, self::PLAN);
             $user = $this->accounts->createUser($claimed['email'], null, $actor);
-            $this->accounts->setMembership($user, $client, ClientMembershipRole::Admin, $actor);
-            if (null !== $policy) {
-                $this->lifecycle->recordPolicyAcceptance($client, $policy, PolicyAcceptanceSource::ClientDashboard, AuditActor::user($user), $user);
-            }
-            $this->limitAdministration->set($client, $limits, $actor, 'starter tier of a public sign-up (owner decision 2026-10-11)');
-            $this->lifecycle->changeStatus($client, ClientStatus::Active, $actor,
-                'public sign-up: activated automatically into the starter tier (owner decision 2026-10-11)');
+            $client = $this->openAccount($claimed['organisation'], $user, $policy, $actor);
             $this->audit->record(AuditActor::user($user), 'auth.login', 'user', $user->getId()->toRfc4122(), ['method' => 'public_sign_up']);
 
             return ['client' => $client, 'user' => $user, 'return_path' => $claimed['return_path']];
@@ -163,6 +143,39 @@ final class PublicSignUp
         $this->notifyOperator($result['client'], $result['user']);
 
         return $result;
+    }
+
+    /**
+     * Someone signed in without an account opens one from the connect page (specification
+     * 2.13): the organisation's name is all it needs, their address is already confirmed.
+     */
+    public function openForUser(User $user, string $organisation, bool $policyAccepted): Client
+    {
+        $this->assertEnabled();
+        [$organisation] = self::valid($organisation, $user->getEmail());
+        $policy = $this->policyVersion();
+        if (null !== $policy && !$policyAccepted) {
+            throw new DomainRuleViolation(\sprintf('Accept the service policy (version %s) to open the account.', $policy));
+        }
+        $client = $this->em->getConnection()->transactional(fn (): Client => $this->openAccount($organisation, $user, $policy, AuditActor::system(self::ACTOR)));
+        $this->notifyOperator($client, $user);
+
+        return $client;
+    }
+
+    /** The account of a sign-up: a starter client with the person as its admin, the policy accepted, active. */
+    private function openAccount(string $organisation, User $user, ?string $policy, AuditActor $actor): Client
+    {
+        $client = $this->lifecycle->apply($organisation, $user->getEmail(), self::PLAN);
+        $this->accounts->setMembership($user, $client, ClientMembershipRole::Admin, $actor);
+        if (null !== $policy) {
+            $this->lifecycle->recordPolicyAcceptance($client, $policy, PolicyAcceptanceSource::ClientDashboard, AuditActor::user($user), $user);
+        }
+        $this->plans->assign($client, self::PLAN, $actor);
+        $this->lifecycle->changeStatus($client, ClientStatus::Active, $actor,
+            'public sign-up: activated automatically on the Starter plan (owner decision 2026-10-11)');
+
+        return $client;
     }
 
     /** @return array{0: string, 1: string} */

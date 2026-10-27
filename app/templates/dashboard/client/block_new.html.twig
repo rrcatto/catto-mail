@@ -1,0 +1,18 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Block an address or a domain{% endblock %}
+{% block crumb_tail %}Block an address or a domain{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Block an address or a domain</h1>
+    <p class="lead">This account then sends nothing to it, from any of its applications, also mail already waiting to go. Other accounts are not affected. You can lift a block later.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_client_block_add', {clientId: client.id.toRfc4122}) }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Address or domain</span>
+            <span class="field-help">An address (name@example.org) blocks that address. A domain (example.org) blocks every address at exactly that domain, not its subdomains.</span>
+            <input type="text" name="value" value="{{ value }}" required maxlength="320" placeholder="name@example.org or example.org" autocomplete="off" spellcheck="false" autofocus></label>
+        <div class="form-actions"><button type="submit">Block it</button> <a class="btn btn-secondary" href="{{ path('dashboard_client_suppressions', {clientId: client.id.toRfc4122}) }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

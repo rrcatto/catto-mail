@@ -1,0 +1,102 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}{{ d.domain }}{% endblock %}
+{% block crumb_tail %}{{ d.domain }}{% endblock %}
+{% block body %}
+{% set cid = client.id.toRfc4122 %}
+{% set r = records %}
+{# Three steps in plain words (owner decision 2026-10-27): prove it is yours, publish its signing key, ready. #}
+{% set step = {added: 1, verified: 2, key_requested: 2, key_failed: 2, pending_dns: 2, activating: 3, active: 4, dkim_disabled: 2, disabled: 0}[stage] %}
+{% set waiting = stage in ['added', 'key_requested', 'pending_dns', 'activating'] %}
+{% set back_field %}{% if back %}<input type="hidden" name="back" value="{{ back.url }}">{% endif %}{% endset %}
+<div class="guide">
+    <div class="pagehead">
+        <div>
+            <h1>{{ d.domain }}</h1>
+            <p class="lead">{% if stage == 'active' %}Ready: {{ client.companyName }} can send from this domain.{% elseif stage == 'disabled' %}Disabled by the operator of this installation.{% else %}Three steps make it ready to send. This page checks them for you.{% endif %}</p>
+        </div>
+        {% if back %}<div class="actions"><a class="btn{{ stage == 'active' ? '' : ' btn-secondary' }}" href="{{ back.url }}">Back to {{ back.name }}</a></div>{% endif %}
+    </div>
+    {% if stage != 'disabled' %}
+    <ol class="guide-steps" aria-label="Steps">
+        <li class="{{ step > 1 ? 'done' : 'current' }}"{% if step == 1 %} aria-current="step"{% endif %}>Prove it is yours</li>
+        <li class="{{ step > 2 ? 'done' : (step == 2 ? 'current') }}"{% if step == 2 %} aria-current="step"{% endif %}>Publish its signing key</li>
+        <li class="{{ step > 3 ? 'done' : (step == 3 ? 'current') }}"{% if step >= 3 %} aria-current="step"{% endif %}>Ready to send</li>
+    </ol>
+    {% endif %}
+
+    <section class="card guide-card"{% if waiting and may_operate %} data-controller="dnscheck" data-dnscheck-url-value="{{ path('dashboard_client_domain_check', {clientId: cid, domainId: d.id}) }}" data-dnscheck-token-value="{{ csrf_token('dashboard-action') }}" data-dnscheck-stage-value="{{ stage }}" data-dnscheck-interval-value="{{ check_seconds * 1000 }}"{% endif %} aria-labelledby="step-h">
+    {% if stage == 'added' %}
+        <h2 id="step-h">Step 1: prove the domain is yours</h2>
+        <p>Add this record where your domain's DNS is managed: usually the company you bought the domain from, or your hosting control panel. It only shows that you control {{ d.domain }}; nothing else uses it.</p>
+        <dl class="record">
+            <dt>Type</dt><dd><code>TXT</code></dd>
+            <dt>Name</dt><dd>{{ ui.copy(r.txt.name, 'the record name') }}
+                <span class="field-help">Some DNS panels add {{ d.domain }} to the name themselves: there, enter only {{ ui.copy(r.txt.name|split('.' ~ d.domain)|first, 'the short record name') }}</span></dd>
+            <dt>Value</dt><dd>{{ ui.copy(r.txt.value, 'the record value', true) }}</dd>
+        </dl>
+    {% elseif stage in ['verified', 'key_requested'] %}
+        <h2 id="step-h">Step 2: publish its signing key</h2>
+        <p><strong>{{ d.domain }} is yours: verified.</strong> Its signing key is being made on this installation's mail server; it takes a minute or two. Then the record to publish appears here by itself.</p>
+        {% if stage == 'verified' and may_admin %}<form method="post" action="{{ path('dashboard_client_domain_dkim', {clientId: cid, domainId: d.id}) }}" class="form-actions">{{ ui.csrf() }}{{ back_field }}<button type="submit">Make the signing key</button></form>{% endif %}
+    {% elseif stage == 'key_failed' %}
+        <h2 id="step-h">Step 2: publish its signing key</h2>
+        <p class="warn">The signing key could not be made ({{ d.request_finished_at|ts }}). Try again; if it fails again, write to the administrator of this installation.</p>
+        {% if may_admin %}<form method="post" action="{{ path('dashboard_client_domain_dkim', {clientId: cid, domainId: d.id}) }}" class="form-actions">{{ ui.csrf() }}{{ back_field }}<button type="submit">Try again</button></form>{% endif %}
+    {% elseif stage == 'pending_dns' and r.dkim %}
+        <h2 id="step-h">Step 2: publish its signing key</h2>
+        <p>Add this second record in the same place. Receiving mail servers check every message's signature against it, so your mail is accepted as really coming from {{ d.domain }}.</p>
+        <dl class="record">
+            <dt>Type</dt><dd><code>TXT</code></dd>
+            <dt>Name</dt><dd>{{ ui.copy(r.dkim.name, 'the signing key record name') }}
+                <span class="field-help">Without {{ d.domain }} where your panel adds it: {{ ui.copy(r.dkim.name|split('.' ~ d.domain)|first, 'the short record name') }}</span></dd>
+            <dt>Value</dt><dd>{{ ui.copy(r.dkim.value, 'the signing key', true) }}
+                <span class="field-help">Enter it as one value; most DNS panels split a long value themselves.</span></dd>
+        </dl>
+        <details class="figures"><summary>The same record in a zone file</summary>{{ ui.copy(r.dkim.zone, 'the zone file line', true) }}</details>
+    {% elseif stage == 'activating' %}
+        <h2 id="step-h">Step 3: ready to send</h2>
+        <p><strong>The signing key is published.</strong> Signing is being switched on for {{ d.domain }}; it takes a minute or two.</p>
+    {% elseif stage == 'active' %}
+        <h2 id="step-h">Ready to send</h2>
+        <p>{{ d.domain }} is verified and its mail is signed. Keep both records published: removing them stops the domain from sending.</p>
+        <h3>Recommended: a DMARC record</h3>
+        {% if dmarc %}
+        <p>{{ d.domain }} already has one. Keep yours: nothing to add.</p>
+        <p class="small">{{ ui.copy(dmarc, 'your DMARC record', true) }}</p>
+        {% else %}
+        <p>It tells receiving servers what to do with mail that claims to come from {{ d.domain }} but fails these checks. The record below only asks them to change nothing, so it is safe to start with; it is not needed to send.</p>
+        <dl class="record">
+            <dt>Type</dt><dd><code>TXT</code></dd>
+            <dt>Name</dt><dd>{{ ui.copy(r.dmarc.name, 'the DMARC record name') }}</dd>
+            <dt>Value</dt><dd>{{ ui.copy(r.dmarc.value, 'the DMARC value') }}</dd>
+        </dl>
+        {% endif %}
+        <p class="muted small">Nothing to add for SPF: bounces go to {% if r.bounce_domain %}{{ r.bounce_domain }}{% else %}this installation's own domain{% endif %}, whose records this installation looks after. Keep your domain's own SPF record for your other mail.</p>
+        <details class="figures"><summary>The records of {{ d.domain }}</summary>
+            <dl class="record">
+                <dt>Ownership</dt><dd>{{ ui.copy(r.txt.name ~ ' TXT ' ~ r.txt.value, 'the ownership record', true) }}</dd>
+                {% if r.dkim %}<dt>Signing key</dt><dd>{{ ui.copy(r.dkim.name ~ ' TXT ' ~ r.dkim.value, 'the signing key record', true) }}</dd>{% endif %}
+            </dl>
+        </details>
+    {% elseif stage == 'dkim_disabled' %}
+        <h2 id="step-h">Signing is switched off</h2>
+        <p class="warn">The operator of this installation switched off signing for {{ d.domain }}, so it cannot send. Write to the administrator of this installation.</p>
+    {% elseif stage == 'pending_dns' %}
+        <h2 id="step-h">Step 2: publish its signing key</h2>
+        <p>The operator of this installation set up this domain's signing key by hand. Ask them for its DNS record.</p>
+    {% else %}
+        <h2 id="step-h">Disabled</h2>
+        <p class="warn">The operator of this installation disabled {{ d.domain }}, so it cannot send. Write to the administrator of this installation.</p>
+    {% endif %}
+
+    {% if waiting %}
+        <p class="guide-wait" data-dnscheck-target="status" aria-live="polite">{% if stage in ['added', 'pending_dns'] %}A new record can take a few minutes to appear, sometimes longer. This page looks every {{ check_seconds }} seconds and moves on by itself; you can also close it: you are emailed when the domain is ready.{% else %}This page moves on by itself.{% endif %}{% if d.last_checked_at and d.last_check_error and stage in ['added', 'pending_dns'] %} Last looked at {{ d.last_checked_at|date('H:i:s', time_zone()) }}: {{ d.last_check_error }}{% endif %}</p>
+        {% if may_operate and stage in ['added', 'pending_dns'] %}
+        <form method="post" action="{{ path('dashboard_client_domain_verify', {clientId: cid, domainId: d.id}) }}" class="form-actions">{{ ui.csrf() }}{{ back_field }}<button type="submit" class="secondary">Check now</button></form>
+        {% endif %}
+    {% endif %}
+    </section>
+    <p><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}">All sending domains</a></p>
+</div>
+{% endblock %}

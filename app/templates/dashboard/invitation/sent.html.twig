@@ -1,0 +1,11 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_icons.html.twig' as icon %}
+{% block title %}Check your email{% endblock %}
+{% block body %}
+<section class="narrow" aria-labelledby="sent-h">
+    <span class="att-mark att-info" aria-hidden="true">{{ icon.i('mail', 20) }}</span>
+    <h1 id="sent-h">Check your email</h1>
+    <p>A link to confirm your address is on its way. Open it to open the account; it works once and expires in {{ minutes }} minutes. Nothing is created until you use it.</p>
+    <p class="muted small">If the address already has an account, a sign-in link comes instead: sign in, then open the invitation link again.</p>
+</section>
+{% endblock %}

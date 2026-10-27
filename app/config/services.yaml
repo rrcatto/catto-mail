@@ -48,14 +48,6 @@ parameters:
     app.client.api_key_limit: '%env(int:APP_CLIENT_API_KEY_LIMIT)%'
     app.client.webhook_endpoint_limit: '%env(int:APP_CLIENT_WEBHOOK_ENDPOINT_LIMIT)%'
     app.client.sending_domain_limit: '%env(int:APP_CLIENT_SENDING_DOMAIN_LIMIT)%'
-    # Public sign-up (owner decision 2026-10-11): the starter tier a new client is activated into.
-    app.starter_limits:
-        send_recipients_per_day: '%env(int:APP_STARTER_SEND_RECIPIENTS_PER_DAY)%'
-        send_recipients_per_month: '%env(int:APP_STARTER_SEND_RECIPIENTS_PER_MONTH)%'
-        validation_addresses_per_day: '%env(int:APP_STARTER_VALIDATION_ADDRESSES_PER_DAY)%'
-        max_api_keys: '%env(int:APP_STARTER_API_KEY_LIMIT)%'
-        max_webhook_endpoints: '%env(int:APP_STARTER_WEBHOOK_ENDPOINT_LIMIT)%'
-        max_sending_domains: '%env(int:APP_STARTER_SENDING_DOMAIN_LIMIT)%'
     # Sending domains in the client dashboard: the SPF guidance names the envelope-sender domain.
     app.bounce_domain: '%env(default:app.no_bounce_domain:SMARTHOST_BOUNCE_DOMAIN)%'
     app.no_bounce_domain: ''

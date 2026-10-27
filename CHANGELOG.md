@@ -2,7 +2,84 @@
 
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Project versions are independent of
-the *specification* version, which is 2.12.
+the *specification* version, which is 2.13.
+
+## [0.3.0] - 2026-10-28
+
+Guided account setup (owner decisions 2026-10-27, specification 2.13): every step from "I have
+no account" to the first message is a guided page in plain words, and nothing dead-ends; and
+account blocks. Migrations `Version20261027000100` and `Version20261027000200`; OpenAPI
+1.0.0-draft.11 (additions: `SendingDomain.setup_url`, the connect page's optional
+`sending_domain`, and `/v1/blocks`); status vocabulary 2.8.0 (reason `account_block`). The six
+`APP_STARTER_*` settings are gone: run `env-migrate` (the upgrade does).
+
+Upgrading from any earlier release, as root on the server:
+`curl -fsSLO https://raw.githubusercontent.com/rrcatto/catto-mail/v0.3.0/upgrade-catto-mail`, then
+`bash upgrade-catto-mail --version v0.3.0`. By hand, as the service user: `git fetch --tags`,
+`git checkout v0.3.0`, `prod env-migrate`, `prod check`, `prod upgrade 0.3.0`. The upgrade runs the
+two migrations; public sign-up stays as it was (off unless the operator turned it on).
+
+### Added
+- **Plans** (Clients › Plans): named sets of limits defined once. Starter (the plan of public
+  sign-ups; its values are the former `APP_STARTER_*` defaults, or the values set in System ›
+  Settings; one set only in `infra/.env` is not carried over: set it on the plan) and Standard (no limits beyond the installation's own) are built in. A client on a
+  plan has its limits and follows changes to the plan; a client changed by hand shows as
+  *Custom*, and *Put back on this plan* undoes that.
+- **Invitations** (Clients › Invitations): a single-use link for 7 days, shown once with a copy
+  button, on a chosen plan and policy rule. Whoever opens it names their organisation, confirms
+  their address and opens an active account, also while the public sign-up is closed. The
+  operator is emailed; an unused invitation can be withdrawn.
+- **New client** on its own page (and in the Clients menu): the organisation, the email of the
+  person who manages it, the plan, the service policy and a private note. The manager becomes
+  the admin and is emailed a sign-in link; exempt from the policy the account is active at once,
+  otherwise it opens by itself when the manager accepts the policy.
+- **A sending domain's steps page** (`/dashboard/c/{account}/sending-domains/{domain}`): one step
+  at a time (prove it is yours, publish its signing key, ready to send), copy buttons, a sentence
+  on what each record is for, a check every 30 seconds that moves on by itself, an email to the
+  account's admins when the domain is ready, an existing DMARC record recognised (otherwise
+  `v=DMARC1; p=none`, without a made-up report address), and a *Back to* link for an application
+  that sent the person there. *Add a domain* is its own page.
+- **The account's start page** is a checklist until it is done: accept the service policy (when
+  required), make a sending domain ready, connect an application (a key and a webhook made by hand
+  count, folded under "For developers"), send a test message.
+- **Connect never dead-ends**: someone signed in without an account opens one on the page with the
+  organisation's name (public sign-up open, or an operator); anyone else is told that accounts
+  are opened by invitation. An application may name the domain it sends from (`sending_domain`),
+  which the approval adds to the account; `GET /v1/sending-domains` and the exchange give each
+  domain's `setup_url`.
+- Copy buttons beside every value to copy elsewhere (DNS records, keys and secrets shown once,
+  invitation links, ids).
+- **Account blocks** (owner decision 2026-10-27): an account blocks an address or a whole domain
+  for its own mail, so its applications need no block list of their own. Its admins add one under
+  Sending › Suppressions › *Block an address or a domain* (one field: an address, or a domain for
+  every address at exactly that domain) and lift it from the list; a connected application uses
+  `POST /v1/blocks`, `GET /v1/blocks`, `GET /v1/blocks/{id}` and `POST /v1/blocks/{id}/lift`
+  (idempotent like the opt-outs). The delivery daemon stops the account's mail to it, also mail
+  already queued; other accounts are never affected. Migration `Version20261027000200` (reason
+  `account_block`).
+- Searching suppressions for an address (the account's page and Mail flow › Suppressions) also
+  finds the domain suppression that covers it.
+- `smarthostctl dev-agent`: on the development pod, the client dashboard's DKIM requests are
+  carried out with the pod's OpenDKIM, so a sending domain can be set up end to end locally.
+
+### Changed
+- **Icons are Bootstrap Icons 1.13.2** (owner decision 2026-10-27), vendored through the import map with their font files, instead of hand-drawn inline SVG; every area, page and view of the menu bar now has its icon, and *Sign out* too.
+- The customer's screens say *account* (never *workspace*, nor *client*); the operator console
+  keeps *client*.
+- The client and user views have plain addresses (`/dashboard/operator/clients/waiting`,
+  `/active`, …, `/invited`, `/sign-ups`; `/dashboard/operator/users/active`, `/disabled`); the
+  breadcrumb appears on detail pages only; create forms are pages of their own (new API key,
+  webhook endpoint, user, role, address batch).
+- Help links name the topic by its title ("Help: DNS records, all together", not "Help: dns").
+- The installation's self-test client is labelled *internal: self-tests* (origin `system`); it is
+  needed by the built-in checks and made again whenever it is missing.
+- System › System setup lists first the steps that need the administrator (DNS, backups, the
+  seed, bounce and reboot tests, readiness) and folds the steps checked automatically, showing
+  only those that fail; the menu counts the first kind only.
+- The clients' billing and abuse contact addresses are removed (nothing used them); a client's
+  page shows who manages it instead. `smarthost:client:create` loses those options and takes a
+  plan's id.
+- nginx logs sign-up and invitation links without their tokens.
 
 ## [0.2.9] - 2026-10-26
 

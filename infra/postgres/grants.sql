@@ -30,6 +30,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON application_connections TO :"app";
 -- Client lifecycle, limits and quotas, notes and policy acceptances (Phase 9, specification 2.10).
 GRANT SELECT, INSERT, UPDATE ON client_limits, client_quota_usage TO :"app";
 GRANT SELECT, INSERT ON client_notes, client_policy_acceptances TO :"app";
+-- Plans and invitations (specification 2.13): an unused plan can be deleted.
+GRANT SELECT, INSERT, UPDATE, DELETE ON plans TO :"app";
+GRANT SELECT, INSERT, UPDATE ON client_invitations TO :"app";
 
 -- Validation
 GRANT SELECT, INSERT, UPDATE ON validation_jobs TO :"app";

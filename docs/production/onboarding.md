@@ -6,24 +6,34 @@ commands (`smarthostctl prod console …`; in development `smarthostctl console 
 action also has a dashboard form under Clients › Clients › *client*, Clients › Abuse & reputation and
 Clients › Usage & billing.
 
-Clients come in two ways:
-- **Created by an operator**, reviewed and approved by an operator (sections 1 and 2).
-- **Public sign-up**, when the operator enables it (`APP_PUBLIC_ONBOARDING_ENABLED=true`; off by
-  default). The new client is activated automatically into a starter tier with low limits
-  (owner decision 2026-10-11). See [Public sign-up](#public-sign-up-owner-decision-2026-10-11).
+Clients come in three ways (a client's people call it their *account*):
+- **New client** (Clients › New client, owner decision 2026-10-27): you give the organisation's
+  name, the email address of the person who manages it, a plan and the service policy. The
+  manager becomes its admin and is emailed a sign-in link. Exempt from the policy, the account is
+  active at once; required to accept it, the account opens by itself when the manager accepts it.
+  Creating it is your approval (sections 1 and 2).
+- **An invitation** (Clients › Invitations, owner decision 2026-10-27): you send a link; whoever
+  opens it names their organisation and opens the account on the plan you chose. It works while
+  the public sign-up is closed. See [Invitations](#invitations-owner-decision-2026-10-27).
+- **Public sign-up**, when you enable it (`APP_PUBLIC_ONBOARDING_ENABLED=true`; off by default).
+  The new client is activated automatically on the Starter plan (owner decision 2026-10-11). See
+  [Public sign-up](#public-sign-up-owner-decision-2026-10-11).
+
+**Plans** (Clients › Plans) are sets of limits defined once: Starter, Standard (no limits beyond
+the installation's own) and any you add. A client on a plan has its limits and follows changes
+to it; a client whose limits you change by hand shows as *Custom* (section 3).
 
 ## 1. Checklist for a new client
 
-Before approval:
+Before you open the account (or send the invitation):
 
 - [ ] **Identity and purpose.**
   - The organisation, and what it sends: transactional or subscription mail, its volumes and
     its audience.
   - How its recipients opted in.
   - Validation is not consent: a valid address is not permission to mail it.
-- [ ] **Contacts recorded.**
-  - Operational contact (`--contact-email`), billing contact and abuse contact.
-  - The abuse contact must answer complaints quickly.
+- [ ] **The person who manages it.** Their email address is the account's admin login; they can
+  add colleagues later. They are the one who must answer complaints quickly.
 - [ ] **Service policy.**
   - The policy text is `docs/AUP.md`, published at `/acceptable-use-policy` and linked from every
     page's footer. It names your installation, not the software: set `APP_SITE_NAME` and
@@ -41,15 +51,18 @@ Before approval:
     dashboard.
   - Or you record an acceptance obtained elsewhere, with a reference
     (`smarthost:client:account <id> policy-accept <version> --reference …`).
-  - A client that requires acceptance cannot be approved without it.
-- [ ] **Limits agreed and set** (section 3). Start low; raise as the reputation record grows.
-- [ ] **Sending domain.** The client sets it up in its own workspace (Settings › Sending
+  - A client that requires acceptance opens (or can be approved) only once it is accepted.
+- [ ] **Plan chosen** (section 3). Start low; raise as the reputation record grows.
+- [ ] **Sending domain.** The client sets it up in its own account (Settings › Sending
   domains, runbook §6a); no console work is needed.
-  - A client admin adds the domain and publishes the TXT challenge, then checks DNS. Its limit
-    (section 3) caps the number of domains.
-  - Once the domain is verified, the host agent generates its DKIM key. The page shows the DKIM
-    and DMARC records to publish, and why SPF needs no change.
-  - The key is activated as soon as the DKIM record is in DNS, and the domain shows *Active*.
+  - An admin adds the domain (or connecting its application adds it), and the domain's page
+    shows its records one step at a time with copy buttons, checking DNS by itself every 30
+    seconds. Its limit (section 3) caps the number of domains.
+  - Once the domain is verified, the host agent makes its DKIM key; the page shows the DKIM
+    record to publish, then an existing DMARC record or one to start with, and why SPF needs no
+    change.
+  - The key is activated as soon as the DKIM record is in DNS; the domain shows *Ready to send*
+    and the account's admins are emailed.
   - A domain another client has also verified is the exception: set up its key by hand (runbook
     §6, then `smarthost:domain:dkim`).
 - [ ] **Unsubscribe handling understood.**
@@ -60,9 +73,9 @@ Before approval:
 - [ ] **Webhooks.**
   - The client verifies signatures, de-duplicates by event id and polls as a fallback.
   - Delivery is at-least-once.
-- [ ] **Client users invited**, with the client role each needs (admin or viewer).
-- [ ] **API key issued** with a name and, preferably, an expiry. The secret is shown once.
-- [ ] **Approval** with a reason (section 2).
+- [ ] **More users**, when they need them, with the role each needs (admin, member or viewer).
+- [ ] **The application connected** with its Connect button (section 4, *Connected applications*), or an API key issued by
+  hand with a name and, preferably, an expiry (the secret is shown once).
 - [ ] **First week:** watch Clients › Abuse & reputation and the client's reputation figures; seed-test
       first sends where possible.
 
@@ -72,9 +85,9 @@ OpenAPI contract).
 ## 2. Lifecycle
 
 ```sh
-smarthost:client:create --company "Example Ltd" --contact-email ops@example.net \
-  --abuse-contact-email abuse@example.net --billing-contact-email billing@example.net
-# -> pending_approval; policy acceptance required (unless --policy-acceptance exempt)
+smarthost:client:create --company "Example Ltd" --contact-email ops@example.net --plan standard
+# -> pending_approval; policy acceptance required (unless --policy-acceptance exempt).
+#    The dashboard's New client also makes the manager the admin and emails them.
 
 smarthost:client:set-status <id> active    --operator <you> --note "reviewed; policy 2026-10 accepted"
 smarthost:client:set-status <id> throttled --operator <you> --note "hard bounces 4 % (alert …)"
@@ -143,7 +156,7 @@ smarthost:api-key:list <id>
 smarthost:api-key:revoke <key-id>
 ```
 
-- Client admins manage their own keys in the dashboard (in the client workspace: Settings › API keys). Operators with
+- Client admins manage their own keys in the dashboard (in their account: Settings › API keys). Operators with
   `PLATFORM.CLIENT_KEY.MANAGE` manage any client's keys.
 - The secret is shown once, never stored, and cannot be recovered.
 - Rotation: create a new key, deploy it, confirm its *last used* time, then revoke the old one.
@@ -154,15 +167,19 @@ An application that supports it gets its key and its webhook endpoint without an
 them (specification 2.12; integration guide, section 15):
 
 1. The application sends a client admin to `/dashboard/connect`. The page shows the
-   application's name, the site it returns to and the address its webhooks go to.
+   application's name, the site it returns to, the address its webhooks go to and, when it says
+   so, the domain it sends from (specification 2.13).
 2. The admin signs in (or, while public sign-up is on, opens an account there and then),
-   chooses the workspace and presses *Connect*. Only a client admin can, and only for an active
-   client with room under its limits on usable API keys and webhook endpoints.
+   chooses the account and presses *Connect*. Only a client admin can, and only for an active
+   client with room under its limits on usable API keys and webhook endpoints. Someone signed in
+   without an account opens one there where that is allowed (public sign-up open, or an
+   operator); anyone else is told that accounts are opened by invitation. The domain the
+   application named is added to the account, within its limit.
 3. The application collects its credentials with a single-use code, valid for 10 minutes. The API
    key (named after the application) and the webhook endpoint appear at that moment, not at the
    approval.
 
-- The client workspace lists them under Settings › Connected applications. A client admin, or
+- The account lists them under Settings › Connected applications. A client admin, or
   an operator with `PLATFORM.CLIENT.MANAGE`, disconnects one there: its key is revoked and its
   endpoint removed. The application can do the same for itself (`DELETE /v1/connection`).
 - Connecting the same application again (the same webhook address) replaces its earlier
@@ -285,7 +302,7 @@ The OPERATOR role holds every Phase 9 permission. A custom role can hold any sub
 
 **The decision.** Members of the public may open an account and start sending without an
 operator running commands or approving them one by one. A new client is activated automatically
-into a **starter tier** with low limits. The operator is notified, and can throttle, suspend or
+on the **Starter plan**, with low limits. The operator is notified, and can throttle, suspend or
 close any client as usual (section 2). This replaces the earlier rule that approval would stay
 manual. Operator-created clients are still reviewed and approved by hand.
 
@@ -301,30 +318,23 @@ the sign-up page does not exist (404), and the front page and the sign-in page d
 3. The link's page shows what will be created, and, when `APP_ACCEPTABLE_USE_POLICY_VERSION` is
    set, asks them to accept that policy version. Opening the account:
    - creates the client through the gated entry point for public applications (origin
-     *public sign-up*, plan `starter`);
+     *public sign-up*, plan Starter);
    - makes the person its client admin;
    - records the policy acceptance;
-   - sets the starter limits;
+   - gives it the Starter plan's limits;
    - activates the client;
    - signs them in. Every step is audited (actor `public-sign-up`).
-4. The client's overview then shows the next steps: add a sending domain (they set it up
-   themselves, DKIM included), create an API key, add a webhook.
+4. The account's start page then guides them: make a sending domain ready (DKIM included),
+   connect their application, send a test message.
 
-**The starter tier** (System › Settings, group *Public sign-up*, or `infra/.env`). It is applied
-when an account is opened, never above the installation ceilings. Later changes do not touch
-existing clients: raise or lower an existing client's limits on its page (section 3). The
-defaults:
-
-| Setting | Limit | Default |
-|---|---|---|
-| `APP_STARTER_SEND_RECIPIENTS_PER_DAY` | `send_recipients_per_day` | 200 |
-| `APP_STARTER_SEND_RECIPIENTS_PER_MONTH` | `send_recipients_per_month` | 3,000 |
-| `APP_STARTER_VALIDATION_ADDRESSES_PER_DAY` | `validation_addresses_per_day` | 1,000 |
-| `APP_STARTER_API_KEY_LIMIT` | `max_api_keys` | 2 |
-| `APP_STARTER_WEBHOOK_ENDPOINT_LIMIT` | `max_webhook_endpoints` | 2 |
-| `APP_STARTER_SENDING_DOMAIN_LIMIT` | `max_sending_domains` | 2 |
-
-There is no automatic promotion out of the starter tier: an operator raises limits per client.
+**The Starter plan** (Clients › Plans). Its limits are what a new account gets, never above the
+installation ceilings; changing the plan changes every client on it whose limits were not
+changed by hand. Its first values are 200 recipients a day and 3,000 a month, 1,000 addresses
+checked a day, 2 API keys, 2 webhook endpoints and 2 sending domains. (Until specification 2.13
+these were the `APP_STARTER_*` settings; the upgrade carries dashboard values over, and
+`env-migrate` drops the old lines from `infra/.env`: set the plan to them if you had changed
+them there.) There is no automatic promotion out of the Starter plan: move a client to another
+plan on its page.
 
 **Abuse protection** (no third-party service):
 - The form accepts at most 10 submissions an hour per client IP. Each address gets at most 3
@@ -371,3 +381,25 @@ There is no automatic promotion out of the starter tier: an operator raises limi
 - [ ] **Retention:** decided periods for each data category (runbook §16).
 - [ ] **Capacity:** the measured query plans (`phase9-query-plans.txt`) and the host's
       resources against the expected number of clients.
+
+## Invitations (owner decision 2026-10-27)
+
+**The decision.** Accounts open by invitation while the public sign-up stays closed: you choose
+who uses the installation, without a waiting list.
+
+**Making one.** Clients › Invitations › *Invite someone* (`PLATFORM.CLIENT.APPROVE`): optionally
+who it is for (only you see it), the plan, and whether the service policy must be accepted. You
+get a link, shown once: copy it and send it. It works once, for 7 days; withdraw an unused one on
+the same page.
+
+**What the person does.** They open the link, give their organisation's name and their email
+address, and confirm the emailed link (signed in already, the organisation's name is enough).
+Opening the account, in one transaction: the invitation is used, the client is created (origin
+*invitation*) on the plan, the person becomes its admin, the policy acceptance is recorded when
+required, and the account is active. Their start page then guides them. You are emailed when an
+invitation is used, and the account appears under Clients › Clients › *Opened by invitation*.
+
+**Abuse protection** is that of the public sign-up (rate limits per client IP and per address, a
+honeypot, the same answer whether an address has an account or not; an address that has one
+gets a sign-in link and opens the account signed in). Tokens are stored only as hashes, and
+nginx logs invitation and sign-up links without them.

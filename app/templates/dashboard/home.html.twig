@@ -1,18 +1,18 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_icons.html.twig' as icon %}
-{% block title %}Your workspaces{% endblock %}
+{% block title %}Your accounts{% endblock %}
 {% block body %}
 <div class="pagehead">
     <div>
-        <h1>Your workspaces</h1>
-        <p class="sub">Each client has its own workspace: its sending, validation, settings and usage.</p>
+        <h1>Your accounts</h1>
+        <p class="sub">Each account has its own sending domains, applications, limits and history.</p>
     </div>
 </div>
 {% if memberships is empty %}
     {% if app.user.platformUser %}
         <p class="empty">Use the menu bar at the top.</p>
     {% else %}
-        <p class="empty">Your account is not a member of any client yet. Ask an operator to add you to a client.</p>
+        <p class="empty">You have no account here yet. Accounts on this installation are opened by invitation: open the invitation link you were sent, or ask the operator of this installation.</p>
     {% endif %}
 {% else %}
     <ul class="workspaces grid">
@@ -20,7 +20,7 @@
         <li class="g-col-4 md:g-col-2 xl:g-col-1"><a class="card workspace" href="{{ path('dashboard_client_overview', {clientId: m.client.id.toRfc4122}) }}">
             <span class="avatar av-{{ m.client.companyName|tone_slot }}" aria-hidden="true">{{ m.client.companyName|initials }}</span>
             <span class="workspace-text"><span class="workspace-name">{{ m.client.companyName }}</span>
-                <span class="muted small">Your role: {{ m.role.value|capitalize }} · client status: {{ m.client.status.value|label('client_status') }}</span></span>
+                <span class="muted small">Your role: {{ m.role.value|capitalize }} · {{ m.client.status.value|label('client_status') }}</span></span>
             {{ icon.i('chevron', 18) }}
         </a></li>
         {% endfor %}

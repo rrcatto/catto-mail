@@ -1,0 +1,33 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}{{ plan ? 'Plan ' ~ plan.name : 'New plan' }}{% endblock %}
+{% block crumb_tail %}{{ plan ? plan.name : 'New plan' }}{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>{{ plan ? 'Plan ' ~ plan.name : 'New plan' }}</h1>
+    <p class="lead">{% if plan %}{{ plan.clients }} client{{ plan.clients == 1 ? ' is' : 's are' }} on this plan. What you save here applies to {{ plan.clients == 1 ? 'it' : 'them' }} at once, except to a client whose limits were changed by hand.{% else %}A plan is a set of limits you choose for clients on New client, on an invitation or on a client's page.{% endif %}</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ plan ? path('dashboard_operator_plan_update', {plan: plan.id}) : path('dashboard_operator_plan_create') }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Name</span>
+            <span class="field-help">Shown wherever a plan is chosen, and on a client's page.</span>
+            <input type="text" name="name" value="{{ name }}" required maxlength="100" autocomplete="off"{% if not plan %} autofocus{% endif %}></label>
+        <p class="field-help">Leave a limit empty for none. A limit of this installation itself (shown as “at most”) always applies, whatever the plan says.</p>
+        <div class="form-grid">
+        {% for column in columns %}
+            <label>{{ column|label('limit') }}{% if ceilings[column] is not null %} <span class="muted small">(at most {{ ceilings[column]|number_format }})</span>{% endif %}
+                <input type="text" inputmode="numeric" name="limits[{{ column }}]" value="{{ limits[column] ?? '' }}" autocomplete="off"></label>
+        {% endfor %}
+        </div>
+        <div class="form-actions"><button type="submit">{{ plan ? 'Save the plan' : 'Add the plan' }}</button> <a class="btn btn-secondary" href="{{ path('dashboard_operator_plans') }}">Cancel</a></div>
+    </form>
+    {% if plan and not plan.built_in %}
+    <form method="post" action="{{ path('dashboard_operator_plan_delete', {plan: plan.id}) }}" class="card card-danger" data-controller="confirm" data-confirm-message-value="Delete the plan {{ plan.name }}?">
+        {{ ui.csrf() }}
+        <h2>Delete this plan</h2>
+        <p>{% if plan.clients > 0 %}{{ plan.clients }} client{{ plan.clients == 1 ? ' is' : 's are' }} still on it: move {{ plan.clients == 1 ? 'it' : 'them' }} to another plan first.{% else %}No client is on it. An invitation that names it stops it from being deleted too.{% endif %}</p>
+        <button type="submit" class="danger"{% if plan.clients > 0 %} disabled{% endif %}>Delete {{ plan.name }}</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

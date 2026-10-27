@@ -42,13 +42,14 @@ final class Labels
         'suppression_reason' => [
             'hard_bounce' => 'Hard bounce', 'complaint' => 'Complaint', 'repeated_soft_bounce' => 'Repeated soft bounces',
             'operator_block' => 'Operator block', 'client_abuse_block' => 'Client abuse block',
-            'recipient_global_opt_out' => 'Recipient global opt-out',
+            'recipient_global_opt_out' => 'Recipient global opt-out', 'account_block' => 'Account block',
         ],
         // Broad reasons shown to a client for a global suppression it did not report (no provenance).
         'suppression_reason_client' => [
             'hard_bounce' => 'Address permanently rejected mail', 'complaint' => 'Recipient complaint',
             'repeated_soft_bounce' => 'Repeated temporary failures', 'operator_block' => 'Blocked by the operator',
             'client_abuse_block' => 'Blocked by the operator', 'recipient_global_opt_out' => 'Recipient asked not to be contacted',
+            'account_block' => 'Blocked by your account',
         ],
         'validation_job_status' => [
             'queued' => 'Queued', 'processing' => 'Processing', 'completed' => 'Completed', 'failed' => 'Failed', 'cancelled' => 'Cancelled',
@@ -69,7 +70,8 @@ final class Labels
         'dsn_status' => ['open' => 'Open', 'match_requested' => 'Match requested (awaiting delivery daemon)', 'matched' => 'Matched', 'dismissed' => 'Dismissed'],
         'usage_type' => ['validation_address' => 'Validation addresses', 'message_submitted' => 'Messages submitted'],
         // Phase 9
-        'client_origin' => ['operator' => 'Created by an operator', 'public_application' => 'Public sign-up'],
+        'client_origin' => ['operator' => 'Opened by an operator', 'public_application' => 'Public sign-up', 'invitation' => 'Opened with an invitation',
+            'system' => 'This installation\'s own (self-tests)'],
         'quota_metric' => ['validation_jobs' => 'Validation jobs', 'validation_addresses' => 'Validation addresses submitted',
             'send_jobs' => 'Send jobs', 'send_recipients' => 'Send recipients accepted'],
         'quota_period' => ['day' => 'Today', 'month' => 'This month'],
@@ -86,9 +88,17 @@ final class Labels
             'send_recipients_per_month' => 'Send recipients per month', 'max_recipients_per_send_job' => 'Recipients per send job',
             'max_api_keys' => 'Usable API keys', 'max_webhook_endpoints' => 'Webhook endpoints', 'max_sending_domains' => 'Sending domains',
         ],
+        // What each client status means, for an operator (the client's page).
+        'client_status_operator' => [
+            'pending_approval' => 'It can sign in and read, but it creates no work until it is approved.',
+            'active' => 'It works within its limits.',
+            'throttled' => 'It works, but sends and calls the API more slowly.',
+            'suspended' => 'New work is refused and work in progress is paused; it can still sign in and read.',
+            'closed' => 'Final: its keys no longer work, and its data is kept.',
+        ],
         // What each client status means for the client (shown on the client's own overview).
         'client_status_meaning' => [
-            'pending_approval' => 'Your account awaits approval. You can sign in and read, but you cannot create validation or send jobs yet.',
+            'pending_approval' => 'Your account is not open yet. You can sign in and look around, but nothing can be sent or checked until it opens.',
             'active' => 'Your account is approved. Work is accepted within the limits shown below.',
             'throttled' => 'Your account is throttled by the operator: sending is paced more slowly and the API accepts fewer requests per minute. You can still create work.',
             'suspended' => 'Your account is suspended by the operator: new validation and send work is refused and work in progress is paused. You can still read your data. Contact the operator.',
@@ -109,6 +119,8 @@ final class Labels
         'client.closed' => 'Client closed', 'client.account_updated' => 'Client account changed', 'client.limits_changed' => 'Client limits changed',
         'client.note_added' => 'Note added', 'client.policy_accepted' => 'Acceptable use policy accepted',
         'client.policy_requirement_changed' => 'Policy requirement changed',
+        'client.plan_changed' => 'Client plan changed', 'plan.created' => 'Plan added', 'plan.updated' => 'Plan changed', 'plan.deleted' => 'Plan deleted',
+        'invitation.created' => 'Invitation made', 'invitation.revoked' => 'Invitation withdrawn', 'invitation.used' => 'Invitation used',
         'client.global_suppressions_enabled' => 'Global opt-out reporting allowed', 'client.global_suppressions_disabled' => 'Global opt-out reporting withdrawn',
         'client_alert.acknowledged' => 'Alert acknowledged', 'client_membership.created' => 'Member added',
         'client_membership.removed' => 'Member removed', 'client_membership.role_changed' => 'Member role changed',
@@ -131,6 +143,8 @@ final class Labels
         'suppression.operator_created' => 'Suppression added', 'suppression.operator_lifted' => 'Suppression lifted',
         'suppression.global_opt_out_created' => 'Global opt-out recorded', 'suppression.global_opt_out_lifted' => 'Global opt-out lifted',
         'suppression.global_opt_out_reaffirmed' => 'Global opt-out confirmed again',
+        'suppression.account_block_created' => 'Account block added', 'suppression.account_block_reaffirmed' => 'Account block confirmed again',
+        'suppression.account_block_lifted' => 'Account block lifted',
         'unmatched_dsn.dismissed' => 'Unmatched bounce dismissed', 'unmatched_dsn.match_requested' => 'Unmatched bounce matched to a message',
         'delivery.live_enabled' => 'Live delivery switched on', 'delivery.live_disabled' => 'Live delivery switched off (HELD)',
         'delivery.outbound_paused' => 'Sending stopped (emergency stop)', 'delivery.outbound_resumed' => 'Sending resumed',

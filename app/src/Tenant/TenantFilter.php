@@ -41,7 +41,8 @@ final class TenantFilter extends SQLFilter
             'message_links', 'message_events' => "$a.message_id IN (SELECT m.id FROM messages m JOIN send_jobs sj ON sj.id = m.send_job_id WHERE sj.client_id = $c)",
             'disposable_domains' => '',
             // users, audit_log, unmatched_dsns, delivery_ingest_cursors, heartbeats, the operator-only
-            // client_notes / client_reputation_metrics / client_alerts, and anything new.
+            // client_notes / client_reputation_metrics / client_alerts / client_invitations, plans (read by
+            // the dashboard through DBAL only), and anything new.
             default => '1 = 0',
         };
     }

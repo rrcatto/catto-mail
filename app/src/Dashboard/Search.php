@@ -57,8 +57,8 @@ final class Search
             if ($clients) {
                 $sections['messages'] = $this->messageRows('m.recipient_address = ?', [$address]);
                 $sections['clients'] = $this->clientRows(
-                    'SELECT id::text AS id, company_name, status, contact_email FROM clients WHERE lower(contact_email) = lower(?) OR lower(billing_contact_email) = lower(?) OR lower(abuse_contact_email) = lower(?) ORDER BY company_name LIMIT '.self::LIMIT,
-                    [$q, $q, $q]);
+                    'SELECT id::text AS id, company_name, status, contact_email FROM clients WHERE lower(contact_email) = lower(?) ORDER BY company_name LIMIT '.self::LIMIT,
+                    [$q]);
             }
             if ($can('PLATFORM.SUPPRESSION.VIEW')) {
                 $sections['suppressions'] = $this->suppressionRows($address, null);

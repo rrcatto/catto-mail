@@ -8,6 +8,7 @@
 <tr><th scope="row">Repeated soft bounce</th><td>The delivery daemon, after 3 mailbox-specific temporary failures (full or disabled mailbox) within 30 days, across all clients. A later acceptance resets the count. Provider throttling, connection or DNS problems never count.</td><td>Global</td><td>Expires after 30 days</td></tr>
 <tr><th scope="row">Recipient global opt-out</th><td>A trusted client reporting the recipient's explicit request, or the recipient's own answer on a re-permission page.</td><td>Global (the reporting client is recorded)</td><td>Never, unless lifted</td></tr>
 <tr><th scope="row">Operator block, client abuse block</th><td>An operator.</td><td>Global or one client; address or whole domain</td><td>Optional expiry</td></tr>
+<tr><th scope="row">Account block</th><td>The account itself: its admins (Sending › Suppressions › Block an address or a domain) or its connected application (<code>POST /v1/blocks</code>), for example after someone complained to it directly.</td><td>That account only; address or whole domain</td><td>Never, unless lifted</td></tr>
 </tbody></table>
 <h2>What is not a suppression</h2>
 <ul>
@@ -15,5 +16,6 @@
 <li>A single soft bounce, provider throttling, a sender or IP reputation rejection, DNS or TLS failures, "outcome unknown", or a validation result.</li>
 </ul>
 <h2>Lifting</h2>
-<p>Operators with the suppression permission can lift a suppression (Mail flow › Suppressions, or <code>smarthost:suppression:lift</code>). Lifting sets a date; nothing is deleted, and the audit log records who and why. Lift only on evidence (for example the person asks to be mailed again, or a hard bounce was a receiver's error).</p>
+<p>A domain suppression covers exactly that domain, not its subdomains. Searching for an address also shows the domain suppression that covers it.</p>
+<p>An account's admins lift their own account blocks from their Suppressions page. Operators with the suppression permission can lift a suppression (Mail flow › Suppressions, or <code>smarthost:suppression:lift</code>). Lifting sets a date; nothing is deleted, and the audit log records who and why. Lift only on evidence (for example the person asks to be mailed again, or a hard bounce was a receiver's error).</p>
 {% endblock %}

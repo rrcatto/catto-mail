@@ -52,6 +52,15 @@ final class ClientApiKeyController extends AbstractController
             'limits' => $this->account->limits($client)]);
     }
 
+    /** Making a key is its own page (owner decision 2026-10-27: no form beside the title). */
+    #[Route('/api-keys/new', name: 'dashboard_client_api_key_new', methods: ['GET'])]
+    public function new(string $clientId): Response
+    {
+        $client = $this->access->client($clientId, ClientVoter::KEYS);
+
+        return $this->render('dashboard/client/api_key_new.html.twig', ['client' => $client, 'section' => 'api_keys', 'name' => '', 'expires_on' => '', 'error' => null]);
+    }
+
     #[Route('/api-keys', name: 'dashboard_client_api_key_create', methods: ['POST'])]
     public function create(string $clientId, Request $request, ApiKeyManager $keys, InstallationTime $time): Response
     {
@@ -60,9 +69,9 @@ final class ClientApiKeyController extends AbstractController
         try {
             [$key, $raw] = $keys->create($client, $request->request->getString('name'), $this->actor(), OperatorClientController::expiry($request, $time->zone));
         } catch (DomainRuleViolation $e) {
-            $this->addFlash('error', $e->getMessage());
-
-            return $this->redirectToRoute('dashboard_client_api_keys', ['clientId' => $clientId]);
+            return $this->render('dashboard/client/api_key_new.html.twig', ['client' => $client, 'section' => 'api_keys',
+                'name' => mb_substr($request->request->getString('name'), 0, 100), 'expires_on' => mb_substr($request->request->getString('expires_on'), 0, 10),
+                'error' => $e->getMessage()], new Response('', Response::HTTP_UNPROCESSABLE_ENTITY));
         }
         $response = $this->render('dashboard/api_key_secret.html.twig', ['client' => $client, 'section' => 'api_keys', 'key' => $key,
             'raw' => $raw, 'back' => $this->generateUrl('dashboard_client_api_keys', ['clientId' => $clientId]), 'client_name' => $client->getCompanyName()]);
@@ -94,7 +103,8 @@ final class ClientApiKeyController extends AbstractController
         try {
             $lifecycle->recordPolicyAcceptance($client, $request->request->getString('policy_version'), PolicyAcceptanceSource::ClientDashboard,
                 $this->actor(), $this->access->user());
-            $this->addFlash('success', 'Service policy accepted.');
+            $this->addFlash('success', \App\Enum\ClientStatus::Active === $client->getStatus() && $client->opensOnPolicyAcceptance()
+                ? 'Service policy accepted: your account is open.' : 'Service policy accepted.');
         } catch (DomainRuleViolation $e) {
             $this->addFlash('error', $e->getMessage());
         }

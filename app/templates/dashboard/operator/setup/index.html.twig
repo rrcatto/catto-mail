@@ -3,45 +3,57 @@
 {% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}System setup{% endblock %}
 {% block body %}
-{% set total = steps|length %}
-{% set done = steps|filter(s => s.view == 'done')|length %}
-{% set ready = steps|filter(s => s.view == 'ready')|length %}
+{% set mine = needs_you|map(k => steps[k]) %}
+{% set done = mine|filter(s => s.view == 'done')|length %}
+{% set ready = mine|filter(s => s.view == 'ready')|length %}
+{% set auto_steps = automatic|map(k => steps[k]) %}
+{% set auto_bad = auto_steps|filter(s => s.view == 'todo') %}
+{% set auto_ok = auto_steps|filter(s => s.view == 'done')|length %}
 <div class="pagehead">
     <div>
         <h1>System setup</h1>
-        <p class="lead"><strong>{{ done }} of {{ total }}</strong> steps done.{% if not complete %} {% if ready %}<strong>{{ ready }}</strong> {{ ready == 1 ? 'is' : 'are' }} ready to mark done; {% endif %}<strong>{{ total - done - ready }}</strong> still need{{ total - done - ready == 1 ? 's' : '' }} something.{% endif %}</p>
-        <progress class="setup-progress" max="{{ total }}" value="{{ done }}" aria-label="{{ done }} of {{ total }} steps done">{{ done }} of {{ total }}</progress>
+        <p class="lead"><strong>{{ done }} of {{ mine|length }}</strong> steps that need you are done.{% if not complete %} {% if ready %}<strong>{{ ready }}</strong> {{ ready == 1 ? 'is' : 'are' }} ready to mark done.{% endif %}{% endif %} The system checks {{ auto_steps|length }} more by itself: {{ auto_ok }} pass{% if auto_bad is not empty %}, <strong class="text-warn">{{ auto_bad|length }} need{{ auto_bad|length == 1 ? 's' : '' }} a look</strong>{% endif %}.</p>
+        <progress class="setup-progress" max="{{ mine|length }}" value="{{ done }}" aria-label="{{ done }} of {{ mine|length }} steps done">{{ done }} of {{ mine|length }}</progress>
     </div>
-    {% if current and not complete %}<a class="btn" href="{{ path('dashboard_operator_setup_step', {step: current}) }}">Continue with step {{ steps[current].n }}: {{ steps[current].title }}</a>{% endif %}
+    {% if current and not complete %}<a class="btn" href="{{ path('dashboard_operator_setup_step', {step: current}) }}">Continue: {{ steps[current].title }}</a>{% endif %}
 </div>
 {% if complete %}<p class="flash flash-success">Setup is complete. Live delivery is a separate decision: <a href="{{ path('dashboard_operator_system') }}">Mail flow › Delivery</a>.</p>{% endif %}
-{% if agent_age is null %}<p class="warn">The host agent has not reported yet, so the host, DNS, TLS, Postfix and backup checks are missing.</p>{% endif %}
+{% if agent_age is null %}<p class="warn">The host agent (the small service on this server that runs the checks only the server can make) has not reported yet, so the host, DNS, TLS, Postfix and backup checks are missing.</p>{% endif %}
 
-{% for group, keys in groups %}
-<section class="card card-flush setup-group" aria-labelledby="sg-{{ loop.index }}">
-    <div class="card-head"><h2 id="sg-{{ loop.index }}">{{ group }}</h2></div>
-    {% for key in keys %}{% set s = steps[key] %}
-    <details class="setup-step setup-{{ s.view }}{{ s.problem ? ' setup-problem' : '' }}" id="step-{{ key }}"{% if key == current and not complete %} open{% endif %}>
+{% macro step_row(key, s, current, complete) %}{% import 'dashboard/_macros.html.twig' as ui %}
+    <details class="setup-step setup-{{ s.view == 'waiting' ? 'todo' : s.view }}{{ s.problem ? ' setup-problem' : '' }}" id="step-{{ key }}"{% if (key == current and not complete) or (not s.needs_you and s.view == 'todo') %} open{% endif %}>
         <summary>
-            <span class="setup-mark" aria-hidden="true">{{ s.view == 'todo' or s.problem ? '!' : '✓' }}</span>
-            <span class="setup-text"><span class="setup-title">{{ s.n }}. {{ s.title }}</span>
-                <span class="setup-line">{% if s.problem %}{{ s.problem.title }}: {{ s.problem.summary }}{% elseif s.view == 'ready' %}{{ s.check_rows is empty ? s.purpose : 'Every check passes.' }}{% if s.state == 'skipped' %} Skipped earlier.{% endif %}{% elseif s.view == 'todo' %}{{ s.purpose }}{% if s.state == 'skipped' %} Skipped earlier.{% endif %}{% endif %}</span></span>
-            <span class="setup-chip setup-chip-{{ s.view }}">{{ s.view == 'done' ? 'Done' : (s.view == 'ready' ? 'Ready to mark done' : 'To do') }}</span>
+            <span class="setup-mark" aria-hidden="true">{{ s.view in ['todo', 'waiting'] or s.problem ? '!' : '✓' }}</span>
+            <span class="setup-text"><span class="setup-title">{{ s.title }}</span>
+                <span class="setup-line">{% if s.problem %}{{ s.problem.title }}: {{ s.problem.summary }}{% elseif s.view == 'ready' %}{{ s.check_rows is empty ? s.purpose : 'Every check passes.' }}{% if s.state == 'skipped' %} Skipped earlier.{% endif %}{% elseif s.view == 'waiting' %}Not checked yet: {{ s.purpose }}{% elseif s.view == 'todo' %}{{ s.purpose }}{% if s.state == 'skipped' %} Skipped earlier.{% endif %}{% else %}{{ s.purpose }}{% endif %}</span></span>
+            <span class="setup-chip setup-chip-{{ s.view == 'waiting' ? 'todo' : s.view }}">{{ s.view == 'done' ? (s.needs_you ? 'Done' : 'Passes') : (s.view == 'ready' ? 'Ready to mark done' : (s.view == 'waiting' ? 'Not checked yet' : (s.needs_you ? 'To do' : 'Needs a look'))) }}</span>
         </summary>
         <div class="setup-body">
             {% if s.check_rows is not empty %}
             <ul class="plainlist setup-checks">{% for c in s.check_rows %}<li>{{ ui.result(c.result) }}<span><strong>{{ c.title }}</strong>: {{ c.summary }}</span></li>{% endfor %}</ul>
             {% endif %}
             <div class="form-actions">
-                {% if s.view != 'done' %}
+                {% if s.needs_you and s.view != 'done' %}
                 <form method="post" action="{{ path('dashboard_operator_setup_state', {step: key}) }}" class="inline">{{ ui.csrf() }}<input type="hidden" name="return" value="index"><button type="submit" name="state" value="done"{% if s.view == 'todo' %} class="secondary"{% endif %}>Mark done</button></form>
                 {% endif %}
                 <a class="btn btn-secondary" href="{{ path('dashboard_operator_setup_step', {step: key}) }}">Open the step</a>
-                {% if s.topic %}{{ ui.help(s.topic, 'Help: ' ~ s.topic|replace({'-': ' '})) }}{% endif %}
+                {% if s.topic %}{{ ui.help(s.topic, 'Help: ' ~ help_title(s.topic)) }}{% endif %}
             </div>
         </div>
     </details>
-    {% endfor %}
+{% endmacro %}
+
+<section class="card card-flush setup-group" aria-labelledby="sg-you">
+    <div class="card-head"><h2 id="sg-you">Needs you</h2>{{ ui.tip('Records to publish at your DNS provider, a copy of the backups off this server, and the tests only a person can confirm. Mark each done when it is.') }}</div>
+    {% for key in needs_you %}{{ _self.step_row(key, steps[key], current, complete) }}{% endfor %}
 </section>
-{% endfor %}
+
+<section class="card card-flush setup-group" aria-labelledby="sg-auto">
+    <div class="card-head"><h2 id="sg-auto">Checked automatically</h2>{{ ui.tip('The system runs these checks by itself, every few minutes. A step passes while its checks pass; nothing to mark.') }}</div>
+    {% if auto_bad is empty %}<p class="card-note">All {{ auto_ok }} checked steps pass{% if auto_ok < auto_steps|length %}; the others have not been checked yet{% endif %}.</p>{% endif %}
+    {% for key in automatic|filter(k => steps[k].view == 'todo') %}{{ _self.step_row(key, steps[key], current, complete) }}{% endfor %}
+    <details class="card-foot figures"><summary>Every automatic step ({{ auto_steps|length }})</summary>
+        {% for key in automatic|filter(k => steps[k].view != 'todo') %}{{ _self.step_row(key, steps[key], current, complete) }}{% endfor %}
+    </details>
+</section>
 {% endblock %}

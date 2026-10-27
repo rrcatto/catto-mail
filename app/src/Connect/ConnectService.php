@@ -10,6 +10,7 @@ use App\Audit\AuditLogger;
 use App\Client\ClientLimitPolicy;
 use App\Dashboard\Labels;
 use App\Domain\DomainRuleViolation;
+use App\Domain\SendingDomainService;
 use App\Entity\ApiKey;
 use App\Entity\ApplicationConnection;
 use App\Entity\Client;
@@ -41,7 +42,10 @@ use Symfony\Component\Uid\Uuid;
  *               client's API-key or webhook-endpoint limit leaves no room. Stores the
  *               connection as pending with the SHA-256 of a single-use code (CODE_TTL_SECONDS)
  *               and the application's code challenge; the raw code is returned once, for the
- *               redirect back to the application. Audited.
+ *               redirect back to the application. Audited. When the application named the
+ *               domain it sends from (specification 2.13) and the client does not have it, the
+ *               domain is added (SendingDomainService::register, within the client's limit), so
+ *               the account can go straight on to its DNS steps.
  *   exchange()  the application presents the code, its code verifier and the redirect URI,
  *               server to server. In one transaction the connection becomes active, an earlier
  *               connection of the client to the same webhook URL is ended, and the API key
@@ -74,6 +78,7 @@ final class ConnectService
         private readonly WebhookTargetGuard $guard,
         private readonly ClientLimitPolicy $limits,
         private readonly SendingDomainRule $domainRule,
+        private readonly SendingDomainService $domains,
         private readonly AuditLogger $audit,
         private readonly string $smarthostEnv,
         private readonly string $publicBaseUrl,
@@ -101,10 +106,12 @@ final class ConnectService
     }
 
     /**
-     * The person's workspaces for the approval page, by name: each with why it cannot be chosen
-     * (null: it can) and the active connection the approval would replace.
+     * The person's accounts for the approval page, by name: each with why it cannot be chosen
+     * (null: it can), the active connection the approval would replace, and what happens to the
+     * domain the application sends from: null (none named), 'present' (the account has it),
+     * 'add' (the approval adds it) or 'full' (the account's domain limit leaves no room).
      *
-     * @return list<array{client: Client, obstacle: ?string, replaces: ?array{application_name: string, created_at: string}}>
+     * @return list<array{client: Client, obstacle: ?string, replaces: ?array{application_name: string, created_at: string}, domain: ?string}>
      */
     public function workspaces(User $user, ConnectRequest $request): array
     {
@@ -116,7 +123,8 @@ final class ConnectService
             $replaces = $this->connection->fetchAssociative(
                 "SELECT application_name, created_at FROM application_connections WHERE client_id = ? AND webhook_url = ? AND status = 'active'",
                 [$client->getId()->toRfc4122(), $request->webhookUrl]);
-            $out[] = ['client' => $client, 'obstacle' => $this->obstacle($membership, $request), 'replaces' => false === $replaces ? null : $replaces];
+            $out[] = ['client' => $client, 'obstacle' => $this->obstacle($membership, $request), 'replaces' => false === $replaces ? null : $replaces,
+                'domain' => $this->domainPlan($client, $request)];
         }
 
         return $out;
@@ -134,7 +142,7 @@ final class ConnectService
             ->setParameter('u', $user->getId(), 'uuid')->setParameter('c', Uuid::fromString($clientId), 'uuid')->getOneOrNullResult() : null;
         if (!$membership instanceof ClientMembership) {
             // A client the person does not belong to is answered like one that does not exist.
-            throw new DomainRuleViolation('Choose one of your workspaces.');
+            throw new DomainRuleViolation('Choose one of your accounts.');
         }
         $obstacle = $this->obstacle($membership, $request);
         if (null !== $obstacle) {
@@ -145,6 +153,7 @@ final class ConnectService
         $expires = Clock::now()->modify('+'.self::CODE_TTL_SECONDS.' seconds');
         $connection = new ApplicationConnection($client, $request->applicationName, $request->redirectUri, $request->webhookUrl, $user,
             hash('sha256', $code), $request->codeChallenge, $expires);
+        $addDomain = 'add' === $this->domainPlan($client, $request);
         $this->em->wrapInTransaction(function () use ($connection, $client, $user, $request): void {
             // Approvals whose code was never exchanged leave nothing but their row: gone a day after the code expired.
             $this->connection->executeStatement("DELETE FROM application_connections WHERE status = 'pending' AND code_expires_at < now() - interval '1 day'");
@@ -155,8 +164,31 @@ final class ConnectService
                 'redirect_origin' => $request->redirectOrigin(), 'webhook_url' => $request->webhookUrl,
                 'code_expires_at' => Clock::rfc3339($connection->getCodeExpiresAt())]);
         });
+        if ($addDomain && null !== $request->sendingDomain) {
+            try {
+                $this->domains->register($client, $request->sendingDomain, AuditActor::user($user));
+            } catch (DomainRuleViolation) {
+                // Taken a moment ago, or the limit reached meanwhile: the account adds it by hand.
+            }
+        }
 
         return $code;
+    }
+
+    /** What the approval does with the domain the application sends from (see workspaces()). */
+    private function domainPlan(Client $client, ConnectRequest $request): ?string
+    {
+        if (null === $request->sendingDomain) {
+            return null;
+        }
+        $counts = $this->connection->fetchAssociative('SELECT count(*) AS n, count(*) FILTER (WHERE domain = ?) AS present FROM sending_domains WHERE client_id = ?',
+            [$request->sendingDomain, $client->getId()->toRfc4122()]) ?: ['n' => 0, 'present' => 0];
+
+        return match (true) {
+            (int) $counts['present'] > 0 => 'present',
+            (int) $counts['n'] < $this->limits->maxSendingDomains($client) => 'add',
+            default => 'full',
+        };
     }
 
     /**
@@ -274,7 +306,13 @@ final class ConnectService
     {
         $domains = $this->em->getRepository(SendingDomain::class)->findBy(['client' => $client], ['domain' => 'ASC']);
 
-        return array_map(fn (SendingDomain $d): array => Presenter::sendingDomain($d, $this->domainRule->canSend($d)), $domains);
+        return array_map(fn (SendingDomain $d): array => Presenter::sendingDomain($d, $this->domainRule->canSend($d), $this->setupUrl($d)), $domains);
+    }
+
+    /** The account's page for setting up a domain (its DNS steps), as an absolute address. */
+    public function setupUrl(SendingDomain $domain): string
+    {
+        return rtrim($this->publicBaseUrl, '/').'/dashboard/c/'.$domain->getClient()->getId()->toRfc4122().'/sending-domains/'.$domain->getId()->toRfc4122();
     }
 
     /** @param array<string, mixed> $detail */
@@ -299,10 +337,10 @@ final class ConnectService
     {
         $client = $membership->getClient();
         if (ClientMembershipRole::Admin !== $membership->getRole()) {
-            return \sprintf('Only a client admin can connect an application; you are a %s of %s.', $membership->getRole()->value, $client->getCompanyName());
+            return \sprintf('Only an admin of the account can connect an application; you are a %s of %s. Ask one of its admins.', $membership->getRole()->value, $client->getCompanyName());
         }
         if (ClientStatus::Active !== $client->getStatus()) {
-            return \sprintf('%s is %s: an application can be connected only to an active client.', $client->getCompanyName(),
+            return \sprintf('%s is %s: an application can be connected only to an active account.', $client->getCompanyName(),
                 strtolower(Labels::label($client->getStatus()->value, 'client_status')));
         }
 
@@ -323,12 +361,12 @@ final class ConnectService
             SQL, ['c' => $client->getId()->toRfc4122(), 'u' => $webhookUrl]) ?: ['keys' => 0, 'endpoints' => 0];
         $maxKeys = $this->limits->maxApiKeys($client);
         if ((int) $counts['keys'] >= $maxKeys) {
-            return \sprintf('%s already has %d usable API key%s, and its limit is %d: nothing was created. Revoke a key or a connected application first, or ask the operator of this installation to raise the limit.',
+            return \sprintf('%s already has %d usable API key%s, and its limit is %d: nothing was created. Revoke a key or disconnect an application first (Settings), or ask the operator of this installation to raise the limit.',
                 $client->getCompanyName(), $counts['keys'], 1 === (int) $counts['keys'] ? '' : 's', $maxKeys);
         }
         $maxEndpoints = $this->limits->maxWebhookEndpoints($client);
         if ((int) $counts['endpoints'] >= $maxEndpoints) {
-            return \sprintf('%s already has %d webhook endpoint%s, and its limit is %d: nothing was created. Revoke a connected application first, or ask the operator of this installation to raise the limit.',
+            return \sprintf('%s already has %d webhook endpoint%s, and its limit is %d: nothing was created. Disconnect an application first (Settings), or ask the operator of this installation to raise the limit.',
                 $client->getCompanyName(), $counts['endpoints'], 1 === (int) $counts['endpoints'] ? '' : 's', $maxEndpoints);
         }
 

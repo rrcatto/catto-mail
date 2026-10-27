@@ -31,7 +31,7 @@ final class ClientLifecycleTest extends DashboardTestCase
     private function pendingClient(): Client
     {
         return $this->lifecycle()->create('Applicant '.bin2hex(random_bytes(3)), 'ops@applicant.example', 'standard',
-            ClientStatus::PendingApproval, self::actor(), true, 'billing@applicant.example', 'abuse@applicant.example');
+            ClientStatus::PendingApproval, self::actor(), true);
     }
 
     public function testApprovalWorkflowWithPolicyAcceptance(): void
@@ -145,18 +145,24 @@ final class ClientLifecycleTest extends DashboardTestCase
     public function testCreationRulesAndThePublicOnboardingGate(): void
     {
         try {
-            $this->lifecycle()->create('Internal', 'ops@internal.example', 'internal', ClientStatus::Active, self::actor(), true);
+            $this->lifecycle()->create('Internal', 'ops@internal.example', 'standard', ClientStatus::Active, self::actor(), true);
             self::fail('an active client needs the policy, or an exemption');
         } catch (DomainRuleViolation) {
         }
         foreach ([ClientStatus::Throttled, ClientStatus::Suspended, ClientStatus::Closed] as $status) {
             try {
-                $this->lifecycle()->create('X', 'ops@x.example', 'p', $status, self::actor());
+                $this->lifecycle()->create('X', 'ops@x.example', 'standard', $status, self::actor());
                 self::fail("created {$status->value}");
             } catch (DomainRuleViolation) {
             }
         }
-        $internal = $this->lifecycle()->create('Internal', 'ops@internal.example', 'internal', ClientStatus::Active, self::actor(), false);
+        $internal = $this->lifecycle()->create('Internal', 'ops@internal.example', 'standard', ClientStatus::Active, self::actor(), false);
+        try {
+            $this->lifecycle()->create('Unplanned', 'ops@unplanned.example', 'no-such-plan', ClientStatus::Active, self::actor(), false);
+            self::fail('a client is on one of the plans');
+        } catch (DomainRuleViolation $e) {
+            self::assertSame('Choose one of the plans.', $e->getMessage());
+        }
         self::assertNotNull($internal->getApprovedAt());
         self::assertSame(['client.created', 'client.approved'], Db::owner()->fetchFirstColumn(
             "SELECT action FROM audit_log WHERE target_id = ? ORDER BY occurred_at", [$internal->getId()->toRfc4122()]));

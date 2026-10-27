@@ -30,12 +30,12 @@
                 <ul class="menu-panel">
                     {% for p in m.items %}
                     <li class="menu-item{{ p.views is not empty ? ' has-views' : '' }}">
-                        <a href="{{ p.href }}"{% if p.current %} aria-current="page"{% endif %}><span class="menu-label">{{ p.label }}</span>{% if p.note %}<span class="menu-note">{{ p.note }}</span>{% endif %}{% if p.badge %}<span class="count count-{{ p.badge[1] }}" aria-hidden="true">{{ p.badge[0] }}</span><span class="sr">, {{ p.badge[0] }} to look at</span>{% endif %}{% if p.views is not empty %}{{ icon.i('chevron', 14) }}{% endif %}</a>
+                        <a href="{{ p.href }}"{% if p.current %} aria-current="page"{% endif %}>{{ icon.i(p.icon, 16) }}<span class="menu-label">{{ p.label }}</span>{% if p.note %}<span class="menu-note">{{ p.note }}</span>{% endif %}{% if p.badge %}<span class="count count-{{ p.badge[1] }}" aria-hidden="true">{{ p.badge[0] }}</span><span class="sr">, {{ p.badge[0] }} to look at</span>{% endif %}{% if p.views is not empty %}{{ icon.i('chevron', 14) }}{% endif %}</a>
                         {% if p.views is not empty %}
                         <ul class="menu-flyout">
                             {% for v in p.views %}
                             {% if v.header %}<li class="menu-head">{{ v.label }}</li>{% else %}
-                            <li><a href="{{ v.href }}">{% if v.state %}<span class="menu-dot menu-dot-{{ v.state }}" aria-hidden="true"></span>{% endif %}<span class="menu-label">{{ v.label }}</span>{% if v.note %}<span class="menu-note">{{ v.note }}</span>{% endif %}</a></li>
+                            <li><a href="{{ v.href }}">{% if v.icon %}{{ icon.i(v.icon, 16, v.state ? 'menu-state-' ~ v.state : '') }}{% endif %}<span class="menu-label">{{ v.label }}</span>{% if v.note %}<span class="menu-note">{{ v.note }}</span>{% endif %}</a></li>
                             {% endif %}
                             {% endfor %}
                         </ul>
@@ -52,7 +52,7 @@
         {% set search_action = nav.context == 'client' ? path('dashboard_client_search', {clientId: nav_client.id.toRfc4122}) : (platform ? path('dashboard_search') : null) %}
         {% if search_action %}
             <details class="dropdown searchdrop" data-controller="dropdown">
-                <summary class="iconbtn" aria-label="Search{{ nav.context == 'client' ? ' this client' : '' }}">{{ icon.i('search') }}</summary>
+                <summary class="iconbtn" aria-label="Search{{ nav.context == 'client' ? ' this account' : '' }}">{{ icon.i('search') }}</summary>
                 <form class="dropdown-panel topsearch" role="search" method="get" action="{{ search_action }}">
                     <label for="top-search">{{ nav.context == 'client' ? 'Search ' ~ nav_client.companyName : 'Search the installation' }}</label>
                     <span class="topsearch-row"><input id="top-search" type="search" name="q" minlength="2" maxlength="200" placeholder="An ID, address, domain, reference or name"{% if (section ?? '') == 'search' %} value="{{ app.request.query.get('q') }}"{% endif %}><button type="submit">Search</button></span>
@@ -84,20 +84,21 @@
                 {% if app.user.roleKeys is not empty %}<p>{% for r in app.user.roleKeys %}<span class="tag">{{ r|lower }}</span>{% endfor %}</p>{% endif %}
                 <form method="post" action="{{ path('dashboard_logout') }}">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
-                    <button type="submit" class="secondary">Sign out</button>
+                    <button type="submit" class="secondary">{{ icon.i('box-arrow-right', 16) }}Sign out</button>
                 </form>
             </div>
         </details>
     </div>
 </header>
 <main id="main" class="content">
-    {# Where this page is: area › page, and › the item a detail page shows (block crumb_tail, rendered by Twig and so already escaped). #}
+    {# Where this page is, on a detail page only (owner decision 2026-10-27: a list page's title says it once): area › page › the item
+       it shows (block crumb_tail, rendered by Twig and so already escaped). The menu bar marks the area of every page. #}
     {% set crumb_tail = block('crumb_tail') is defined ? block('crumb_tail')|trim : '' %}
-    {% if nav.crumbs is not empty %}
+    {% if nav.crumbs is not empty and crumb_tail is not empty %}
     <nav class="crumbs" aria-label="Breadcrumb">{% for c in nav.crumbs %}{% if not loop.first %}<span aria-hidden="true"> › </span>{% endif %}{% if c.href and (not loop.last or crumb_tail is not empty) %}<a href="{{ c.href }}">{{ c.label }}</a>{% else %}<span{% if loop.last %} aria-current="page"{% endif %}>{{ c.label }}</span>{% endif %}{% endfor %}{% if crumb_tail is not empty %}<span aria-hidden="true"> › </span><span class="crumb-tail">{{ crumb_tail|raw }}</span>{% endif %}</nav>
     {% endif %}
     {% if nav.context == 'client' and platform %}
-        <p class="viewing">You are viewing the workspace of <strong>{{ nav_client.companyName }}</strong> as an operator. <a href="{{ nav.switch.href }}">Back to the operator console</a></p>
+        <p class="viewing">You are viewing the account of <strong>{{ nav_client.companyName }}</strong> as an operator. <a href="{{ nav.switch.href }}">Back to the operator console</a></p>
     {% endif %}
     {% for type, messages in app.flashes %}
         {% for message in messages %}

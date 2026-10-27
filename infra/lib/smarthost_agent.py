@@ -24,6 +24,7 @@ on stdin/stdout) and polls the request queue cheaply with psql. Standard library
   smarthost_agent.py run [--poll SECONDS]   the service loop
   smarthost_agent.py once [--requested] [--section S] [--no-preflight]
   smarthost_agent.py facts                  print the host facts (JSON)
+  smarthost_agent.py dev-dkim [--once]      development only: DKIM requests with the pod's OpenDKIM
 """
 from __future__ import annotations
 
@@ -114,6 +115,8 @@ class Agent:
         self.i = values["SMARTHOST_INSTANCE"]
         self.resolver = resolver or Resolver()
         self.next_host = self.next_preflight = self.next_app = self.next_domains = 0.0
+        # The development stand-in (dev-dkim): DKIM keys through the development pod's OpenDKIM, not `smarthostctl prod`.
+        self.development = False
 
     # ------------------------------------------------------------- plumbing
     def console(self, *args: str, payload: Any = None, timeout: float = 600) -> tuple[int, str]:
@@ -123,6 +126,16 @@ class Agent:
 
     def prod(self, *args: str, timeout: float = 3600) -> tuple[int, str]:
         return self.host.run(PROD, *args, timeout=timeout)
+
+    def dkim(self, *args: str) -> tuple[int, str]:
+        """`smarthostctl prod dkim ...`; on the development pod the same key tool inside its OpenDKIM,
+        and a reload (SIGUSR1) after an activation."""
+        if not self.development:
+            return self.prod("dkim", *args)
+        rc, out = self.host.exec("opendkim", "smarthost-dkim-key", *args)
+        if rc == 0 and args and args[0] == "activate":
+            self.host.run("podman", "kill", "--signal", "USR1", f"{self.i}-opendkim")
+        return rc, out
 
     def pending(self) -> int:
         try:
@@ -483,7 +496,7 @@ class Agent:
             if not re.fullmatch(r"[a-z0-9.-]{3,253}", domain) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", selector):
                 return False, "invalid domain or selector", {}
             if action == "dkim.generate":
-                rc, out = self.prod("dkim", "generate", domain, selector)
+                rc, out = self.dkim("generate", domain, selector)
                 rc2, rec = self.host.exec("opendkim", "smarthost-dkim-key", "dns", domain, selector)
                 result: dict[str, Any] = {}
                 if rc == 0:
@@ -503,7 +516,7 @@ class Agent:
                 return False, f"DNS lookup failed: {exc}", {}
             if published != key.strip():
                 return False, f"publish the TXT record at {selector}._domainkey.{domain} first (DNS does not show the matching key yet)", {}
-            rc, out = self.prod("dkim", "activate", domain, selector)
+            rc, out = self.dkim("activate", domain, selector)
             if rc != 0:
                 return False, out.strip()[-600:], {}
             if params.get("sending_domain_id"):
@@ -524,8 +537,8 @@ class Agent:
             return rc == 0, out.strip()[-800:], {}
         return False, f"unknown action {action}", {}
 
-    def process_requests(self) -> int:
-        rc, out = self.console("claim")
+    def process_requests(self, only: tuple[str, ...] = ()) -> int:
+        rc, out = self.console("claim", *[f"--only={a}" for a in only])
         if rc != 0:
             print(f"host-agent: claim failed: {out.strip()[-300:]}", file=sys.stderr)
             return 0
@@ -570,6 +583,26 @@ class Agent:
             time.sleep(poll)
 
 
+def dev_dkim(agent: Agent, once: bool, poll: float) -> int:
+    """The development stand-in for the host agent (2026-10-27): only the DKIM requests of the
+    client dashboard, carried out with the development pod's OpenDKIM, and the periodic look at the
+    domains waiting for their DKIM record. Never on a production configuration."""
+    if agent.v.get("SMARTHOST_ENV") == "production":
+        print("host-agent: dev-dkim is for the development pod; production runs `smarthostctl prod agent run`", file=sys.stderr)
+        return 2
+    agent.development = True
+    print(f"host-agent (development): DKIM requests of {agent.i}, every {poll} s", flush=True)
+    while True:
+        try:
+            agent.process_requests(("dkim.generate", "dkim.activate"))
+            agent.console("domains")
+        except Exception as exc:  # never die: try again on the next round
+            print(f"host-agent: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        if once:
+            return 0
+        time.sleep(poll)
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="catto-mail host agent")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -580,11 +613,16 @@ def main(argv: list[str]) -> int:
     o.add_argument("--no-preflight", action="store_true")
     o.add_argument("--section", choices=Preflight.SECTIONS)
     sub.add_parser("facts")
+    d = sub.add_parser("dev-dkim", help="development only: carry out DKIM requests with the development pod's OpenDKIM")
+    d.add_argument("--poll", type=float, default=10)
+    d.add_argument("--once", action="store_true")
     a = p.parse_args(argv)
     env = Path(os.environ.get("SMARTHOST_DOTENV") or ROOT / "infra/.env")
     values = render.load(env)   # the .env's values completed with the built-in ones
     generated = Path(os.environ.get("SMARTHOST_GENERATED") or ROOT / "infra/.generated")
     agent = Agent(values, Host(values), generated)
+    if a.cmd == "dev-dkim":
+        return dev_dkim(agent, a.once, a.poll)
     if a.cmd == "facts":
         agent.dkim_keys_cache = agent.dkim_keys()
         print(json.dumps(agent.host_facts(), indent=2))

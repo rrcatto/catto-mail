@@ -8,7 +8,7 @@
 <div class="pagehead">
     <div>
         <div class="titleline"><h1>{{ client.companyName }}</h1>{{ ui.status(client.status.value, 'client_status') }}</div>
-        <p class="lead">{{ client.approvedAt ? 'Approved ' ~ client.approvedAt|date('j M Y', time_zone()) ~ '.' : 'Not approved yet.' }}
+        <p class="lead">{{ client.approvedAt ? 'Open since ' ~ client.approvedAt|date('j M Y', time_zone()) ~ '.' : 'Not open yet.' }}
             {% if near is empty %}Within every limit.{% else %}<span class="text-warn">Close to a limit: {% for q in near %}{{ q.metric|label('quota_metric')|lower }} {{ q.period|label('quota_period')|lower }} ({{ q.used|number_format }} of {{ q.limit|number_format }}){% if not loop.last %}, {% endif %}{% endfor %}.</span> <a href="{{ path('dashboard_client_usage', {clientId: cid}) }}">Usage &amp; limits</a>{% endif %}
             The last {{ period.label }}.</p>
     </div>
@@ -18,34 +18,57 @@
     </div>
 </div>
 
-{% if client.status.value != 'active' %}
+{% if client.status.value != 'active' and not (client.status.value == 'pending_approval' and client.opensOnPolicyAcceptance) %}
 <section class="banner banner-client-{{ client.status.value }}" aria-label="Account status">
     <div class="banner-text"><h2>{{ client.status.value|label('client_status') }}</h2><p>{{ client.status.value|label('client_status_meaning') }}</p></div>
 </section>
 {% endif %}
 
-{% if policy.version_in_force and policy.required and not policy.accepted %}
-<section class="card card-accent" aria-labelledby="policy-h">
-    <h2 id="policy-h">Accept the service policy</h2>
-    <p>A client admin must accept the service policy, version <strong>{{ policy.version_in_force }}</strong>, before this account can be approved.</p>
-    {% if may_admin %}
-    <form method="post" action="{{ path('dashboard_client_policy_accept', {clientId: cid}) }}" class="stack">
-        {{ ui.csrf() }}<input type="hidden" name="policy_version" value="{{ policy.version_in_force }}">
-        <label class="checkline"><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
-        <button type="submit">Accept policy {{ policy.version_in_force }}</button>
-    </form>
-    {% else %}<p class="muted">Ask a client admin to accept it.</p>{% endif %}
-</section>
-{% endif %}
-
-{% if not (steps.domain and steps.api_key and steps.webhook) %}
-<section class="card card-accent get-started" aria-labelledby="start-h">
-    <div class="card-head"><h2 id="start-h">Get started</h2><span class="muted">{{ (steps.domain ? 1 : 0) + (steps.api_key ? 1 : 0) + (steps.webhook ? 1 : 0) }} of 3 done</span>
-        <span class="tip"><button type="button" class="tip-btn" aria-describedby="start-tip">{{ icon.i('info', 16) }}<span class="sr">How sending works</span></button><span class="tip-body" role="tooltip" id="start-tip">Your messages go out from your own domain: add it, publish the DNS records shown, and it is ready once its DKIM key is active. Your application sends through the API with a key, and a webhook endpoint tells it what happened to each message.{% if not may_admin %} A client admin takes these steps.{% endif %}</span></span></div>
-    <ol class="stepper stepper-row">
-        <li class="{{ steps.domain ? 'done' }}"><a href="{{ path('dashboard_client_domains', {clientId: cid}) }}">Add a sending domain</a></li>
-        <li class="{{ steps.api_key ? 'done' }}"><a href="{{ path('dashboard_client_api_keys', {clientId: cid}) }}">Create an API key</a></li>
-        <li class="{{ steps.webhook ? 'done' }}"><a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}">Add a webhook</a></li>
+{% if not steps.done %}
+{# The account's start page (owner decision 2026-10-27): the steps to the first message, one at a time. #}
+{% set order = (steps.policy is null ? [] : ['policy'])|merge(['domain', 'connected', 'sent']) %}
+{% set current = order|filter(k => not steps[k])|first %}
+{% set done = order|filter(k => steps[k])|length %}
+<section class="card guide-card" aria-labelledby="start-h">
+    <div class="card-head"><h2 id="start-h">Get ready to send</h2><span class="muted">{{ done }} of {{ order|length }} done</span></div>
+    {% if not may_admin %}<p class="muted small">An admin of this account takes these steps; you can follow them here.</p>{% endif %}
+    <ol class="checklist">
+        {% if steps.policy is not null %}
+        <li class="{{ steps.policy ? 'done' : (current == 'policy' ? 'current') }}"><div class="checklist-text">
+            <span class="checklist-title">Accept the service policy</span>
+            {% if steps.policy %}<p>Accepted.</p>{% else %}
+            <p>The rules for what may be sent through {{ site_name() }}: <a href="{{ path('acceptable_use_policy') }}" target="_blank" rel="noopener">read the service policy</a> (version {{ policy.version_in_force }}).{% if client.status.value == 'pending_approval' %} Your account opens when you accept it.{% endif %}</p>
+            {% if may_admin %}
+            <form method="post" action="{{ path('dashboard_client_policy_accept', {clientId: cid}) }}" class="stack">
+                {{ ui.csrf() }}<input type="hidden" name="policy_version" value="{{ policy.version_in_force }}">
+                <label class="checkline"><input type="checkbox" required> I accept the service policy version {{ policy.version_in_force }} on behalf of {{ client.companyName }}.</label>
+                <button type="submit">Accept the policy</button>
+            </form>
+            {% endif %}{% endif %}
+        </div></li>
+        {% endif %}
+        <li class="{{ steps.domain ? 'done' : (current == 'domain' ? 'current') }}"><div class="checklist-text">
+            <span class="checklist-title">Make your sending domain ready</span>
+            {% if steps.domain %}<p>Ready: your messages can be sent from it.</p>{% else %}
+            <p>Your messages come from your own domain, the part after @ in your From address. You add two records to its DNS, one to prove it is yours and one with its signing key, and this page checks them for you.</p>
+            {% if current == 'domain' and may_admin %}<p class="form-actions">{% if steps.domain_next %}<a class="btn" href="{{ path('dashboard_client_domain', {clientId: cid, domainId: steps.domain_next.id}) }}">Continue with {{ steps.domain_next.domain }}</a>{% else %}<a class="btn" href="{{ path('dashboard_client_domain_new', {clientId: cid}) }}">Add your domain</a>{% endif %}</p>{% endif %}
+            {% endif %}
+        </div></li>
+        <li class="{{ steps.connected ? 'done' : (current == 'connected' ? 'current') }}"><div class="checklist-text">
+            <span class="checklist-title">Connect your application</span>
+            {% if steps.connected %}<p>Connected.{% if not steps.by_hand %} <a href="{{ path('dashboard_client_connections', {clientId: cid}) }}">Connected applications</a>{% endif %}</p>{% else %}
+            <p>Open the application that sends your mail, for example your mailing-list site, and choose Connect there. It brings you back here to approve; it then gets its own key and is told what happens to its mail. Nothing to copy.</p>
+            <details class="figures"><summary>For developers: connect by hand instead</summary>
+                <p>Make an <a href="{{ path('dashboard_client_api_keys', {clientId: cid}) }}">API key</a> and a <a href="{{ path('dashboard_client_webhooks', {clientId: cid}) }}">webhook</a> for your own code; the <a href="{{ path('docs_api') }}">API documentation</a> explains both.</p>
+            </details>
+            {% endif %}
+        </div></li>
+        <li class="{{ steps.sent ? 'done' : (current == 'sent' ? 'current') }}"><div class="checklist-text">
+            <span class="checklist-title">Send a test message</span>
+            {% if steps.sent %}<p>Sent: see <a href="{{ path('dashboard_client_send_jobs', {clientId: cid}) }}">Sending</a>.</p>{% else %}
+            <p>From your application, send a test message to yourself. It appears here under Sending, with what happened to it.</p>
+            {% endif %}
+        </div></li>
     </ol>
 </section>
 {% endif %}

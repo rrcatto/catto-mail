@@ -6,15 +6,15 @@
 <div class="pagehead">
     <div>
         <h1>Connected applications</h1>
-        <p class="lead">{{ connections|filter(c => c.status == 'active')|length }} application{{ connections|filter(c => c.status == 'active')|length == 1 ? '' : 's' }} connected.{{ ui.tip('An application that supports it sends a client admin to this installation; the admin signs in, chooses the workspace and approves, and the application collects its own API key and webhook signing secret. Nobody copies a key or a secret. Each connection has its own key and webhook endpoint; ending it revokes the key and removes the endpoint.' ~ (may_manage ? ' Connections are started in the application, never here.' : ' Client admins connect and disconnect applications.')) }}</p>
+        <p class="lead">{{ connections|filter(c => c.status == 'active')|length }} application{{ connections|filter(c => c.status == 'active')|length == 1 ? '' : 's' }} connected.{{ ui.tip('An application that supports it sends an admin of this account here to approve it, and then gets its own key and is told what happens to its mail. Nobody copies a key or a secret. Disconnecting one stops its key at once.' ~ (may_manage ? ' You start a connection in the application (its Connect button), never here.' : ' The account\'s admins connect and disconnect applications.')) }}</p>
     </div>
     <a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a>
 </div>
 <section class="card card-flush" aria-labelledby="conn-h">
     <div class="card-head"><h2 id="conn-h">Connections</h2></div>
-    {% if connections is empty %}<p class="empty">No application is connected.</p>{% else %}
+    {% if connections is empty %}<p class="empty">No application is connected. Open your application and choose Connect there.</p>{% else %}
     <div class="scroll"><table class="list">
-        <thead><tr><th scope="col">Application</th><th scope="col">Webhooks go to</th><th scope="col">State</th><th scope="col"><span class="sr">Details</span></th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
+        <thead><tr><th scope="col">Application</th><th scope="col">Where it is told what happened</th><th scope="col">State</th><th scope="col"><span class="sr">Details</span></th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>
         <tbody>{% for c in connections %}<tr><td><strong>{{ c.application_name }}</strong></td><td class="url">{{ c.webhook_url }}</td>
             <td>{% if c.status == 'active' %}<span class="st st-active">Connected</span>{% elseif c.status == 'pending' %}<span class="st st-pending">Approved</span> <small>waiting until {{ c.code_expires_at|when }}</small>{% else %}<span class="st st-disabled">Ended</span> <small>{{ c.revoked_at|when }}</small>{% endif %}</td>
             <td class="tipcell">{{ ui.tip('API key ' ~ (c.key_prefix ? c.key_prefix ~ '…' : '—') ~ ' · approved ' ~ (c.created_at|ts) ~ ' by ' ~ c.approved_by ~ ' · key last used ' ~ (c.last_used_at|ts)) }}</td>

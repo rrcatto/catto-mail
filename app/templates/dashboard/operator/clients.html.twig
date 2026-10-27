@@ -1,55 +1,45 @@
 {% extends 'dashboard/layout.html.twig' %}
 {% import 'dashboard/_macros.html.twig' as ui %}
-{% block title %}Clients{% endblock %}
+{% block title %}{{ view == '' ? 'Clients' : 'Clients: ' ~ view_label|lower }}{% endblock %}
 {% block body %}
-{% set views = {'': ['All', {}], pending: ['Waiting for approval', {status: 'pending_approval', sort: 'status_changed', dir: 'asc'}], active: ['Active', {status: 'active'}], throttled: ['Throttled', {status: 'throttled'}], suspended: ['Suspended', {status: 'suspended'}], closed: ['Closed', {status: 'closed'}], signups: ['Public sign-ups', {origin: 'public_application', sort: 'created', dir: 'desc'}]} %}
 <div class="pagehead">
     <div>
         <h1>Clients</h1>
-        <p class="lead">The organisations that send through this installation.{{ ui.tip('Public sign-ups are active at once in the starter tier: review them, and throttle, suspend or close any that misuse the service. Status changes happen on a client\'s page, always with a reason.') }}</p>
+        <p class="lead">The organisations that send through this installation, each with its own account.{{ ui.tip('A client\'s page shows its status, plan and limits, domains, keys and members, and its history. Status changes happen there, always with a reason.') }}</p>
     </div>
     {% if is_granted('PLATFORM.CLIENT.APPROVE') %}
-    <details class="actionform" id="new-client"><summary class="btn">New client</summary>
-        <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="stack">
-            {{ ui.csrf() }}
-            <p class="small muted">The record starts pending approval: approve it on its page after reviewing it and setting its limits.</p>
-            <label>Organisation name <input type="text" name="company_name" required maxlength="200"></label>
-            <label>Operational contact (email) <input type="email" name="contact_email" required maxlength="320"></label>
-            <label>Billing contact (email, if different) <input type="email" name="billing_contact_email" maxlength="320"></label>
-            <label>Abuse/security contact (email) <input type="email" name="abuse_contact_email" maxlength="320"></label>
-            <label>Plan <input type="text" name="plan" value="standard" required maxlength="100"></label>
-            <label>Service policy acceptance
-                <select name="policy_acceptance"><option value="required">Required before approval (external client)</option><option value="exempt">Exempt (internal client)</option></select>
-            </label>
-            <label>Private note (optional, operators only) <textarea name="note" maxlength="4000" rows="2"></textarea></label>
-            <button type="submit">Create pending client</button>
-        </form>
-    </details>
+    <div class="actions">
+        <a class="btn" href="{{ path('dashboard_operator_client_new') }}">New client</a>
+        <a class="btn btn-secondary" href="{{ path('dashboard_operator_invitation_new') }}">Invite someone</a>
+    </div>
     {% endif %}
 </div>
 
+<nav class="chips" aria-label="Views of the clients">
+    {% for key, v in views %}<a class="chip-link" href="{{ key == '' ? path('dashboard_operator_clients') : path('dashboard_operator_clients_view', {view: key}) }}"{% if key == view and not filters.q %} aria-current="page"{% endif %}>{{ v[0] }}</a>{% endfor %}
+</nav>
 <form method="get" class="searchline" role="search" aria-label="Find a client">
-    <label class="sr" for="client-q">Name or contact contains</label>
-    <input id="client-q" type="search" name="q" value="{{ filters.q }}" placeholder="Find a client by name or contact">
+    <label class="sr" for="client-q">Name or address contains</label>
+    <input id="client-q" type="search" name="q" value="{{ filters.q }}" placeholder="Find a client by name or address">
     <button type="submit">Find</button>
 </form>
-<nav class="chips" aria-label="Views of the clients">
-    {% for key, v in views %}{% set on = not filters.q and filters.status == (v[1].status ?? '') and filters.origin == (v[1].origin ?? '') %}<a class="chip-link" href="{{ path('dashboard_operator_clients', v[1]) }}"{% if on %} aria-current="page"{% endif %}>{{ v[0] }}</a>{% endfor %}
-</nav>
 
 <section class="card card-flush" aria-labelledby="list-h">
-    <div class="card-head"><h2 id="list-h">{{ filters.q ? 'Clients matching “' ~ filters.q ~ '”' : (filters.status ? filters.status|label('client_status') : (filters.origin ? 'Public sign-ups' : 'All clients')) }}</h2></div>
-    {% if page.rows is empty %}<p class="empty">No clients match.</p>{% else %}
+    <div class="card-head"><h2 id="list-h">{{ filters.q ? 'Clients matching “' ~ filters.q ~ '”' : view_label }}</h2></div>
+    {% if page.rows is empty %}<p class="empty">{{ filters.q ? 'No client matches.' : 'None.' }}{% if view == '' and is_granted('PLATFORM.CLIENT.APPROVE') %} <a href="{{ path('dashboard_operator_client_new') }}">Open the first account</a>.{% endif %}</p>{% else %}
     <div class="scroll"><table class="list">
-        <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Organisation') }}</th><th scope="col">Status</th><th scope="col">Open alerts</th><th scope="col" class="num">Verified domains</th><th scope="col">{{ ui.sort(listing, 'created', 'Created') }}</th><th scope="col"><span class="sr">Details</span></th></tr></thead>
+        <thead><tr><th scope="col">{{ ui.sort(listing, 'name', 'Organisation') }}</th><th scope="col">Status</th><th scope="col">Plan</th><th scope="col">Open alerts</th><th scope="col" class="num">Domains that can send</th><th scope="col">{{ ui.sort(listing, 'created', 'Opened') }}</th></tr></thead>
         <tbody>{% for c in page.rows %}
             <tr>
-                <td><a href="{{ path('dashboard_operator_client', {id: c.id}) }}">{{ c.company_name }}</a>{% if c.origin == 'public_application' %} <span class="tag">sign-up</span>{% endif %}</td>
-                <td>{{ ui.status(c.status, 'client_status') }}</td>
+                <td><a href="{{ path('dashboard_operator_client', {id: c.id}) }}">{{ c.company_name }}</a>
+                    {% if c.origin == 'system' %} <span class="tag internal-tag" title="The installation's own client for its built-in system tests (System › Diagnostics). It is made again whenever it is missing.">internal: self-tests</span>
+                    {% elseif c.origin == 'public_application' %} <span class="tag">sign-up</span>{% elseif c.origin == 'invitation' %} <span class="tag">invitation</span>{% endif %}
+                    <span class="muted small">{{ c.contact_email }}</span></td>
+                <td>{{ ui.status(c.status, 'client_status') }}{% if c.status == 'pending_approval' and c.opens_on_policy_acceptance %} <span class="muted small">opens when its manager accepts the policy</span>{% endif %}</td>
+                <td>{{ c.plan_name ?? c.plan }}</td>
                 <td>{% if c.open_alerts > 0 %}<span class="st st-sev-{{ c.worst_alert }}"><strong>{{ c.open_alerts }}</strong>&nbsp;{{ c.worst_alert|label('alert_severity')|lower }}</span>{% else %}<span class="muted">none</span>{% endif %}</td>
                 <td class="num">{{ c.verified_domains }}</td>
                 <td class="nowrap" title="{{ c.created_at|ts }}">{{ c.created_at|when }}</td>
-                <td class="tipcell">{{ ui.tip(c.contact_email ~ ' · ' ~ c.plan ~ ' plan · status since ' ~ (c.status_changed_at|ts) ~ (c.approved_at ? ' · approved ' ~ (c.approved_at|ts) : '') ~ ' · global opt-outs ' ~ (c.can_submit_global_suppressions ? 'permitted' : 'not permitted')) }}</td>
             </tr>
         {% endfor %}</tbody>
     </table></div>

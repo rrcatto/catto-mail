@@ -1,7 +1,8 @@
 -- =============================================================================
--- Smarthost reference schema — specification 2.11 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5, engagement index in 2.6, access control in 2.7,
+-- Smarthost reference schema — specification 2.13 (PostgreSQL 16; D-30 in 2.4, D-38 in 2.5, engagement index in 2.6, access control in 2.7,
 -- webhooks in 2.8, delivery heartbeats in 2.9, client lifecycle, limits, quotas, billing boundary and reputation in 2.10,
--- setup, diagnostics, host agent, emergency stop, address batches and re-permission in 2.11)
+-- setup, diagnostics, host agent, emergency stop, address batches and re-permission in 2.11,
+-- application connections in 2.12, plans and invitations in 2.13)
 -- =============================================================================
 --
 -- THIS IS NOT A MIGRATION. Symfony/Doctrine migrations (Phase 2) are the sole
@@ -29,27 +30,51 @@
 -- Tenancy, people, domains and authentication
 -- -----------------------------------------------------------------------------
 
+-- Plans (owner decision 2026-10-27): named sets of client limits, defined once. A client on a
+-- plan has the plan's limits (copied into client_limits; changed by hand they show as custom).
+-- Built in: standard (no client limits: the installation's ceilings) and starter (the tier of
+-- public sign-ups). The same columns and rules as client_limits; NULL = no limit.
+CREATE TABLE plans (
+    id                            text        PRIMARY KEY CHECK (id ~ '^[a-z][a-z0-9-]{1,39}$'),
+    name                          text        NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    api_requests_per_minute       integer     NULL CHECK (api_requests_per_minute >= 1),
+    validation_jobs_per_day       integer     NULL CHECK (validation_jobs_per_day >= 0),
+    validation_addresses_per_day  bigint      NULL CHECK (validation_addresses_per_day >= 0),
+    validation_addresses_per_month bigint     NULL CHECK (validation_addresses_per_month >= 0),
+    send_jobs_per_day             integer     NULL CHECK (send_jobs_per_day >= 0),
+    send_recipients_per_day       bigint      NULL CHECK (send_recipients_per_day >= 0),
+    send_recipients_per_month     bigint      NULL CHECK (send_recipients_per_month >= 0),
+    max_recipients_per_send_job   integer     NULL CHECK (max_recipients_per_send_job BETWEEN 1 AND 10000),
+    max_api_keys                  integer     NULL CHECK (max_api_keys >= 0),
+    max_webhook_endpoints         integer     NULL CHECK (max_webhook_endpoints >= 0),
+    max_sending_domains           integer     NULL CHECK (max_sending_domains >= 0),
+    created_at                    timestamptz NOT NULL DEFAULT now(),
+    updated_at                    timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX plans_name_uq ON plans (lower(name));
+
 CREATE TABLE clients (
     id             uuid        PRIMARY KEY,
     company_name   text        NOT NULL,
     contact_email  text        NOT NULL,
     status         text        NOT NULL DEFAULT 'pending_approval'
         CHECK (status IN ('pending_approval', 'active', 'throttled', 'suspended', 'closed')),
-    plan           text        NOT NULL,
+    plan           text        NOT NULL REFERENCES plans (id),
     created_at     timestamptz NOT NULL DEFAULT now(),
     -- D-30: operator-granted capability to report recipient global opt-outs. Never set by the client.
     can_submit_global_suppressions  boolean  NOT NULL DEFAULT false,
     -- Specification 2.10 (Phase 9): account lifecycle and operational metadata.
-    -- How the client record came to exist; public_application requires APP_PUBLIC_ONBOARDING_ENABLED.
-    origin                      text        NOT NULL DEFAULT 'operator' CHECK (origin IN ('operator', 'public_application')),
-    billing_contact_email       text        NULL,                -- when distinct from contact_email
-    abuse_contact_email         text        NULL,                -- abuse/security contact
+    -- How the client record came to exist: an operator, the public sign-up (APP_PUBLIC_ONBOARDING_ENABLED),
+    -- an operator's invitation, or the installation itself (its self-test client).
+    origin                      text        NOT NULL DEFAULT 'operator' CHECK (origin IN ('operator', 'public_application', 'invitation', 'system')),
     status_changed_at           timestamptz NOT NULL DEFAULT now(),
     approved_at                 timestamptz NULL,                -- first transition to active
     closed_at                   timestamptz NULL,
     -- Whether approval needs an acceptance of the policy version in force (APP_ACCEPTABLE_USE_POLICY_VERSION).
     -- Operator-created internal clients may be exempt explicitly.
     policy_acceptance_required  boolean     NOT NULL DEFAULT true,
+    -- An operator created it pending for a manager who must accept the policy: it opens when they accept (2026-10-27).
+    opens_on_policy_acceptance  boolean     NOT NULL DEFAULT false,
     CONSTRAINT clients_closed_has_time CHECK (status <> 'closed' OR closed_at IS NOT NULL)
 );
 CREATE INDEX clients_status_changed_idx ON clients (status, status_changed_at);   -- approval queue, status filter
@@ -113,6 +138,28 @@ CREATE TABLE user_roles (
 CREATE UNIQUE INDEX user_roles_user_role_uq ON user_roles (user_id, role_id);
 CREATE INDEX user_roles_role_idx ON user_roles (role_id);
 
+-- Invitations (owner decision 2026-10-27): a single-use link an operator makes. Whoever opens it
+-- names their organisation and opens an account on the invitation's plan, also while public
+-- sign-up is closed. Only the SHA-256 of the token is stored; operator-only.
+CREATE TABLE client_invitations (
+    id                          uuid        PRIMARY KEY,
+    token_hash                  text        NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    plan                        text        NOT NULL REFERENCES plans (id),
+    policy_acceptance_required  boolean     NOT NULL,
+    note                        text        NULL CHECK (note IS NULL OR length(note) BETWEEN 1 AND 200),
+    created_by_user_id          uuid        NOT NULL REFERENCES users (id),
+    created_at                  timestamptz NOT NULL DEFAULT now(),
+    expires_at                  timestamptz NOT NULL,
+    used_at                     timestamptz NULL,
+    client_id                   uuid        NULL REFERENCES clients (id),
+    revoked_at                  timestamptz NULL,
+    CONSTRAINT client_invitations_expiry_after_creation CHECK (expires_at > created_at),
+    CONSTRAINT client_invitations_used_has_client CHECK ((used_at IS NULL) = (client_id IS NULL)),
+    CONSTRAINT client_invitations_used_or_revoked CHECK (used_at IS NULL OR revoked_at IS NULL)
+);
+CREATE UNIQUE INDEX client_invitations_token_hash_uq ON client_invitations (token_hash);
+CREATE INDEX client_invitations_created_idx ON client_invitations (created_at);
+
 -- Single-use emailed sign-in links. Only the SHA-256 of the token is stored; the
 -- rows double as the request history for the per-address and per-IP rate limits
 -- (the IP is stored only as a keyed hash). user_id is NULL when the link was
@@ -131,10 +178,13 @@ CREATE TABLE auth_login_tokens (
     -- belongs to no user; nothing else exists until it is used.
     purpose            text        NOT NULL DEFAULT 'sign_in' CHECK (purpose IN ('sign_in', 'sign_up')),
     organisation_name  text        NULL CHECK (organisation_name IS NULL OR length(organisation_name) BETWEEN 1 AND 200),
+    -- A sign-up link that came from an operator's invitation (2026-10-27).
+    invitation_id      uuid        NULL REFERENCES client_invitations (id),
     CONSTRAINT auth_login_tokens_expiry_after_creation CHECK (expires_at > created_at),
     CONSTRAINT auth_login_tokens_sign_up_fields CHECK (
         (purpose = 'sign_in' AND organisation_name IS NULL)
-     OR (purpose = 'sign_up' AND organisation_name IS NOT NULL AND user_id IS NULL))
+     OR (purpose = 'sign_up' AND organisation_name IS NOT NULL AND user_id IS NULL)),
+    CONSTRAINT auth_login_tokens_invitation_sign_up CHECK (invitation_id IS NULL OR purpose = 'sign_up')
 );
 CREATE UNIQUE INDEX auth_login_tokens_hash_uq ON auth_login_tokens (token_hash);
 CREATE INDEX auth_login_tokens_email_created_idx ON auth_login_tokens (lower(email), created_at);
@@ -555,8 +605,10 @@ CREATE TABLE delivery_ingest_cursors (
 
 -- D-30: automatic suppressions (hard_bounce, complaint, repeated_soft_bounce) and
 -- recipient global opt-outs are global (client_id NULL). client_id only scopes a
--- row; the client that reported a global opt-out is source_client_id. Rows are
--- lifted (lifted_at), never deleted, except by configured retention.
+-- row; the client that reported a global opt-out is source_client_id. An account's
+-- own block (account_block, 2.13) is scoped to that account (client_id) and stops
+-- only its mail. Rows are lifted (lifted_at), never deleted, except by configured
+-- retention.
 CREATE TABLE suppressions (
     id                 uuid        PRIMARY KEY,
     client_id          uuid        NULL REFERENCES clients (id),     -- NULL = global suppression
@@ -564,7 +616,7 @@ CREATE TABLE suppressions (
     scope_type         text        NOT NULL CHECK (scope_type IN ('address', 'domain')),
     reason             text        NOT NULL CHECK (reason IN (
         'hard_bounce', 'complaint', 'repeated_soft_bounce', 'operator_block', 'client_abuse_block',
-        'recipient_global_opt_out')),
+        'recipient_global_opt_out', 'account_block')),
     source_message_id  uuid        NULL REFERENCES messages (id),
     created_at         timestamptz NOT NULL DEFAULT now(),
     expires_at         timestamptz NULL,
@@ -572,7 +624,7 @@ CREATE TABLE suppressions (
     -- Provenance (D-30)
     source_event_id    uuid        NULL REFERENCES message_events (id),  -- authoritative event of a system suppression
     source_client_id   uuid        NULL REFERENCES clients (id),     -- client that reported a global opt-out
-    external_reference text        NULL,                             -- optional opaque reference of the creating request
+    external_reference text        NULL,                             -- optional opaque reference of the creating request (opt-out, account block)
     -- D-18: only the domain is lower-cased; the local part is never case-folded.
     CONSTRAINT suppressions_normalised CHECK (
         (scope_type = 'domain'  AND address_or_domain = lower(address_or_domain)
@@ -584,8 +636,11 @@ CREATE TABLE suppressions (
     -- global address suppression. Its requests are in global_suppression_requests.
     CONSTRAINT suppressions_opt_out_provenance CHECK (
         (reason = 'recipient_global_opt_out') = (source_client_id IS NOT NULL)
-        AND (external_reference IS NULL OR source_client_id IS NOT NULL)
+        AND (external_reference IS NULL OR source_client_id IS NOT NULL OR reason = 'account_block')
         AND (reason <> 'recipient_global_opt_out' OR (client_id IS NULL AND scope_type = 'address'))),
+    -- An account's own block always belongs to that account and never expires.
+    CONSTRAINT suppressions_account_block_scoped CHECK (
+        reason <> 'account_block' OR (client_id IS NOT NULL AND expires_at IS NULL)),
     -- Indefinite reasons never expire; repeated_soft_bounce is the temporary one.
     CONSTRAINT suppressions_indefinite_reasons CHECK (
         reason NOT IN ('hard_bounce', 'complaint', 'recipient_global_opt_out') OR expires_at IS NULL),
@@ -599,17 +654,20 @@ CREATE UNIQUE INDEX suppressions_global_address_reason_active_uq ON suppressions
 -- One active opt-out per reporting client and address.
 CREATE UNIQUE INDEX suppressions_source_client_address_active_uq ON suppressions (source_client_id, address_or_domain)
     WHERE reason = 'recipient_global_opt_out' AND lifted_at IS NULL;
+-- One active account block per account, scope and value.
+CREATE UNIQUE INDEX suppressions_account_block_active_uq ON suppressions (client_id, scope_type, address_or_domain)
+    WHERE reason = 'account_block' AND lifted_at IS NULL;
 CREATE INDEX suppressions_source_message_idx ON suppressions (source_message_id) WHERE source_message_id IS NOT NULL;
 
--- D-38: durable idempotency of recipient global opt-out requests, independent of
--- the suppression row. One row per accepted (client, operation, Idempotency-Key):
+-- D-38: durable idempotency of recipient global opt-out requests (and, since 2.13,
+-- of account block requests), independent of the suppression row. One row per accepted (client, operation, Idempotency-Key):
 -- the canonical request hash, the suppression it resulted in and the original
 -- status (201 created, 200 already active). Never updated, so a key keeps its
 -- meaning after the suppression is lifted.
 CREATE TABLE global_suppression_requests (
     id                  uuid        PRIMARY KEY,
     client_id           uuid        NOT NULL REFERENCES clients (id),     -- the authenticated reporting client
-    operation           text        NOT NULL CHECK (operation IN ('create_global_opt_out')),
+    operation           text        NOT NULL CHECK (operation IN ('create_global_opt_out', 'create_account_block')),
     idempotency_key     text        NOT NULL,
     request_hash        text        NOT NULL,                             -- canonical JSON hash (as other idempotent requests)
     suppression_id      uuid        NOT NULL REFERENCES suppressions (id),

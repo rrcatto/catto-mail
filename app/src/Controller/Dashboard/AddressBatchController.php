@@ -57,6 +57,13 @@ final class AddressBatchController extends AbstractController
             'section' => 'batches', 'batches' => $this->read->batches(), 'clients' => $this->clients(), 'max' => BatchFileParser::MAX_ROWS]);
     }
 
+    /** Uploading a list is its own page (owner decision 2026-10-27: no form beside the title). */
+    #[Route('/new', name: 'dashboard_operator_batch_new', methods: ['GET'])]
+    public function new(): Response
+    {
+        return $this->render('dashboard/operator/batches/new.html.twig', ['section' => 'batches', 'clients' => $this->clients(), 'max' => BatchFileParser::MAX_ROWS]);
+    }
+
     #[Route('/preview', name: 'dashboard_operator_batch_preview', methods: ['POST'])]
     public function preview(Request $request): Response
     {

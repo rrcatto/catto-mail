@@ -147,7 +147,7 @@ func (e *env) str(sql string, args ...any) string {
 
 func (e *env) newClient(status string) string {
 	id := ids.UUIDv7()
-	e.exec(`INSERT INTO clients (id, company_name, contact_email, status, plan) VALUES ($1, 'Test', 'ops@client.test', $2, 'test')`, id, status)
+	e.exec(`INSERT INTO clients (id, company_name, contact_email, status, plan) VALUES ($1, 'Test', 'ops@client.test', $2, 'standard')`, id, status)
 	return id
 }
 

@@ -205,7 +205,7 @@ final class Phase9QueryPlanTest extends DashboardTestCase
         // The pages.
         $this->signIn($this->newUser(true));
         $this->browser->disableReboot();
-        foreach (['operator clients' => '/dashboard/operator/clients', 'approval queue' => '/dashboard/operator/clients?status=pending_approval&sort=status_changed&dir=asc',
+        foreach (['operator clients' => '/dashboard/operator/clients', 'approval queue' => '/dashboard/operator/clients/waiting',
             'operator client page (measured)' => "/dashboard/operator/clients/$m", 'alerts (open)' => '/dashboard/operator/alerts',
             'alerts, 7-day metrics' => '/dashboard/operator/alerts?window=168', 'alerts of one client' => "/dashboard/operator/alerts?client=$m&state=all",
             'usage, current month, all clients' => '/dashboard/operator/usage?period=current_month', 'usage, previous month' => '/dashboard/operator/usage?period=previous_month',

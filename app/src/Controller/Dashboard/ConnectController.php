@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Dashboard;
 
+use App\Client\AccountOpening;
+use App\Client\PublicSignUp;
 use App\Connect\ConnectRequest;
 use App\Connect\ConnectService;
 use App\Dashboard\SecurityHeadersSubscriber;
@@ -26,7 +28,15 @@ use Symfony\Component\Routing\Attribute\Route;
  *                             that is not allowed) gets an explanation and is never redirected
  *                             anywhere. A visitor is shown what is asked and offered sign-in and,
  *                             while APP_PUBLIC_ONBOARDING_ENABLED is true, sign-up; both lead
- *                             back here. A signed-in person chooses one of their workspaces.
+ *                             back here (otherwise the page says accounts are opened by
+ *                             invitation). A signed-in person chooses one of their accounts.
+ *   POST /dashboard/connect/account
+ *                             CSRF; someone signed in without an account opens one with the
+ *                             organisation's name alone (specification 2.13: the page never
+ *                             dead-ends): through the public sign-up while it is open
+ *                             (PublicSignUp::openForUser, the Starter plan), or as an operator
+ *                             who may create clients (AccountOpening::forOperator). Then back to
+ *                             the connect step, the new account chosen.
  *   POST /dashboard/connect   CSRF; the same request again with the chosen client and the
  *                             decision. Approving (a client admin, an active client, room under
  *                             the key and endpoint limits) answers with a redirect to the
@@ -42,6 +52,8 @@ final class ConnectController extends AbstractController
     public function __construct(
         private readonly ConnectService $connect,
         private readonly RateLimiterFactoryInterface $connectPageLimiter,
+        private readonly PublicSignUp $signUp,
+        private readonly AccountOpening $opening,
     ) {
     }
 
@@ -94,6 +106,51 @@ final class ConnectController extends AbstractController
         return new RedirectResponse($connect->callback(['code' => $code, 'state' => $connect->state]), Response::HTTP_SEE_OTHER);
     }
 
+    #[Route('/account', name: 'dashboard_connect_account', methods: ['POST'])]
+    public function openAccount(Request $request): Response
+    {
+        $connect = $this->read($request, $request->request->all());
+        if ($connect instanceof Response) {
+            return $connect;
+        }
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return new RedirectResponse($connect->path(), Response::HTTP_SEE_OTHER);
+        }
+        if (!$this->isCsrfTokenValid(self::CSRF_ID, $request->request->getString('_token'))) {
+            $this->addFlash('error', 'The form expired. Please try again.');
+
+            return new RedirectResponse($connect->path(), Response::HTTP_SEE_OTHER);
+        }
+        $organisation = $request->request->getString('organisation');
+        try {
+            $client = match ($this->accountOffer($user)) {
+                'sign_up' => $this->signUp->openForUser($user, $organisation, '1' === $request->request->getString('accept_policy')),
+                'operator' => $this->opening->forOperator($organisation, $user),
+                default => throw new DomainRuleViolation('Accounts on this installation are opened by invitation.'),
+            };
+        } catch (DomainRuleViolation $e) {
+            return $this->approval($request, $connect, $user, $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        $this->addFlash('success', \sprintf('The account of %s is open. Now choose Connect.', $client->getCompanyName()));
+
+        return new RedirectResponse($connect->path(), Response::HTTP_SEE_OTHER);
+    }
+
+    /**
+     * How someone signed in without an account can open one here: 'sign_up' while the public
+     * sign-up is open, 'operator' for an operator who may create clients, or null (accounts are
+     * opened by invitation).
+     */
+    private function accountOffer(User $user): ?string
+    {
+        return match (true) {
+            $this->signUp->enabled() => 'sign_up',
+            $this->isGranted('PLATFORM.CLIENT.APPROVE') => 'operator',
+            default => null,
+        };
+    }
+
     /**
      * The validated request, or the answer to give instead: too many requests, or what is wrong
      * with the request (never a redirect to an address that was not accepted).
@@ -121,9 +178,12 @@ final class ConnectController extends AbstractController
         SecurityHeadersSubscriber::allowFormAction($request, $connect->redirectOrigin());
         $workspaces = $this->connect->workspaces($user, $connect);
 
-        return $this->render('dashboard/connect/approve.html.twig', ['connect' => $connect, 'workspaces' => $workspaces, 'error' => $error,
-            'eligible' => \count(array_filter($workspaces, static fn (array $w): bool => null === $w['obstacle'])),
-            'chosen' => $request->request->getString('client_id'), 'events' => ConnectService::EVENTS,
-            'minutes' => intdiv(ConnectService::CODE_TTL_SECONDS, 60)], new Response('', $status));
+        $eligible = array_values(array_filter($workspaces, static fn (array $w): bool => null === $w['obstacle']));
+
+        return $this->render('dashboard/connect/approve.html.twig', ['connect' => $connect, 'accounts' => $workspaces, 'error' => $error,
+            'eligible' => \count($eligible), 'chosen' => $request->request->getString('client_id') ?: (1 === \count($eligible) ? $eligible[0]['client']->getId()->toRfc4122() : ''),
+            'events' => ConnectService::EVENTS, 'minutes' => intdiv(ConnectService::CODE_TTL_SECONDS, 60),
+            'account_offer' => [] === $workspaces ? $this->accountOffer($user) : null, 'policy' => $this->signUp->policyVersion(),
+            'organisation' => mb_substr($request->request->getString('organisation'), 0, 200)], new Response('', $status));
     }
 }

@@ -265,7 +265,7 @@ final class GlobalSuppressionApiTest extends ApiTestCase
             self::assertSame(404, $this->api('POST', $path, $key, ['email_address' => self::address()], ['Idempotency-Key' => self::key()])->getStatusCode(), $path);
         }
         // Sending a subscription job never creates a suppression by itself.
-        self::assertSame(0, (int) Db::owner()->fetchOne("SELECT count(*) FROM suppressions WHERE reason NOT IN ('recipient_global_opt_out', 'hard_bounce', 'complaint', 'repeated_soft_bounce', 'operator_block', 'client_abuse_block')"));
+        self::assertSame(0, (int) Db::owner()->fetchOne("SELECT count(*) FROM suppressions WHERE reason NOT IN ('recipient_global_opt_out', 'hard_bounce', 'complaint', 'repeated_soft_bounce', 'operator_block', 'client_abuse_block', 'account_block')"));
     }
 
     public function testLiftByTheReportingClientKeepsHistoryAndIndependentSuppressions(): void

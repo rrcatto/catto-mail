@@ -21,8 +21,11 @@ use Doctrine\ORM\EntityManagerInterface;
 /**
  * The external-client account lifecycle (Phase 9, specification 2.10 `client_lifecycle`).
  *
- *   create          an operator creates a client record: pending_approval (default), or
- *                   active for an internal client created by an operator (approved at once);
+ *   create          a client record on a plan (App\Client\PlanCatalog): active when an operator
+ *                   creates it for a manager exempt from the policy (no approving one's own
+ *                   work, owner decision 2026-10-27), pending_approval otherwise; an operator's
+ *                   client whose manager must accept the policy opens by itself when they do
+ *                   (opens_on_policy_acceptance, openAfterAcceptance());
  *   apply           a public application record (origin public_application): only while
  *                   APP_PUBLIC_ONBOARDING_ENABLED is true, always pending_approval, no user,
  *                   no key. It is the single entry point of a public channel: the public
@@ -35,8 +38,9 @@ use Doctrine\ORM\EntityManagerInterface;
  *   approval rule   when the client requires policy acceptance and a policy version is in
  *                   force (APP_ACCEPTABLE_USE_POLICY_VERSION), approval needs a recorded
  *                   acceptance of that version;
- *   account         contacts, plan and the policy requirement (audited), private operator
- *                   notes (client_notes, never shown to the client), policy acceptances.
+ *   account         the organisation's name and the policy requirement (audited), private
+ *                   operator notes (client_notes, never shown to the client), policy acceptances.
+ *                   The plan and its limits are App\Client\PlanCatalog's.
  */
 final class ClientLifecycle
 {
@@ -59,9 +63,13 @@ final class ClientLifecycle
         return '' === trim($this->policyVersion) ? null : trim($this->policyVersion);
     }
 
+    /**
+     * @param string $contactEmail the address the account is opened for (the manager's, or the person's who signed up)
+     * @param string $plan         a plan's id (plans.id)
+     */
     public function create(string $companyName, string $contactEmail, string $plan, ClientStatus $status, AuditActor $actor,
-        bool $policyAcceptanceRequired = true, ?string $billingContactEmail = null, ?string $abuseContactEmail = null,
-        ClientOrigin $origin = ClientOrigin::Operator, string $note = ''): Client
+        bool $policyAcceptanceRequired = true, ClientOrigin $origin = ClientOrigin::Operator, string $note = '',
+        bool $opensOnPolicyAcceptance = false): Client
     {
         if (!\in_array($status, [ClientStatus::PendingApproval, ClientStatus::Active], true)) {
             throw new DomainRuleViolation('A new client starts pending_approval, or active when an operator creates an internal client.');
@@ -69,16 +77,18 @@ final class ClientLifecycle
         if (ClientOrigin::PublicApplication === $origin && ClientStatus::PendingApproval !== $status) {
             throw new DomainRuleViolation('A public application always starts pending_approval.');
         }
-        [$companyName, $contactEmail, $billingContactEmail, $abuseContactEmail, $plan] =
-            self::accountFields($companyName, $contactEmail, $billingContactEmail, $abuseContactEmail, $plan);
+        [$companyName, $contactEmail] = self::accountFields($companyName, $contactEmail);
+        if (false === $this->em->getConnection()->fetchOne('SELECT 1 FROM plans WHERE id = ?', [$plan])) {
+            throw new DomainRuleViolation('Choose one of the plans.');
+        }
         if (ClientStatus::Active === $status && $policyAcceptanceRequired && null !== $this->policyVersionInForce()) {
             throw new DomainRuleViolation(\sprintf('Policy version %s must be accepted before the client is approved: create it pending_approval, or exempt this internal client from policy acceptance.',
                 $this->policyVersionInForce()));
         }
         $client = new Client($companyName, $contactEmail, $plan);
-        $client->updateAccount($companyName, $contactEmail, $billingContactEmail, $abuseContactEmail, $plan);
         $client->setOrigin($origin);
         $client->setPolicyAcceptanceRequired($policyAcceptanceRequired);
+        $client->setOpensOnPolicyAcceptance($opensOnPolicyAcceptance && ClientStatus::PendingApproval === $status);
 
         return $this->em->wrapInTransaction(function () use ($client, $status, $actor, $note): Client {
             if (ClientStatus::Active === $status) {
@@ -89,7 +99,8 @@ final class ClientLifecycle
             $id = $client->getId()->toRfc4122();
             $this->audit->record($actor, 'client.created', 'client', $id, [
                 'company_name' => $client->getCompanyName(), 'status' => $client->getStatus()->value, 'plan' => $client->getPlan(),
-                'origin' => $client->getOrigin()->value, 'policy_acceptance_required' => $client->isPolicyAcceptanceRequired()]);
+                'origin' => $client->getOrigin()->value, 'policy_acceptance_required' => $client->isPolicyAcceptanceRequired(),
+                'opens_on_policy_acceptance' => $client->opensOnPolicyAcceptance()]);
             if (ClientStatus::Active === $status) {
                 $this->audit->record($actor, 'client.approved', 'client', $id,
                     ['from' => null, 'to' => 'active', 'note' => '' === trim($note) ? 'created active by an operator (internal client)' : trim($note)]);
@@ -100,14 +111,31 @@ final class ClientLifecycle
     }
 
     /** A public application (gated by APP_PUBLIC_ONBOARDING_ENABLED); never credentials or approval. */
-    public function apply(string $companyName, string $contactEmail, ?string $abuseContactEmail = null, string $plan = 'application'): Client
+    public function apply(string $companyName, string $contactEmail, string $plan = PlanCatalog::STARTER): Client
     {
         if (!$this->publicOnboardingEnabled) {
             throw new DomainRuleViolation('Public onboarding is disabled (APP_PUBLIC_ONBOARDING_ENABLED=false).');
         }
 
         return $this->create($companyName, $contactEmail, $plan, ClientStatus::PendingApproval,
-            AuditActor::system('public_application'), true, null, $abuseContactEmail, ClientOrigin::PublicApplication);
+            AuditActor::system('public_application'), true, ClientOrigin::PublicApplication);
+    }
+
+    /**
+     * Opens the client of an operator who chose "must accept the policy" (opens_on_policy_acceptance)
+     * once the version in force is accepted: the approval was the operator's when they created it.
+     *
+     * @return bool whether the client was opened now
+     */
+    public function openAfterAcceptance(Client $client): bool
+    {
+        if (ClientStatus::PendingApproval !== $client->getStatus() || !$client->opensOnPolicyAcceptance() || $this->policyStatus($client)['blocks_approval']) {
+            return false;
+        }
+        $this->changeStatus($client, ClientStatus::Active, AuditActor::system('policy-acceptance'),
+            'the service policy was accepted; the operator created this client to open then');
+
+        return true;
     }
 
     /**
@@ -137,22 +165,19 @@ final class ClientLifecycle
         });
     }
 
-    public function updateAccount(Client $client, string $companyName, string $contactEmail, ?string $billingContactEmail,
-        ?string $abuseContactEmail, string $plan, AuditActor $actor): bool
+    /** Changes the organisation's name (audited as client.account_updated); false when it is the same. */
+    public function rename(Client $client, string $companyName, AuditActor $actor): bool
     {
-        [$companyName, $contactEmail, $billingContactEmail, $abuseContactEmail, $plan] =
-            self::accountFields($companyName, $contactEmail, $billingContactEmail, $abuseContactEmail, $plan);
-        $before = self::account($client);
-        $client->updateAccount($companyName, $contactEmail, $billingContactEmail, $abuseContactEmail, $plan);
-        $after = self::account($client);
-        if ($before === $after) {
+        [$companyName] = self::accountFields($companyName, $client->getContactEmail());
+        $before = $client->getCompanyName();
+        if ($before === $companyName) {
             return false;
         }
-        $this->em->wrapInTransaction(function () use ($client, $before, $after, $actor): void {
+        $this->em->wrapInTransaction(function () use ($client, $before, $companyName, $actor): void {
+            $client->rename($companyName);
             $this->em->flush();
-            $changed = array_keys(array_diff_assoc(array_map('strval', $after), array_map('strval', $before)));
             $this->audit->record($actor, 'client.account_updated', 'client', $client->getId()->toRfc4122(), [
-                'before' => array_intersect_key($before, array_flip($changed)), 'after' => array_intersect_key($after, array_flip($changed))]);
+                'before' => ['company_name' => $before], 'after' => ['company_name' => $companyName]]);
         });
 
         return true;
@@ -217,7 +242,7 @@ final class ClientLifecycle
             throw new DomainRuleViolation('The reference has at most 255 characters.');
         }
 
-        return $this->em->wrapInTransaction(function () use ($client, $version, $source, $actor, $acceptedBy, $reference): ClientPolicyAcceptance {
+        $acceptance = $this->em->wrapInTransaction(function () use ($client, $version, $source, $actor, $acceptedBy, $reference): ClientPolicyAcceptance {
             $this->em->lock($client, LockMode::PESSIMISTIC_WRITE);
             $existing = $this->em->getRepository(ClientPolicyAcceptance::class)->findOneBy(['client' => $client, 'policyVersion' => $version]);
             if (null !== $existing) {
@@ -231,6 +256,9 @@ final class ClientLifecycle
 
             return $acceptance;
         });
+        $this->openAfterAcceptance($client);
+
+        return $acceptance;
     }
 
     /**
@@ -286,34 +314,18 @@ final class ClientLifecycle
         };
     }
 
-    /** @return array{company_name: string, contact_email: string, billing_contact_email: ?string, abuse_contact_email: ?string, plan: string} */
-    private static function account(Client $client): array
+    /** @return array{0: string, 1: string} */
+    private static function accountFields(string $companyName, string $contactEmail): array
     {
-        return ['company_name' => $client->getCompanyName(), 'contact_email' => $client->getContactEmail(),
-            'billing_contact_email' => $client->getBillingContactEmail(), 'abuse_contact_email' => $client->getAbuseContactEmail(),
-            'plan' => $client->getPlan()];
-    }
-
-    /** @return array{0: string, 1: string, 2: ?string, 3: ?string, 4: string} */
-    private static function accountFields(string $companyName, string $contactEmail, ?string $billing, ?string $abuse, string $plan): array
-    {
-        $companyName = trim($companyName);
-        $plan = trim($plan);
-        if ('' === $companyName || mb_strlen($companyName) > 200 || '' === $plan || mb_strlen($plan) > 100) {
-            throw new DomainRuleViolation('A client needs an organisation name (at most 200 characters) and a plan (at most 100).');
+        $companyName = trim((string) preg_replace('/\s+/u', ' ', $companyName));
+        if ('' === $companyName || mb_strlen($companyName) > 200 || 1 === preg_match('/\p{C}/u', $companyName)) {
+            throw new DomainRuleViolation('Give the organisation\'s name (at most 200 characters).');
         }
-        $emails = [];
-        foreach (['contact' => $contactEmail, 'billing' => $billing, 'abuse' => $abuse] as $label => $email) {
-            $email = null === $email ? null : trim($email);
-            if ('' === $email) {
-                $email = null;
-            }
-            if (('contact' === $label && null === $email) || (null !== $email && (!filter_var($email, \FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 320))) {
-                throw new DomainRuleViolation(\sprintf('The %s email is not a valid address.', $label));
-            }
-            $emails[] = $email;
+        $contactEmail = trim($contactEmail);
+        if (!filter_var($contactEmail, \FILTER_VALIDATE_EMAIL) || mb_strlen($contactEmail) > 320) {
+            throw new DomainRuleViolation('Give a valid email address.');
         }
 
-        return [$companyName, (string) $emails[0], $emails[1], $emails[2], $plan];
+        return [$companyName, $contactEmail];
     }
 }

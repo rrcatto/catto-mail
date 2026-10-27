@@ -1,0 +1,37 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Your invitation{% endblock %}
+{% block body %}
+<section class="narrow" aria-labelledby="inv-h">
+    {% if invitation is null %}
+    <h1 id="inv-h">This invitation cannot be used</h1>
+    <p>It was used already, withdrawn, or it has expired. Ask the person who sent it for a new one.</p>
+    {% if app.user %}<p><a href="{{ path('dashboard_home') }}">Go to your dashboard</a></p>{% else %}<p>Already have an account? <a href="{{ path('dashboard_login') }}">Sign in</a>.</p>{% endif %}
+    {% else %}
+    <h1 id="inv-h">Open your {{ site_name() }} account</h1>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <p>You were invited to open an account. With it, your own applications send email and check addresses through {{ site_name() }}. There is no password: you sign in with links emailed to you.</p>
+    <form method="post" action="{{ path('dashboard_invitation_request') }}" class="stack">
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('invitation') }}">
+        <label>Organisation <span class="muted small">(the name your account is shown under)</span>
+            <input type="text" name="organisation" value="{{ organisation }}" required minlength="2" maxlength="200" autocomplete="organization" autofocus>
+        </label>
+        {% if app.user %}
+        <p class="muted small">The account is opened for {{ app.user.email }}, the address you are signed in with.</p>
+        {% if invitation.policy_required and policy %}
+        <label class="checkline"><input type="checkbox" name="accept_policy" value="1" required> <span>I accept the <a href="{{ path('acceptable_use_policy') }}" target="_blank" rel="noopener">service policy</a> (version {{ policy }}).</span></label>
+        {% endif %}
+        <button type="submit">Open the account</button>
+        {% else %}
+        <label>Your email address <span class="muted small">(we email you a link to confirm it)</span>
+            <input type="email" name="email" value="{{ email }}" required maxlength="320" autocomplete="email">
+        </label>
+        {# Not for people: a form robot fills it in, and then nothing is sent. #}
+        <div class="hp" aria-hidden="true"><label>Leave this field empty <input type="text" name="website" value="" tabindex="-1" autocomplete="off"></label></div>
+        <button type="submit">Email me the confirmation link</button>
+        {% endif %}
+    </form>
+    <p class="muted small">The invitation works once, until {{ invitation.expires_at|ts }}.{% if not app.user %} Already have an account? <a href="{{ path('dashboard_login') }}">Sign in</a>, then open this invitation again.{% endif %}</p>
+    {% endif %}
+</section>
+{% endblock %}

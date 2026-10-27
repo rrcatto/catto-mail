@@ -222,8 +222,8 @@ final class AddressBatchTest extends DashboardTestCase
         $client = $this->newClient(\App\Enum\ClientStatus::Active, 'Batch Co');
         $admin = $this->newUser(false, null, roleKey: 'ADMIN');
         $this->signIn($admin);
-        $index = $this->crawler('/dashboard/operator/batches');
-        $token = $index->filter('form[action="/dashboard/operator/batches/preview"] input[name="_token"]')->attr('value');
+        self::assertSame(1, $this->crawler('/dashboard/operator/batches')->filter('a[href="/dashboard/operator/batches/new"]')->count(), 'uploading is its own page');
+        $token = $this->crawler('/dashboard/operator/batches/new')->filter('form[action="/dashboard/operator/batches/preview"] input[name="_token"]')->attr('value');
         $file = tempnam(sys_get_temp_dir(), 'batch');
         file_put_contents($file, "first,mail,city\nAnn,ann@example.org,Rome\nBen,ann@example.org,Oslo\nCy,=cmd|' /c calc'!A0,Paris\n");
         $upload = new \Symfony\Component\HttpFoundation\File\UploadedFile($file, 'members.csv', 'text/csv', null, true);

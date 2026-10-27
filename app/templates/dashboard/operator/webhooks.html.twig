@@ -17,13 +17,13 @@
 <div class="kpis">
     <section class="card kpi"><div class="kpi-head"><h2>Failed (24 h)</h2>{{ ui.tip('A delivery fails after its last retry; the endpoint never answered 2xx. Delivery is at-least-once and signed.') }}</div><p class="kpi-value{{ failed ? ' text-bad' : '' }}">{{ failed|number_format }}</p></section>
     <section class="card kpi"><div class="kpi-head"><h2>Retrying</h2></div><p class="kpi-value">{{ (summary.deliveries.retrying ?? 0)|number_format }}</p></section>
-    <section class="card kpi"><div class="kpi-head"><h2>Pending</h2>{{ ui.tip(summary.events_awaiting_fanout|number_format ~ ' outbox events are waiting to be turned into deliveries.') }}</div><p class="kpi-value">{{ (summary.deliveries.pending ?? 0)|number_format }}</p></section>
+    <section class="card kpi"><div class="kpi-head"><h2>Pending</h2>{{ ui.tip(summary.events_awaiting_fanout|number_format ~ ' events are waiting to be addressed to the endpoints that receive them.') }}</div><p class="kpi-value">{{ (summary.deliveries.pending ?? 0)|number_format }}</p></section>
     <section class="card kpi"><div class="kpi-head"><h2>Delivered (24 h)</h2></div><p class="kpi-value">{{ (summary.deliveries.delivered ?? 0)|number_format }}</p></section>
 </div>
 
 <nav class="chips" aria-label="Views of the webhooks">
     {% for key, label in {failed: 'Failed', retrying: 'Retrying', pending: 'Pending', delivered: 'Delivered', '': 'Every delivery'} %}<a class="chip-link" href="{{ path('dashboard_operator_webhooks', key ? {status: key} : {}) }}"{% if not outbox and filters.status == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
-    <a class="chip-link" href="{{ path('dashboard_operator_webhooks', {state: 'awaiting_fanout'}) }}"{% if outbox %} aria-current="page"{% endif %}>Outbox events</a>
+    <a class="chip-link" href="{{ path('dashboard_operator_webhooks', {state: 'awaiting_fanout'}) }}"{% if outbox %} aria-current="page"{% endif %}>Events not yet sent out</a>
 </nav>
 
 {% if not outbox %}
@@ -42,16 +42,16 @@
 </section>
 {{ ui.pager(page, 'deliveries') }}
 {% else %}
-<nav class="seg" aria-label="Outbox events">
-    <a href="{{ path('dashboard_operator_webhooks', {state: 'awaiting_fanout'}) }}"{% if filters.state == 'awaiting_fanout' %} aria-current="page"{% endif %}>Awaiting fan-out</a>
-    <a href="{{ path('dashboard_operator_webhooks', {state: 'fanned_out'}) }}"{% if filters.state == 'fanned_out' %} aria-current="page"{% endif %}>Fanned out</a>
+<nav class="seg" aria-label="Events">
+    <a href="{{ path('dashboard_operator_webhooks', {state: 'awaiting_fanout'}) }}"{% if filters.state == 'awaiting_fanout' %} aria-current="page"{% endif %}>Not yet sent out</a>
+    <a href="{{ path('dashboard_operator_webhooks', {state: 'fanned_out'}) }}"{% if filters.state == 'fanned_out' %} aria-current="page"{% endif %}>Sent out</a>
 </nav>
 <section class="card card-flush" aria-labelledby="outbox-h">
-    <div class="card-head"><h2 id="outbox-h">Outbox events</h2>{{ ui.tip('The webhook worker turns each outbox event into one delivery per subscribed, enabled endpoint.') }}
+    <div class="card-head"><h2 id="outbox-h">Events</h2>{{ ui.tip('Every change a client is told about is first recorded as an event; the webhook worker then makes one delivery of it to each enabled endpoint that subscribed to it.') }}
         {% if events.next %}<a class="more" href="{{ path('dashboard_operator_webhooks', app.request.query.all|merge({events_cursor: events.next})) }}">More »</a>{% endif %}</div>
-    {% if events.rows is empty %}<p class="empty">No outbox events match.</p>{% else %}
+    {% if events.rows is empty %}<p class="empty">No events match.</p>{% else %}
     <div class="scroll"><table class="list">
-        <thead><tr><th scope="col">When</th><th scope="col">Client</th><th scope="col">Event</th><th scope="col">Fanned out</th><th scope="col" class="num">Deliveries</th></tr></thead>
+        <thead><tr><th scope="col">When</th><th scope="col">Client</th><th scope="col">Event</th><th scope="col">Sent out</th><th scope="col" class="num">Deliveries</th></tr></thead>
         <tbody>{% for w in events.rows %}
             <tr><td class="nowrap" title="{{ w.created_at|ts }}">{{ w.created_at|when }}</td><td>{{ w.company_name }}</td><td><code>{{ w.event_type }}</code> {{ ui.tip(w.subject_type ~ ' ' ~ w.subject_id) }}</td><td>{{ w.fanned_out_at ? w.fanned_out_at|when : 'Waiting' }}</td><td class="num">{{ w.deliveries }}</td></tr>
         {% endfor %}</tbody>

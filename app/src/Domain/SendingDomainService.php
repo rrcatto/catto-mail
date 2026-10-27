@@ -93,8 +93,13 @@ final class SendingDomainService
         }
     }
 
-    /** @return bool whether the domain is verified after the check */
-    public function verify(SendingDomain $domain, AuditActor $actor): bool
+    /**
+     * @param bool $quiet an automatic check (the domain's page looks every 30 seconds): a failure
+     *                    is recorded on the domain but not in the audit log
+     *
+     * @return bool whether the domain is verified after the check
+     */
+    public function verify(SendingDomain $domain, AuditActor $actor, bool $quiet = false): bool
     {
         if ($domain->isDisabled()) {
             throw new DomainRuleViolation('A disabled sending domain cannot be verified; enable it first.');
@@ -112,7 +117,7 @@ final class SendingDomainService
         }
         $wasVerified = $domain->isVerified();
 
-        $this->em->wrapInTransaction(function () use ($domain, $actor, $now, $error, $wasVerified): void {
+        $this->em->wrapInTransaction(function () use ($domain, $actor, $now, $error, $wasVerified, $quiet): void {
             if (null === $error) {
                 $domain->markVerified($now);
             } else {
@@ -122,7 +127,7 @@ final class SendingDomainService
             if (null === $error && !$wasVerified) {
                 $this->audit->record($actor, 'sending_domain.verified', 'sending_domain', $domain->getId()->toRfc4122(), [
                     'client_id' => $domain->getClient()->getId()->toRfc4122(), 'domain' => $domain->getDomain()]);
-            } elseif (null !== $error) {
+            } elseif (null !== $error && !$quiet) {
                 $this->audit->record($actor, 'sending_domain.verification_failed', 'sending_domain', $domain->getId()->toRfc4122(), [
                     'client_id' => $domain->getClient()->getId()->toRfc4122(), 'domain' => $domain->getDomain(), 'error' => $error]);
             }

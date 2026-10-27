@@ -692,6 +692,17 @@ the page refused it as designed. The e2e suites against the pod, the rehearsal a
 test were not run. The four new pages were photographed with headless Firefox
 (`docs/screenshots/`); the other screenshots were not retaken.
 
+Latest runs (v0.3.0, 2026-10-28: guided account setup, account blocks, Bootstrap Icons; on the
+local Podman 4.9.3 engine, after `build` and `recreate`): `check-contracts` 2,930; `test` green:
+phase2 394 tests and 7,322 assertions, phase3 298 pytest tests and the end-to-end run, phase4 the Go
+units and integration tests; `test phase8` 29/29; `test installer --with-upgrade` 23/23; `test
+installer --from v0.2.9` 14/15: the released 0.2.9 installed by its own installer, upgraded to the
+working tree in 13 steps (both migrations) and rolled back, all passing; the one failure was the
+development-pod check, because the pod was rebuilt for the version change while that test ran.
+The guided setup and account blocks were also walked in Chromium against the pod (the guided setup
+in Firefox too), and a block made in ctnlist's development copy was followed into the account's
+Suppressions page and lifted again.
+
 Latest runs (v0.2.9, 2026-10-26: the dashboard layout of 2026-10-25, the first ACME issue,
 the pinned lego, the firewall under `/etc/nftables.d`; on the local Podman 4.9.3 engine):
 `check-contracts` 2,946; `test phase2` 377 tests and 6,588 assertions (the earlier runs of the day

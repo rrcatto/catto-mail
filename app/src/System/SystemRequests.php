@@ -102,15 +102,18 @@ final class SystemRequests
      *
      * @return list<array{id: string, action: string, params: array<string, string>, note: ?string, requested_by: ?string, requested_at: string}>
      */
-    public function claim(int $limit = 10): array
+    /** @param list<string> $actions only these actions (the development agent claims the DKIM requests alone); empty: every action */
+    public function claim(int $limit = 10, array $actions = []): array
     {
-        return $this->connection->transactional(function () use ($limit): array {
+        return $this->connection->transactional(function () use ($limit, $actions): array {
             $rows = $this->connection->fetchAllAssociative(<<<'SQL'
                 UPDATE system_requests r SET status = 'running', started_at = now()
-                  FROM (SELECT id FROM system_requests WHERE status = 'pending' ORDER BY requested_at LIMIT ? FOR UPDATE SKIP LOCKED) p
+                  FROM (SELECT id FROM system_requests WHERE status = 'pending' AND (cardinality(?::text[]) = 0 OR action = ANY(?::text[]))
+                         ORDER BY requested_at LIMIT ? FOR UPDATE SKIP LOCKED) p
                  WHERE r.id = p.id
                 RETURNING r.id::text AS id, r.action, r.params_json, r.note, r.requested_at, r.requested_by_user_id::text AS user_id
-                SQL, [$limit], [\Doctrine\DBAL\ParameterType::INTEGER]);
+                SQL, ['{'.implode(',', $actions).'}', '{'.implode(',', $actions).'}', $limit],
+                [\Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::INTEGER]);
             $out = [];
             foreach ($rows as $r) {
                 $email = null === $r['user_id'] ? null : $this->connection->fetchOne('SELECT email FROM users WHERE id = ?', [$r['user_id']]);

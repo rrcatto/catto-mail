@@ -1,0 +1,22 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Add a sending domain{% endblock %}
+{% block crumb_tail %}Add a domain{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Add a sending domain</h1>
+    <p class="lead">The domain your messages come from: the part after @ in your From address. You will add two records to its DNS; the next page shows them, one at a time.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    {% if not room %}
+    <p class="warn">{{ client.companyName }} already has {{ max_domains }} sending domain{{ max_domains == 1 ? '' : 's' }}, its limit. Ask the operator of this installation for a higher limit.</p>
+    {% else %}
+    <form method="post" action="{{ path('dashboard_client_domain_add', {clientId: client.id.toRfc4122}) }}" class="card">
+        {{ ui.csrf() }}{% if back %}<input type="hidden" name="back" value="{{ back.url }}">{% endif %}
+        <label class="field"><span class="field-label">Domain</span>
+            <span class="field-help">For newsletter@news.example.org, the domain is news.example.org. You need access to its DNS settings.</span>
+            <input type="text" name="domain" value="{{ name }}" required maxlength="253" placeholder="news.example.org" autocomplete="off" spellcheck="false" autofocus></label>
+        <div class="form-actions"><button type="submit">Add the domain</button> <a class="btn btn-secondary" href="{{ back ? back.url : path('dashboard_client_domains', {clientId: client.id.toRfc4122}) }}">Cancel</a></div>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

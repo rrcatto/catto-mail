@@ -23,10 +23,11 @@ use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * Sending domains set up in the client dashboard (owner decision 2026-10-11): a client admin adds
- * a domain within the client's limit, verification requests the DKIM key from the host agent, the
- * agent's result shows the records to publish, and the published record leads to activation (by
- * the button or by the agent's periodic call). The host agent is played through its console
+ * Sending domains set up in the client dashboard (owner decisions 2026-10-11 and 2026-10-27): a
+ * client admin adds a domain on its own page within the client's limit, the domain's steps page
+ * shows one step at a time, verification requests the DKIM key from the host agent, the agent's
+ * result shows the record to publish, and the published record leads to activation (by Check now,
+ * the page's own check or the agent's periodic call), after which the admins are emailed. The host agent is played through its console
  * protocol (smarthost:system:agent claim/finish/domains); nothing here touches OpenDKIM.
  */
 final class ClientDomainSetupTest extends DashboardTestCase
@@ -88,6 +89,25 @@ final class ClientDomainSetupTest extends DashboardTestCase
         return '/dashboard/c/'.$client->getId()->toRfc4122().'/sending-domains';
     }
 
+    /** Adds a domain on its own page (owner decision 2026-10-27), as a client admin does. */
+    private function add(Client $client, string $name): \Symfony\Component\HttpFoundation\Response
+    {
+        $base = $this->base($client);
+
+        return $this->submit("$base/new", "$base/new", ['domain' => $name]);
+    }
+
+    /** The domain's steps page. */
+    private function steps(Client $client, string $domainId): \Symfony\Component\DomCrawler\Crawler
+    {
+        return $this->crawler($this->base($client).'/'.$domainId);
+    }
+
+    private function flashes(\Symfony\Component\DomCrawler\Crawler $page): string
+    {
+        return implode(' ', $page->filter('.flash')->each(static fn ($f): string => $f->text()));
+    }
+
     /** A verified domain waiting for its DKIM record, as the agent's generate result leaves it. */
     private function pendingDns(Client $client, string $key): SendingDomain
     {
@@ -106,29 +126,31 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $name = self::domainName();
         $this->signIn($admin);
         $base = $this->base($client);
+        self::assertSame(1, $this->crawler($base)->filter(".pagehead a[href=\"$base/new\"]")->count(), 'Add a domain leads to its own page');
 
-        $r = $this->submit($base, $base, ['domain' => ' '.strtoupper($name).'. ']);
+        $r = $this->add($client, ' '.strtoupper($name).'. ');
         self::assertSame(302, $r->getStatusCode());
         $row = Db::owner()->fetchAssociative('SELECT id::text AS id, status, dkim_status, verification_token FROM sending_domains WHERE client_id = ? AND domain = ?',
             [$client->getId()->toRfc4122(), $name]);
+        self::assertSame("$base/{$row['id']}", $r->headers->get('Location'), 'straight on to its steps');
         self::assertSame(['pending', 'not_configured'], [$row['status'], $row['dkim_status']]);
         self::assertSame(['user', $admin->getId()->toRfc4122()], array_values(Db::owner()->fetchAssociative(
             "SELECT actor_type, actor_id FROM audit_log WHERE action = 'sending_domain.created' AND target_id = ?", [$row['id']])));
 
-        $page = $this->crawler($base);
-        self::assertStringContainsString("$name is added", $page->filter('.flash')->text());
-        $card = $page->filter("#d-{$row['id']}");
-        self::assertStringContainsString('Waiting for the TXT record', $card->text());
-        self::assertStringContainsString("_smarthost-verification.$name", $card->text());
-        self::assertStringContainsString('smarthost-verification='.$row['verification_token'], $card->text());
-        self::assertSame('TXT verified', $card->filter('.stepper li.current')->text(), 'the next step is the TXT verification');
-        self::assertSame(1, $card->filter("form[action=\"$base/{$row['id']}/verify\"]")->count());
+        $page = $this->steps($client, $row['id']);
+        self::assertSame('Prove it is yours', $page->filter('.guide-steps li.current')->text());
+        self::assertSame(["_smarthost-verification.$name", 'smarthost-verification='.$row['verification_token']],
+            $page->filter('.record [data-copy-target="source"]')->slice(0, 1)->each(static fn ($c): string => $c->text())
+            + [1 => $page->filter('.record [data-copy-target="source"]')->last()->text()], 'each value with its copy button');
+        self::assertSame(1, $page->filter("form[action=\"$base/{$row['id']}/verify\"]")->count(), 'Check now');
+        self::assertSame(1, $page->filter('[data-controller="dnscheck"]')->count(), 'the page checks by itself');
+        self::assertStringContainsString('Step 1: prove it is yours', $this->crawler($base)->filter('tbody')->text());
 
-        // An invalid or duplicate domain is refused with the reason.
-        $this->submit($base, $base, ['domain' => 'not a domain']);
-        self::assertStringContainsString('is not a valid domain name', $this->crawler($base)->filter('.flash')->text());
-        $this->submit($base, $base, ['domain' => $name]);
-        self::assertStringContainsString('already registered for this client', $this->crawler($base)->filter('.flash')->text());
+        // An invalid or duplicate domain is refused on the page, with what was typed.
+        $r = $this->add($client, 'not a domain');
+        self::assertSame(422, $r->getStatusCode());
+        self::assertStringContainsString('is not a valid domain name', self::text($r));
+        self::assertStringContainsString('already registered for this client', self::text($this->add($client, $name)));
         self::assertSame(1, (int) Db::owner()->fetchOne('SELECT count(*) FROM sending_domains WHERE client_id = ?', [$client->getId()->toRfc4122()]));
     }
 
@@ -138,16 +160,17 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $base = $this->base($client);
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Member));
         $page = $this->crawler($base);
-        self::assertSame(0, $page->filter("form[action=\"$base\"]")->count(), 'no add form for members');
-        self::assertStringContainsString('Client admins add sending domains', $page->text());
-        $this->browser->request('POST', $base, ['domain' => self::domainName(), '_token' => 'x']);
+        self::assertSame(0, $page->filter("a[href=\"$base/new\"]")->count(), 'no Add a domain for members');
+        self::assertSame(404, $this->page("$base/new")->getStatusCode());
+        $this->browser->request('POST', "$base/new", ['domain' => self::domainName(), '_token' => 'x']);
         self::assertSame(404, $this->browser->getResponse()->getStatusCode(), 'a member cannot add');
 
         $this->browser->request('POST', '/dashboard/logout', ['_csrf_token' => $page->filter('form input[name="_csrf_token"]')->attr('value')]);
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
-        $this->browser->request('POST', $base, ['domain' => self::domainName(), '_token' => 'forged']);
+        $this->browser->request('POST', "$base/new", ['domain' => self::domainName(), '_token' => 'forged']);
         self::assertSame(403, $this->browser->getResponse()->getStatusCode());
         self::assertSame(405, $this->page("$base/".SchemaFixtures::id().'/dkim')->getStatusCode(), 'no mutating GET');
+        self::assertSame(405, $this->page("$base/".SchemaFixtures::id().'/check')->getStatusCode(), 'the page\'s check is a POST');
         self::assertSame(0, (int) Db::owner()->fetchOne('SELECT count(*) FROM sending_domains WHERE client_id = ?', [$client->getId()->toRfc4122()]));
     }
 
@@ -157,16 +180,20 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $this->container()->get(ClientLimitAdministration::class)->set($this->reload($client), ['max_sending_domains' => 1], self::actor(), 'test limit');
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
         $base = $this->base($client);
+        $token = $this->crawler("$base/new")->filter('input[name="_token"]')->attr('value');
 
-        $this->submit($base, $base, ['domain' => self::domainName()]);
+        $this->add($client, self::domainName());
         $page = $this->crawler($base);
         self::assertStringContainsString('1 of at most 1', $page->filter('.pagehead .lead')->text());
-        self::assertSame(0, $page->filter("form[action=\"$base\"]")->count(), 'no add form at the limit');
-        self::assertStringContainsString('Ask the operator for a higher limit', $page->text());
+        self::assertSame(0, $page->filter("a[href=\"$base/new\"]")->count(), 'no Add a domain at the limit');
+        $new = $this->crawler("$base/new");
+        self::assertSame(0, $new->filter('form[action$="/new"]')->count());
+        self::assertStringContainsString('Ask the operator of this installation for a higher limit', $new->text());
 
-        // Posting anyway (with a valid token from another form) is refused by the service.
-        $this->browser->request('POST', $base, ['domain' => self::domainName(), '_token' => $page->filter('input[name="_token"]')->attr('value')]);
-        self::assertStringContainsString('its limit is 1', $this->crawler($base)->filter('.flash')->text());
+        // Posting anyway is refused by the service.
+        $this->browser->request('POST', "$base/new", ['domain' => self::domainName(), '_token' => $token]);
+        self::assertSame(422, $this->browser->getResponse()->getStatusCode());
+        self::assertStringContainsString('its limit is 1', self::text($this->browser->getResponse()));
         self::assertSame(1, (int) Db::owner()->fetchOne('SELECT count(*) FROM sending_domains WHERE client_id = ?', [$client->getId()->toRfc4122()]));
     }
 
@@ -174,13 +201,13 @@ final class ClientDomainSetupTest extends DashboardTestCase
     {
         $this->withEnv(['APP_CLIENT_SENDING_DOMAIN_LIMIT' => '1'], function (): void {
             $client = $this->newClient();
-            $this->verifiedDomain($client);
+            $domain = $this->verifiedDomain($client);
             $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
             $base = $this->base($client);
-            $page = $this->crawler($base);
-            self::assertSame(0, $page->filter("form[action=\"$base\"]")->count());
-            $this->browser->request('POST', $base, ['domain' => self::domainName(), '_token' => $page->filter('input[name="_token"]')->attr('value')]);
-            self::assertStringContainsString('its limit is 1', $this->crawler($base)->filter('.flash')->text());
+            self::assertSame(0, $this->crawler("$base/new")->filter('form[action$="/new"]')->count());
+            $token = $this->steps($client, $domain->getId()->toRfc4122())->filter('input[name="_token"]')->attr('value');
+            $this->browser->request('POST', "$base/new", ['domain' => self::domainName(), '_token' => $token]);
+            self::assertStringContainsString('its limit is 1', self::text($this->browser->getResponse()));
         });
     }
 
@@ -196,7 +223,7 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $this->browser->disableReboot();
         $this->dns()->set("_smarthost-verification.$name", ['smarthost-verification='.$domain->getVerificationToken()]);
 
-        $this->submit($base, "$base/$id/verify");
+        $this->submit("$base/$id", "$base/$id/verify");
         self::assertSame('verified', $this->row($id)['status']);
         $request = Db::owner()->fetchAssociative("SELECT id::text AS id, params_json, requested_by_user_id::text AS by FROM system_requests WHERE action = 'dkim.generate' AND status = 'pending' AND params_json->>'domain' = ?", [$name]);
         $params = json_decode($request['params_json'], true);
@@ -204,12 +231,12 @@ final class ClientDomainSetupTest extends DashboardTestCase
         self::assertMatchesRegularExpression('/^cm\d{6}[0-9a-f]{4}$/', $params['selector']);
         self::assertSame($member->getId()->toRfc4122(), $request['by'], 'requested in the name of the user whose check verified the domain');
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'system.request.dkim.generate' AND target_id = ? AND actor_type = 'user'", [$request['id']]));
-        $page = $this->crawler($base);
-        $flashes = implode(' ', $page->filter('.flash')->each(static fn ($f): string => $f->text()));
-        self::assertStringContainsString("$name is verified", $flashes);
-        self::assertStringContainsString('A DKIM key for '.$name.' is requested', $flashes);
-        self::assertStringContainsString('DKIM key being generated', $page->filter("#d-$id")->text());
-        self::assertSame(0, $page->filter("#d-$id form")->count(), 'nothing to press while the host agent works');
+        $page = $this->steps($client, $id);
+        self::assertStringContainsString("$name is verified: it is yours", $this->flashes($page));
+        self::assertSame('Publish its signing key', $page->filter('.guide-steps li.current')->text());
+        self::assertStringContainsString('Its signing key is being made', $page->filter('.guide-card')->text());
+        self::assertSame(0, $page->filter('.guide-card form')->count(), 'nothing to press while the key is made');
+        self::assertSame(1, $page->filter('[data-controller="dnscheck"][data-dnscheck-stage-value="key_requested"]')->count(), 'the page waits for it by itself');
 
         // The host agent generates the key and returns only the public half.
         $key = self::publicKey();
@@ -218,16 +245,14 @@ final class ClientDomainSetupTest extends DashboardTestCase
         self::assertSame(['system', 'host-agent'], array_values(Db::owner()->fetchAssociative(
             "SELECT actor_type, actor_id FROM audit_log WHERE action = 'sending_domain.dkim_changed' AND target_id = ? ORDER BY occurred_at DESC LIMIT 1", [$id])));
 
-        $card = $this->crawler($base)->filter("#d-$id");
-        self::assertStringContainsString('DKIM pending in DNS', $card->filter('.card-head')->text());
-        self::assertSame('DKIM pending in DNS', $card->filter('.stepper li.current')->text());
-        self::assertSame(2, $card->filter('.stepper li.done')->count(), 'added and TXT verified are done');
-        $text = $card->text();
-        foreach (["{$params['selector']}._domainkey.$name", "v=DKIM1; k=rsa; p=$key", "_dmarc.$name", "v=DMARC1; p=none; rua=mailto:dmarc-reports@$name",
-            'bounce.smarthost.localhost', 'nothing to add for catto-mail'] as $expected) {
-            self::assertStringContainsString($expected, $text);
-        }
-        self::assertSame(1, $card->filter("form[action=\"$base/$id/verify\"]")->count(), 'Check DNS now for the DKIM record');
+        $page = $this->steps($client, $id);
+        self::assertSame('Publish its signing key', $page->filter('.guide-steps li.current')->text());
+        self::assertSame(1, $page->filter('.guide-steps li.done')->count(), 'proving it is yours is done');
+        $values = $page->filter('.record [data-copy-target="source"]')->each(static fn ($c): string => $c->text());
+        self::assertContains("{$params['selector']}._domainkey.$name", $values);
+        self::assertContains("v=DKIM1; k=rsa; p=$key", $values);
+        self::assertStringNotContainsString('DMARC', $page->filter('.guide-card')->text(), 'one step at a time: DMARC comes when the domain is ready');
+        self::assertSame(1, $page->filter("form[action=\"$base/$id/verify\"]")->count(), 'Check now for the signing key record');
 
         // One key per domain: a second request is refused.
         try {
@@ -246,17 +271,17 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $base = $this->base($client);
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
         $this->browser->disableReboot();
-        self::assertStringContainsString('Verified, no DKIM key yet', $this->crawler($base)->filter("#d-$id")->text(), 'verified before this page requested keys');
+        self::assertSame('Make the signing key', $this->steps($client, $id)->filter("form[action=\"$base/$id/dkim\"] button")->text(), 'verified before the page requested keys');
 
-        $this->submit($base, "$base/$id/dkim");
+        $this->submit("$base/$id", "$base/$id/dkim");
         $this->agentFinishes('dkim.generate', $domain->getDomain(), [], true);
         self::assertSame('not_configured', $this->row($id)['dkim_status']);
-        $card = $this->crawler($base)->filter("#d-$id");
-        self::assertStringContainsString('DKIM key not generated', $card->text());
-        self::assertSame('Request the DKIM key again', $card->filter("form[action=\"$base/$id/dkim\"] button")->text());
+        $page = $this->steps($client, $id);
+        self::assertStringContainsString('The signing key could not be made', $page->text());
+        self::assertSame('Try again', $page->filter("form[action=\"$base/$id/dkim\"] button")->text());
 
         // A succeeded generation without a usable public key changes nothing either.
-        $this->submit($base, "$base/$id/dkim");
+        $this->submit("$base/$id", "$base/$id/dkim");
         $this->agentFinishes('dkim.generate', $domain->getDomain(), ['public_key' => 'not base64!']);
         self::assertSame('not_configured', $this->row($id)['dkim_status']);
     }
@@ -270,40 +295,105 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $name = $domain->getDomain();
         $record = "cm202610abcd._domainkey.$name";
         $base = $this->base($client);
+        $admin = $this->newUser(false, $client, ClientMembershipRole::Admin);
         $member = $this->newUser(false, $client, ClientMembershipRole::Member);
         $this->signIn($member);
         $this->browser->disableReboot();
 
-        $this->submit($base, "$base/$id/verify");
-        self::assertStringContainsString("No DKIM record found at $record yet", $this->crawler($base)->filter('.flash')->text());
-        self::assertSame("No DKIM record found at $record yet.", $this->row($id)['last_check_error']);
+        $this->submit("$base/$id", "$base/$id/verify");
+        self::assertStringContainsString("No signing key record found at $record yet", $this->flashes($this->steps($client, $id)));
+        self::assertSame("No signing key record found at $record yet.", $this->row($id)['last_check_error']);
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'sending_domain.dkim_check_failed' AND target_id = ?", [$id]));
 
         $this->dns()->set($record, ['v=DKIM1; k=rsa; p='.self::publicKey()]);
-        $this->submit($base, "$base/$id/verify");
-        self::assertStringContainsString('does not match', $this->crawler($base)->filter('.flash')->text());
+        $this->submit("$base/$id", "$base/$id/verify");
+        self::assertStringContainsString('does not match', $this->flashes($this->steps($client, $id)));
         self::assertFalse(Db::owner()->fetchOne("SELECT 1 FROM system_requests WHERE action = 'dkim.activate' AND params_json->>'domain' = ?", [$name]));
 
         // The matching record (a long value's strings arrive concatenated from the resolver).
         $this->dns()->set($record, ['v=DKIM1; k=rsa; p='.$key]);
-        $this->submit($base, "$base/$id/verify");
-        self::assertStringContainsString('The host agent activates the key', $this->crawler($base)->filter('.flash')->text());
+        $this->submit("$base/$id", "$base/$id/verify");
+        $page = $this->steps($client, $id);
+        self::assertStringContainsString('Signing is being switched on', $this->flashes($page));
         self::assertNull($this->row($id)['last_check_error']);
         $request = Db::owner()->fetchAssociative("SELECT id::text AS id, params_json FROM system_requests WHERE action = 'dkim.activate' AND status = 'pending' AND params_json->>'domain' = ?", [$name]);
         self::assertSame(['domain' => $name, 'selector' => 'cm202610abcd', 'sending_domain_id' => $id], json_decode($request['params_json'], true));
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'system.request.dkim.activate' AND target_id = ? AND actor_id = ?",
             [$request['id'], $member->getId()->toRfc4122()]));
-        $card = $this->crawler($base)->filter("#d-$id");
-        self::assertStringContainsString('Activating DKIM', $card->text());
-        self::assertSame(0, $card->filter('form')->count());
+        self::assertSame('Ready to send', $page->filter('.guide-steps li.current')->text());
+        self::assertSame(0, $page->filter('.guide-card form')->count());
 
-        // The agent activates the selector (it compared DNS with the private key itself) and the application records it.
+        // The agent activates the selector (it compared DNS with the private key itself), the application records it and emails the admins.
+        $sent = \count(self::getMailerMessages());
         $this->agentFinishes('dkim.activate', $name);
         self::assertSame(['verified', 'active', 'cm202610abcd', $key], array_values(array_slice($this->row($id), 0, 4)));
-        $card = $this->crawler($base)->filter("#d-$id");
-        self::assertStringContainsString('Active', $card->filter('.card-head')->text());
-        self::assertSame(0, $card->filter('.stepper')->count(), 'an active domain shows its state, not the steps');
-        self::assertStringContainsString("v=DKIM1; k=rsa; p=$key", $card->filter('details')->text(), 'the records stay available');
+        $ready = array_values(array_filter(\array_slice(self::getMailerMessages(), $sent), static fn ($m): bool => "$name is ready to send" === $m->getSubject()));
+        self::assertCount(1, $ready, 'one email, to the one admin');
+        self::assertSame($admin->getEmail(), $ready[0]->getTo()[0]->getAddress());
+        self::assertStringContainsString("$base/$id", (string) $ready[0]->getTextBody());
+
+        $page = $this->steps($client, $id);
+        self::assertSame(3, $page->filter('.guide-steps li.done')->count());
+        self::assertStringContainsString('Ready: ', $page->filter('.pagehead .lead')->text());
+        $card = $page->filter('.guide-card')->text();
+        self::assertStringContainsString("_dmarc.$name", $card, 'no DMARC record yet: one is suggested');
+        self::assertStringContainsString('v=DMARC1; p=none', $card);
+        self::assertStringNotContainsString('rua=', $card, 'no report address is made up');
+        self::assertStringContainsString('bounce.smarthost.localhost', $card);
+        self::assertStringContainsString("v=DKIM1; k=rsa; p=$key", $page->filter('.guide-card details')->text(), 'the records stay available');
+
+        // An existing DMARC record is recognised.
+        $this->dns()->set("_dmarc.$name", ['v=DMARC1; p=quarantine; rua=mailto:reports@example.net']);
+        $card = $this->steps($client, $id)->filter('.guide-card')->text();
+        self::assertStringContainsString('already has one. Keep yours: nothing to add.', $card);
+        self::assertStringContainsString('v=DMARC1; p=quarantine; rua=mailto:reports@example.net', $card);
+    }
+
+    public function testThePageChecksByItselfQuietly(): void
+    {
+        $client = $this->newClient();
+        $domain = $this->pendingDomain($client, self::domainName());
+        $id = $domain->getId()->toRfc4122();
+        $name = $domain->getDomain();
+        $base = $this->base($client);
+        $this->signIn($this->newUser(false, $client, ClientMembershipRole::Viewer));
+        $this->browser->disableReboot();
+        self::assertSame(0, $this->steps($client, $id)->filter('[data-controller="dnscheck"]')->count(), 'a viewer only reads the page');
+        $this->browser->request('POST', "$base/$id/check", ['_token' => 'x']);
+        self::assertSame(404, $this->browser->getResponse()->getStatusCode(), 'and cannot make it look');
+
+        $this->browser->getCookieJar()->clear();
+        $this->signIn($this->newUser(false, $client, ClientMembershipRole::Member));
+        $page = $this->steps($client, $id);
+        $token = $page->filter('[data-controller="dnscheck"]')->attr('data-dnscheck-token-value');
+        self::assertSame('30000', $page->filter('[data-controller="dnscheck"]')->attr('data-dnscheck-interval-value'));
+        $check = function () use ($base, $id, $token): array {
+            $this->browser->request('POST', "$base/$id/check", ['_token' => $token]);
+            self::assertSame(200, $this->browser->getResponse()->getStatusCode());
+            self::assertStringContainsString('no-store', (string) $this->browser->getResponse()->headers->get('Cache-Control'));
+
+            return json_decode((string) $this->browser->getResponse()->getContent(), true);
+        };
+        $first = $check();
+        self::assertSame('added', $first['stage']);
+        self::assertStringContainsString('not there yet', (string) $first['message']);
+        self::assertSame(0, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'sending_domain.verification_failed' AND target_id = ?", [$id]),
+            'a failed automatic look is not audited');
+        self::assertNotNull($this->row($id)['last_check_error'], 'it is recorded on the domain');
+
+        // Within 20 seconds it does not look again, even when the record has appeared meanwhile.
+        $this->dns()->set("_smarthost-verification.$name", ['smarthost-verification='.$domain->getVerificationToken()]);
+        $second = $check();
+        self::assertSame(['added', null], [$second['stage'], $second['message']]);
+
+        // Later it finds the record and moves on: verified, and the signing key asked for.
+        Db::owner()->executeStatement("UPDATE sending_domains SET last_checked_at = now() - interval '1 minute' WHERE id = ?", [$id]);
+        $third = $check();
+        self::assertSame('key_requested', $third['stage']);
+        self::assertSame('verified', $this->row($id)['status']);
+        self::assertSame(['system', 'domain-page'], array_values(Db::owner()->fetchAssociative(
+            "SELECT actor_type, actor_id FROM audit_log WHERE action = 'sending_domain.verified' AND target_id = ?", [$id])));
+        self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM system_requests WHERE action = 'dkim.generate' AND params_json->>'sending_domain_id' = ?", [$id]));
     }
 
     public function testTheHostAgentActivatesPublishedRecordsByItself(): void
@@ -322,13 +412,13 @@ final class ClientDomainSetupTest extends DashboardTestCase
             [$published->getId()->toRfc4122()]);
         self::assertNull($request['requested_by_user_id'], 'nobody pressed a button');
         self::assertSame(['system', 'dkim-setup'], array_values(Db::owner()->fetchAssociative('SELECT actor_type, actor_id FROM audit_log WHERE target_id = ?', [$request['id']])));
-        self::assertStringContainsString('No DKIM record found', (string) $this->row($unpublished->getId()->toRfc4122())['last_check_error']);
+        self::assertStringContainsString('No signing key record found', (string) $this->row($unpublished->getId()->toRfc4122())['last_check_error']);
         self::assertSame($before, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'sending_domain.dkim_check_failed'"), 'the periodic check does not fill the audit log');
 
         // Checked a moment ago: not again until the interval passed; the waiting activation is not requested twice.
         $this->dns()->set('cm202610abcd._domainkey.'.$unpublished->getDomain(), ['v=DKIM1; k=rsa; p='.self::publicKey()]);
         $this->agent('domains');
-        self::assertStringContainsString('No DKIM record found', (string) $this->row($unpublished->getId()->toRfc4122())['last_check_error']);
+        self::assertStringContainsString('No signing key record found', (string) $this->row($unpublished->getId()->toRfc4122())['last_check_error']);
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM system_requests WHERE action = 'dkim.activate' AND params_json->>'sending_domain_id' = ?", [$published->getId()->toRfc4122()]));
 
         $this->agentFinishes('dkim.activate', $published->getDomain());
@@ -346,16 +436,18 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $aBase = $this->base($a);
         $bBase = $this->base($b);
         $page = $this->crawler($aBase);
-        $token = $page->filter('input[name="_token"]')->attr('value');
+        $token = $this->steps($a, $aDomain->getId()->toRfc4122())->filter('input[name="_token"]')->attr('value');
         foreach ([$bPending, $bVerified] as $d) {
             self::assertStringNotContainsString($d->getDomain(), (string) $this->browser->getResponse()->getContent());
         }
 
         self::assertSame(404, $this->page($bBase)->getStatusCode());
-        $attempts = [[$bBase, ['domain' => self::domainName()]]];
+        $attempts = [["$bBase/new", ['domain' => self::domainName()]]];
         foreach ([$bPending, $bVerified] as $d) {
             $did = $d->getId()->toRfc4122();
+            self::assertSame(404, $this->page("$aBase/$did")->getStatusCode(), 'another client\'s domain is not found');
             $attempts[] = ["$aBase/$did/verify", []];
+            $attempts[] = ["$aBase/$did/check", []];
             $attempts[] = ["$aBase/$did/dkim", []];
             $attempts[] = ["$bBase/$did/verify", []];
             $attempts[] = ["$bBase/$did/dkim", []];
@@ -384,8 +476,9 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $domain = $this->verifiedDomain($client, $name);
         $base = $this->base($client);
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
-        $this->submit($base, "$base/{$domain->getId()->toRfc4122()}/dkim");
-        self::assertStringContainsString('also verified for another client', $this->crawler($base)->filter('.flash')->text());
+        $id = $domain->getId()->toRfc4122();
+        $this->submit("$base/$id", "$base/$id/dkim");
+        self::assertStringContainsString('also verified for another client', $this->flashes($this->steps($client, $id)));
         self::assertFalse(Db::owner()->fetchOne("SELECT 1 FROM system_requests WHERE action = 'dkim.generate' AND params_json->>'domain' = ?", [$name]));
     }
 
@@ -393,16 +486,16 @@ final class ClientDomainSetupTest extends DashboardTestCase
     {
         $client = $this->newClient(ClientStatus::Suspended);
         $domain = $this->verifiedDomain($client, self::domainName());
+        $id = $domain->getId()->toRfc4122();
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Admin));
         $base = $this->base($client);
         $page = $this->crawler($base);
-        self::assertSame(0, $page->filter("form[action=\"$base\"]")->count());
-        self::assertSame(0, $page->filter("form[action=\"$base/{$domain->getId()->toRfc4122()}/dkim\"]")->count());
-        $token = $page->filter('input[name="_token"]')->attr('value');
-        $this->browser->request('POST', $base, ['domain' => self::domainName(), '_token' => $token]);
-        self::assertStringContainsString('cannot add sending domains', $this->crawler($base)->filter('.flash')->text());
-        $this->browser->request('POST', "$base/{$domain->getId()->toRfc4122()}/dkim", ['_token' => $token]);
-        self::assertStringContainsString('suspended or closed client gets no new DKIM keys', $this->crawler($base)->filter('.flash')->text());
+        self::assertSame(0, $page->filter("a[href=\"$base/new\"]")->count());
+        $token = $this->steps($client, $id)->filter('input[name="_token"]')->attr('value');
+        $this->browser->request('POST', "$base/new", ['domain' => self::domainName(), '_token' => $token]);
+        self::assertStringContainsString('cannot add sending domains', self::text($this->browser->getResponse()));
+        $this->browser->request('POST', "$base/$id/dkim", ['_token' => $token]);
+        self::assertStringContainsString('suspended or closed client gets no new DKIM keys', $this->flashes($this->steps($client, $id)));
     }
 
     public function testAKeyTheOperatorSetUpByHandIsShownWithoutARecord(): void
@@ -411,11 +504,11 @@ final class ClientDomainSetupTest extends DashboardTestCase
         $domain = $this->verifiedDomain($client, self::domainName());
         $this->container()->get(SendingDomainService::class)->setDkim($this->reload($domain), DkimStatus::Active, 's2026a', self::actor());
         $this->signIn($this->newUser(false, $client, ClientMembershipRole::Viewer));
-        $card = $this->crawler($this->base($client))->filter("#d-{$domain->getId()->toRfc4122()}");
-        self::assertStringContainsString('DKIM signing is active with selector s2026a', $card->text());
-        self::assertSame(0, $card->filter('.stepper')->count(), 'an active domain shows its state, not the steps');
-        self::assertSame(0, $card->filter('form')->count(), 'viewers check nothing');
-        self::assertSame(0, $card->filter('table')->count(), 'no record without the recorded public half');
+        $page = $this->steps($client, $domain->getId()->toRfc4122());
+        self::assertStringContainsString('Ready: ', $page->filter('.pagehead .lead')->text());
+        self::assertSame(0, $page->filter('.guide-card form')->count(), 'viewers check nothing');
+        self::assertStringNotContainsString('Signing key', $page->filter('details')->text(), 'no record without the recorded public half');
+        self::assertStringContainsString('Ready to send', $this->crawler($this->base($client))->filter('tbody')->text());
     }
 
     public function testDkimRequestsWaitPerDomainAndANewSelectorForgetsTheStoredKey(): void

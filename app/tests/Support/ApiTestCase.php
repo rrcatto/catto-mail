@@ -73,7 +73,7 @@ abstract class ApiTestCase extends WebTestCase
         /** @var AccountAdministration $accounts */
         $accounts = $this->service(AccountAdministration::class);
         $initial = ClientStatus::PendingApproval === $status ? ClientStatus::PendingApproval : ClientStatus::Active;
-        $client = $accounts->createClient($name.' '.bin2hex(random_bytes(4)), 'ops@example.test', 'test', $initial, self::actor());
+        $client = $accounts->createClient($name.' '.bin2hex(random_bytes(4)), 'ops@example.test', 'standard', $initial, self::actor());
         if ($status !== $initial) {
             $this->setClientStatus($client, $status);
         }

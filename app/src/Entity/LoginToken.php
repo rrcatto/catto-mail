@@ -9,8 +9,8 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * A single-use emailed sign-in link, or the verification link of a public sign-up (purpose
- * sign_up, with the organisation's name). Only the SHA-256 of the token is stored.
+ * A single-use emailed sign-in link, or the verification link of a public sign-up or an
+ * invitation (purpose sign_up, with the organisation's name). Only the SHA-256 of the token is stored.
  * Written and redeemed with DBAL by App\Security\LoginLinkService (the redeem is
  * one atomic UPDATE ... RETURNING); mapped for the schema model and audits.
  */
@@ -53,6 +53,11 @@ class LoginToken
 
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $organisationName = null;
+
+    /** A sign-up link that came from an operator's invitation (2026-10-27). */
+    #[ORM\ManyToOne(targetEntity: ClientInvitation::class)]
+    #[ORM\JoinColumn(name: 'invitation_id', nullable: true)]
+    private ?ClientInvitation $invitation = null;
 
     private function __construct()
     {

@@ -1,0 +1,41 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}New client{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>New client</h1>
+    <p class="lead">Open an account for an organisation. The person who manages it gets an email with a link to sign in, and the dashboard then guides them through their setup.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_operator_client_create') }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Organisation</span>
+            <span class="field-help">The name the account is shown under, to you and to them.</span>
+            <input type="text" name="company_name" value="{{ values.company_name }}" required maxlength="200" autocomplete="off" autofocus></label>
+        <label class="field"><span class="field-label">Email of the person who manages it</span>
+            <span class="field-help">They become the account's admin and sign in with this address; there is no password. They can add colleagues later.</span>
+            <input type="email" name="manager_email" value="{{ values.manager_email }}" required maxlength="320" autocomplete="off"></label>
+        <fieldset class="field"><legend>Sending limits</legend>
+            <span class="field-help">A plan is a set of limits defined once under <a href="{{ path('dashboard_operator_plans') }}">Plans</a>. You can change one client's limits later.</span>
+            {% for p in plans %}
+            <label class="choice"><input type="radio" name="plan" value="{{ p.id }}" required{% if values.plan == p.id %} checked{% endif %}>
+                <span class="choice-text"><span class="choice-title">{{ p.name }}</span><span class="choice-help">{% include 'dashboard/operator/_plan_summary.html.twig' with {limits: p.limits} only %}</span></span></label>
+            {% endfor %}
+        </fieldset>
+        <fieldset class="field"><legend>Service policy</legend>
+            {% if policy_version %}
+            <label class="choice"><input type="radio" name="policy" value="must_accept" required{% if values.policy == 'must_accept' %} checked{% endif %}>
+                <span class="choice-text"><span class="choice-title">Must accept it</span><span class="choice-help">For an outside organisation. The manager accepts the service policy (version {{ policy_version }}) when they first sign in, and the account opens then.</span></span></label>
+            <label class="choice"><input type="radio" name="policy" value="exempt" required{% if values.policy == 'exempt' %} checked{% endif %}>
+                <span class="choice-text"><span class="choice-title">Exempt</span><span class="choice-help">For your own organisation or one bound by a separate agreement. The account opens at once.</span></span></label>
+            {% else %}
+            <p class="field-help">No service policy is in force on this installation, so there is nothing to accept: the account opens at once.</p>
+            <input type="hidden" name="policy" value="exempt">
+            {% endif %}
+        </fieldset>
+        <label class="field"><span class="field-label">Private note <span class="muted">(optional)</span></span>
+            <span class="field-help">For operators only, never shown to the client: why you opened it, or a reference.</span>
+            <textarea name="note" rows="2" maxlength="4000">{{ values.note }}</textarea></label>
+        <div class="form-actions"><button type="submit">Open the account</button> <a class="btn btn-secondary" href="{{ path('dashboard_operator_clients') }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

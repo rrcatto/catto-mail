@@ -35,6 +35,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .skip:focus { left: 1rem; top: .5rem; background: #fff; padding: .4rem .8rem; border-radius: 10px; z-index: 50; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .icon { flex: none; }
+/* Bootstrap Icons in the icon font; the size is a class, since the CSP allows no inline style. */
+.bi.icon { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.bi.icon::before { vertical-align: 0; }
+.icon-13 { font-size: 13px; } .icon-14 { font-size: 14px; } .icon-16 { font-size: 16px; }
+.icon-18 { font-size: 18px; } .icon-20 { font-size: 20px; } .icon-22 { font-size: 22px; }
 
 /* The type scale (owner decision, 2026-10-25): every level clearly bigger or bolder than the next. */
 h1 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 .6rem; }
@@ -117,9 +122,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .menubar-item-end .menu-flyout { left: auto; right: calc(100% + 8px); }
 .menubar-item-end .menu-item.has-views::after { right: auto; left: -10px; }
 .menu-head { padding: 10px 12px 3px; font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
-.menu-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: #B7C3BC; }
-.menu-dot-done { background: var(--green); }
-.menu-dot-skipped { background: var(--warn-dot); }
+.menu-state-todo { color: #8A9A91; }
+.menu-flyout .menu-state-done { color: var(--green); }
+.menu-flyout .menu-state-skipped { color: var(--warn-dot); }
 /* Where you are, above the page title. */
 .crumbs { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
 .crumbs a { color: var(--muted); }
@@ -222,7 +227,6 @@ dl.banner-facts { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; flex: 1 
 .kpi-value { position: relative; z-index: 1; margin: auto 0 0; padding-top: 70px; font-size: 34px; font-weight: 600; letter-spacing: -.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .kpi-delta { position: relative; z-index: 1; margin: 10px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .delta { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #E8EFEA; color: var(--ink); }
-.delta .icon { stroke-width: 2.6; }
 .delta-good { background: var(--neon); color: var(--ink); }
 .delta-bad { background: #FAD4D7; color: #8A1520; }
 
@@ -460,6 +464,8 @@ dl.rows > dt:last-of-type, dl.rows > dd:last-of-type { border-bottom: 0; }
 .titleline .setup-chip { font-size: 14px; }
 .setup-step > summary > .res { flex: none; min-width: 6.2em; }
 .setup-checks li { align-items: baseline; }
+.setup-checks li > span:not(.res) { min-width: 0; overflow-wrap: anywhere; }
+.setup-checks li > .res { flex: none; }
 
 /* A sending domain's progress in the client dashboard: the same steps in one row. */
 .stepper.stepper-row { flex-direction: row; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
@@ -698,6 +704,63 @@ progress { width: 100%; max-width: 40rem; height: 12px; accent-color: var(--gree
 .help-body p, .help-body li { line-height: 1.6; }
 .helplink { font-size: .9em; }
 
+/* ---- Guided setup (owner decisions 2026-10-27) ----
+   .copy          a value with its copy button (macro ui.copy, copy_controller.js)
+   .formpage      a create or edit form on its own centred page (New client, New plan, ...)
+   .guide         one step at a time: the step's number and title, what to do, then the action
+   .checklist     the account's start page: each step done, current or to do */
+.copy { display: inline-flex; align-items: flex-start; gap: 6px; max-width: 100%; vertical-align: top; }
+.copy > code { flex: 1 1 auto; min-width: 0; }
+.copy-block { display: flex; width: 100%; }
+.copy-block > code { display: block; padding: 8px 10px; font-size: 13px; line-height: 1.5; }
+button.copy-btn { flex: none; height: 30px; padding: 0 10px; gap: 6px; font-size: 13px; background: var(--surface); color: var(--ink); border-color: #C9D3CD; }
+button.copy-btn:hover { background: var(--line-2); color: var(--ink); }
+button.copy-btn.is-done { background: var(--mint); border-color: var(--mint-line); color: var(--green-dark); }
+.formpage { max-width: 44rem; margin: 0 auto; }
+.formpage > h1 { margin-bottom: 6px; }
+.formpage > .lead { margin-bottom: 20px; }
+.formpage .card { padding: 26px 30px; }
+.field { display: block; margin: 0 0 18px; }
+.field > .field-label { display: block; font-weight: 600; margin-bottom: 4px; }
+.field > .field-help { display: block; margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+.field > input:not([type="checkbox"]):not([type="radio"]), .field > select, .field > textarea { display: block; width: 100%; }
+.choice, .stack label.choice { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; margin: 0 0 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--green); background: var(--mint); }
+.choice input { margin-top: 3px; flex: none; }
+.choice-text { display: block; }
+.choice-title { display: block; font-weight: 600; }
+.choice-help { display: block; font-size: 14px; color: var(--ink-2); }
+fieldset.field { border: 0; padding: 0; min-width: 0; }
+fieldset.field > legend { font-weight: 600; margin-bottom: 8px; padding: 0; }
+.guide { max-width: 52rem; margin: 0 auto; }
+.guide-steps { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; counter-reset: guide; }
+.guide-steps li { counter-increment: guide; display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px; border-radius: 999px; background: var(--line-2); font-size: 14px; color: var(--ink-2); }
+.guide-steps li::before { content: counter(guide); width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; background: var(--surface); }
+.guide-steps li.done::before { content: '✓'; background: var(--neon); }
+.guide-steps li.current { background: var(--ink); color: #fff; }
+.guide-steps li.current::before { color: var(--ink); }
+.guide-card { border: 2px solid var(--neon); }
+.guide-card > h2 { margin-top: 0; }
+.guide-wait { display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
+.guide-wait::before { content: ''; width: 12px; height: 12px; flex: none; border-radius: 50%; background: var(--warn-dot); box-shadow: 0 0 0 4px rgba(194,116,0,.2); }
+.record { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 18px; margin: 14px 0; padding: 16px 18px; border-radius: 14px; background: var(--soft); border: 1px solid var(--line); }
+.record > dt { padding-top: 5px; font-weight: 600; color: var(--ink-2); }
+.record > dd { margin: 0; }
+.record > dd > .field-help { display: block; margin-top: 8px; }
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; counter-reset: check; }
+.checklist > li { counter-increment: check; display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); }
+.checklist > li::before { content: counter(check); flex: none; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; background: var(--line-2); }
+.checklist > li.done { background: var(--soft); }
+.checklist > li.done::before { content: '✓'; background: var(--neon); }
+.checklist > li.current { border: 2px solid var(--neon); }
+.checklist > li.current::before { background: var(--ink); color: #fff; }
+.checklist-text { flex: 1; min-width: 0; }
+.checklist-title { display: block; font-weight: 600; }
+.checklist-text p { margin: 4px 0 0; color: var(--ink-2); }
+.checklist .form-actions { margin-top: 10px; }
+.checklist .btn { height: auto; min-height: 42px; padding-block: 8px; white-space: normal; text-align: center; overflow-wrap: anywhere; }
+.internal-tag { background: var(--ink); color: #fff; }
+
 /* Narrower screens keep the bar on one line: the area icons go first, then the arrows. */
 /* The workspace switch shows the client's name only where the top bar has room for it; screen readers still read it. */
 @media (max-width: 1599px) { .chip .chip-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
@@ -720,7 +783,7 @@ progress { width: 100%; max-width: 40rem; height: 12px; accent-color: var(--gree
     .js-menubar.is-open .menubar-item { display: block; }
     .js-menubar.is-open .menu-panel { display: block; position: static; box-shadow: none; border: 0; padding: 0 0 6px 30px; min-width: 0; }
     .js-menubar.is-open .menu-panel::before, .js-menubar.is-open .menu-item.has-views::after { display: none; }
-    .js-menubar.is-open .menu-flyout, .js-menubar.is-open .menu-item > a > .icon { display: none !important; }
+    .js-menubar.is-open .menu-flyout, .js-menubar.is-open .menu-item.has-views > a > .icon:last-child { display: none !important; }
     .js-menubar.is-open .menubar-link .icon:last-child { display: none; }
 }
 @media (max-width: 760px) {
@@ -733,4 +796,6 @@ progress { width: 100%; max-width: 40rem; height: 12px; accent-color: var(--gree
     .front-hero h1 { font-size: 2.2rem; }
     dl { grid-template-columns: 1fr; }
     .kpi-value { font-size: 30px; }
+    .setup-step > summary { padding: 12px 16px; flex-wrap: wrap; }
+    .setup-body { padding: 0 16px 16px; }
 }

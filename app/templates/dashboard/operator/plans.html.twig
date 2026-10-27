@@ -1,0 +1,24 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Plans{% endblock %}
+{% block body %}
+<div class="pagehead">
+    <div>
+        <h1>Plans</h1>
+        <p class="lead">Each plan is a set of limits, defined once. A client on a plan has its limits, and changes with it.{{ ui.tip('Changing a plan changes the limits of every client on it, except a client whose limits were changed by hand on its own page: that one shows as Custom. Starter is the plan of public sign-ups; Standard has no limits beyond this installation\'s own. Neither can be deleted.') }}</p>
+    </div>
+    {% if is_granted('PLATFORM.CLIENT_LIMIT.MANAGE') %}<div class="actions"><a class="btn" href="{{ path('dashboard_operator_plan_new') }}">New plan</a></div>{% endif %}
+</div>
+<section class="card card-flush" aria-labelledby="plans-h">
+    <div class="card-head"><h2 id="plans-h">{{ plans|length }} plan{{ plans|length == 1 ? '' : 's' }}</h2></div>
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">Plan</th><th scope="col">Limits</th><th scope="col" class="num">Clients</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>{% for p in plans %}<tr>
+            <td><strong>{{ p.name }}</strong>{% if p.built_in %} <span class="tag">built in</span>{% endif %}</td>
+            <td>{% include 'dashboard/operator/_plan_summary.html.twig' with {limits: p.limits} only %}</td>
+            <td class="num">{{ p.clients }}</td>
+            <td class="nowrap">{% if is_granted('PLATFORM.CLIENT_LIMIT.MANAGE') %}<a href="{{ path('dashboard_operator_plan', {plan: p.id}) }}">Change</a>{% endif %}</td>
+        </tr>{% endfor %}</tbody>
+    </table></div>
+</section>
+{% endblock %}

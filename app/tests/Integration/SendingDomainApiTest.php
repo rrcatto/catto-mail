@@ -30,10 +30,14 @@ final class SendingDomainApiTest extends ApiTestCase
         $response = $this->api('GET', '/v1/sending-domains', $key);
         $body = $this->assertContract($response, 200, '/sending-domains', 'get');
         self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        $setup = static fn (object $d): string => 'https://smarthost.localhost/dashboard/c/'.$client->getId()->toRfc4122().'/sending-domains/'.$d->getId()->toRfc4122();
         self::assertSame([
-            ['id' => $pending->getId()->toRfc4122(), 'domain' => "a-$tag.example", 'status' => 'pending', 'dkim_status' => 'not_configured', 'verified_at' => null, 'can_send' => false],
-            ['id' => $verified->getId()->toRfc4122(), 'domain' => "b-$tag.example", 'status' => 'verified', 'dkim_status' => 'not_configured', 'can_send' => true],
-            ['id' => $disabled->getId()->toRfc4122(), 'domain' => "c-$tag.example", 'status' => 'disabled', 'dkim_status' => 'not_configured', 'can_send' => false],
+            ['id' => $pending->getId()->toRfc4122(), 'domain' => "a-$tag.example", 'status' => 'pending', 'dkim_status' => 'not_configured', 'verified_at' => null, 'can_send' => false,
+                'setup_url' => $setup($pending)],
+            ['id' => $verified->getId()->toRfc4122(), 'domain' => "b-$tag.example", 'status' => 'verified', 'dkim_status' => 'not_configured', 'can_send' => true,
+                'setup_url' => $setup($verified)],
+            ['id' => $disabled->getId()->toRfc4122(), 'domain' => "c-$tag.example", 'status' => 'disabled', 'dkim_status' => 'not_configured', 'can_send' => false,
+                'setup_url' => $setup($disabled)],
         ], array_map(static fn (array $d): array => null === $d['verified_at'] ? $d : array_diff_key($d, ['verified_at' => 1]), $body['data']),
             'by domain; only this client\'s');
         self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+02:00$/', $body['data'][1]['verified_at']);

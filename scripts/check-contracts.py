@@ -51,8 +51,8 @@ OTHER_DOCS = [
     ROOT / "docs/architecture/postfix-integration.md",
 ]
 
-EXPECTED_SPEC_VERSION = "2.12"
-EXPECTED_SPEC_DATE = "2026-10-11"
+EXPECTED_SPEC_VERSION = "2.13"
+EXPECTED_SPEC_DATE = "2026-10-27"
 # Decisions that must be incorporated across the revision history (all of D-01..D-38).
 EXPECTED_DECISIONS = {f"D-{n:02d}" for n in range(1, 39)}
 

@@ -122,7 +122,7 @@ final class AccessControlTest extends DashboardTestCase
         $this->signIn($operator);
         $email = 'new.'.bin2hex(random_bytes(4)).'@example.test';
         $operatorRole = $this->acl()->roleByKey('OPERATOR')->getId()->toRfc4122();
-        $r = $this->submit('/dashboard/operator/users', '/dashboard/operator/users', ['email' => $email, 'display_name' => 'New Person',
+        $r = $this->submit('/dashboard/operator/users/new', '/dashboard/operator/users', ['email' => $email, 'display_name' => 'New Person',
             'role_id' => '', 'client_id' => $client->getId()->toRfc4122(), 'membership_role' => 'member', 'send_link' => '1']);
         self::assertSame(302, $r->getStatusCode());
         self::assertCount(1, self::getMailerMessages(), 'a sign-in link was emailed to the new user');
@@ -158,7 +158,7 @@ final class AccessControlTest extends DashboardTestCase
     {
         $this->signIn($this->admin());
         $key = 'SUPPORT_'.strtoupper(bin2hex(random_bytes(3)));
-        $r = $this->submit('/dashboard/operator/roles', '/dashboard/operator/roles', ['role_key' => strtolower($key), 'name' => 'Support', 'description' => 'Helps clients']);
+        $r = $this->submit('/dashboard/operator/roles/new', '/dashboard/operator/roles', ['role_key' => strtolower($key), 'name' => 'Support', 'description' => 'Helps clients']);
         $location = (string) $r->headers->get('Location');
         self::assertMatchesRegularExpression('#/dashboard/operator/roles/[0-9a-f-]{36}$#', $location);
         $this->submit($location, $location, ['name' => 'Support desk', 'description' => 'Helps clients', 'permissions' => ['PLATFORM.CLIENT.VIEW', 'PLATFORM.USER.VIEW']]);

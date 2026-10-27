@@ -31,4 +31,7 @@ return [
     // Bootstrap 6 (owner decision 2026-10-10): the compiled CSS only, linked by templates/_site.html.twig
     // under styles/app.css; no Bootstrap JavaScript.
     'bootstrap/dist/css/bootstrap.min.css' => ['version' => '6.0.0-alpha.1', 'type' => 'css'],
+    // Bootstrap Icons (owner decision 2026-10-27): the icon font's stylesheet and its two font files
+    // (extra files), linked by templates/_site.html.twig; templates/dashboard/_icons.html.twig names them.
+    'bootstrap-icons/font/bootstrap-icons.min.css' => ['version' => '1.13.2', 'type' => 'css'],
 ];

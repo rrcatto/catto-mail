@@ -93,7 +93,7 @@ final class PublicSignUpTest extends DashboardTestCase
             self::assertSame(404, $this->request($method, $uri, ['organisation' => 'X Ltd', 'email' => self::email()])->getStatusCode(), "$method $uri");
         }
         $front = self::text($this->page('/'));
-        self::assertStringContainsString('There is no public sign-up.', $front);
+        self::assertStringContainsString('There is no public sign-up: accounts are opened by invitation.', $front);
         self::assertStringNotContainsString('/dashboard/sign-up', (string) $this->browser->getResponse()->getContent());
         self::assertStringNotContainsString('/dashboard/sign-up', (string) $this->page('/dashboard/login')->getContent());
         self::assertFalse($this->container()->get(PublicSignUp::class)->enabled());
@@ -155,9 +155,10 @@ final class PublicSignUpTest extends DashboardTestCase
             // Signed in, on the overview with the next steps.
             $overview = $this->crawler('/dashboard/c/'.$client['id']);
             self::assertStringContainsString('Welcome to Catto Mail', $overview->filter('.flash')->text());
-            $steps = $overview->filter('.get-started');
-            self::assertStringContainsString('0 of 3 done', $steps->text());
-            foreach (['sending-domains', 'api-keys', 'webhooks'] as $page) {
+            $steps = $overview->filter('.guide-card');
+            self::assertStringContainsString('1 of 4 done', $steps->text(), 'the policy was accepted on the way');
+            self::assertSame('Make your sending domain ready', $steps->filter('.checklist li.current .checklist-title')->text());
+            foreach (['sending-domains/new', 'api-keys', 'webhooks'] as $page) {
                 self::assertSame(1, $steps->filter('a[href="/dashboard/c/'.$client['id'].'/'.$page.'"]')->count(), $page);
             }
 
@@ -282,22 +283,29 @@ final class PublicSignUpTest extends DashboardTestCase
         });
     }
 
-    public function testStarterLimitsAreSettingsCappedByTheCeilings(): void
+    public function testStarterLimitsAreTheStarterPlanCappedByTheCeilings(): void
     {
-        $this->open(function (): void {
-            $limits = $this->container()->get(PublicSignUp::class)->starterLimits();
-            self::assertSame(['send_recipients_per_day' => 50, 'send_recipients_per_month' => 3000, 'validation_addresses_per_day' => 1000,
-                'max_api_keys' => 10, 'max_webhook_endpoints' => 2, 'max_sending_domains' => 2], $limits, 'API keys capped at APP_CLIENT_API_KEY_LIMIT (10)');
-            $email = self::email();
-            $this->submitForm('Capped Ltd', $email);
-            $this->confirm($this->emailedLink($email));
-            self::assertSame(['50', '10'], array_map('strval', array_values(Db::owner()->fetchAssociative(
-                'SELECT l.send_recipients_per_day, l.max_api_keys FROM client_limits l JOIN clients c ON c.id = l.client_id WHERE c.contact_email = ?', [$email]))));
-        }, ['APP_STARTER_SEND_RECIPIENTS_PER_DAY' => '50', 'APP_STARTER_API_KEY_LIMIT' => '50']);
+        $before = Db::owner()->fetchAssociative("SELECT send_recipients_per_day, max_api_keys FROM plans WHERE id = 'starter'");
+        // A value above an installation ceiling (a plan saved under a higher ceiling) is capped when a client gets it.
+        Db::owner()->executeStatement("UPDATE plans SET send_recipients_per_day = 50, max_api_keys = 50 WHERE id = 'starter'");
+        try {
+            $this->open(function (): void {
+                $limits = $this->container()->get(PublicSignUp::class)->starterLimits();
+                self::assertEquals(['send_recipients_per_day' => 50, 'send_recipients_per_month' => 3000, 'validation_addresses_per_day' => 1000,
+                    'max_api_keys' => 10, 'max_webhook_endpoints' => 2, 'max_sending_domains' => 2], array_filter($limits, static fn (?int $v): bool => null !== $v),
+                    'API keys capped at APP_CLIENT_API_KEY_LIMIT (10)');
+                $email = self::email();
+                $this->submitForm('Capped Ltd', $email);
+                $this->confirm($this->emailedLink($email));
+                self::assertSame(['50', '10', 'starter'], array_map('strval', array_values(Db::owner()->fetchAssociative(
+                    'SELECT l.send_recipients_per_day, l.max_api_keys, c.plan FROM client_limits l JOIN clients c ON c.id = l.client_id WHERE c.contact_email = ?', [$email]))));
+            });
+        } finally {
+            Db::owner()->executeStatement("UPDATE plans SET send_recipients_per_day = ?, max_api_keys = ? WHERE id = 'starter'", [$before['send_recipients_per_day'], $before['max_api_keys']]);
+        }
         $catalog = $this->container()->get(\App\System\SettingCatalog::class);
-        foreach (['APP_STARTER_SEND_RECIPIENTS_PER_DAY', 'APP_STARTER_SEND_RECIPIENTS_PER_MONTH', 'APP_STARTER_VALIDATION_ADDRESSES_PER_DAY',
-            'APP_STARTER_API_KEY_LIMIT', 'APP_STARTER_WEBHOOK_ENDPOINT_LIMIT', 'APP_STARTER_SENDING_DOMAIN_LIMIT'] as $name) {
-            self::assertTrue($catalog->has($name), "$name is editable in System › Settings");
+        foreach (['APP_STARTER_SEND_RECIPIENTS_PER_DAY', 'APP_STARTER_API_KEY_LIMIT'] as $name) {
+            self::assertFalse($catalog->has($name), "$name is gone: the Starter plan replaces it (Clients › Plans)");
         }
     }
 
@@ -309,11 +317,11 @@ final class PublicSignUpTest extends DashboardTestCase
             $this->confirm($this->emailedLink($email));
         });
         $this->signIn($this->newUser(true, null, ClientMembershipRole::Viewer));
-        $list = $this->crawler('/dashboard/operator/clients?origin=public_application&sort=created&dir=desc');
+        $list = $this->crawler('/dashboard/operator/clients/sign-ups');
         $row = $list->filter('tbody tr')->reduce(static fn ($tr): bool => str_contains($tr->text(), 'Visible Sign-up Ltd'));
         self::assertSame(1, $row->count());
         self::assertStringContainsString('sign-up', $row->filter('.tag')->text());
-        self::assertSame(0, $this->crawler('/dashboard/operator/clients?origin=operator')->filter('tbody tr')->reduce(
+        self::assertSame(0, $this->crawler('/dashboard/operator/clients/invited')->filter('tbody tr')->reduce(
             static fn ($tr): bool => str_contains($tr->text(), 'Visible Sign-up Ltd'))->count());
         $overview = $this->crawler('/dashboard/operator');
         self::assertMatchesRegularExpression('/new public sign-up/i', $overview->filter('#attention')->text());

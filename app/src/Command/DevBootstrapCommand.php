@@ -70,7 +70,7 @@ final class DevBootstrapCommand extends AdminCommand
         }
         $actor = $this->actor();
         $client = $this->em->getRepository(Client::class)->findOneBy(['companyName' => self::CLIENT_NAME])
-            ?? $this->accounts->createClient(self::CLIENT_NAME, 'dev-client@smarthost-dev.test', 'development', ClientStatus::Active, $actor);
+            ?? $this->accounts->createClient(self::CLIENT_NAME, 'dev-client@smarthost-dev.test', \App\Client\PlanCatalog::STANDARD, ClientStatus::Active, $actor);
 
         $domainName = (string) $input->getOption('domain');
         $domain = $this->em->getRepository(SendingDomain::class)->findOneBy(['client' => $client, 'domain' => strtolower($domainName)])

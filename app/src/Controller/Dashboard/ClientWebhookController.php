@@ -58,6 +58,16 @@ final class ClientWebhookController extends AbstractController
         ]);
     }
 
+    /** Adding an endpoint is its own page (owner decision 2026-10-27: no form beside the title). */
+    #[Route('/new', name: 'dashboard_client_webhook_new', methods: ['GET'])]
+    public function new(string $clientId): Response
+    {
+        $client = $this->access->client($clientId, ClientVoter::ADMIN);
+
+        return $this->render('dashboard/client/webhook_new.html.twig', ['client' => $client, 'section' => 'webhooks', 'event_types' => self::subscribable(),
+            'url' => '', 'chosen' => self::subscribable(), 'error' => null]);
+    }
+
     #[Route('', name: 'dashboard_client_webhook_create', methods: ['POST'])]
     public function create(string $clientId, Request $request): Response
     {
@@ -66,9 +76,9 @@ final class ClientWebhookController extends AbstractController
         try {
             [$endpoint, $secret] = $this->endpoints->create($client, trim($request->request->getString('url')), self::types($request), $this->actor());
         } catch (DomainRuleViolation $e) {
-            $this->addFlash('error', $e->getMessage());
-
-            return $this->redirectToRoute('dashboard_client_webhooks', ['clientId' => $clientId]);
+            return $this->render('dashboard/client/webhook_new.html.twig', ['client' => $client, 'section' => 'webhooks', 'event_types' => self::subscribable(),
+                'url' => mb_substr($request->request->getString('url'), 0, 2000), 'chosen' => self::types($request), 'error' => $e->getMessage()],
+                new Response('', Response::HTTP_UNPROCESSABLE_ENTITY));
         }
 
         return $this->secret($client, $endpoint, $secret, 'Webhook endpoint created');

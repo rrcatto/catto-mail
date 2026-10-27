@@ -14,6 +14,7 @@ use App\Dashboard\TrendCharts;
 use App\Domain\DomainRuleViolation;
 use App\Entity\Client;
 use App\Security\ClientVoter;
+use App\Suppression\AccountBlocks;
 use App\Suppression\GlobalSuppressionService;
 use App\Util\Clock;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -58,7 +59,7 @@ final class ClientDashboardController extends AbstractController
             'kpis' => TrendCharts::kpis($o['trends'], $period),
             'limits' => $this->account->limits($client), 'policy' => $this->account->policy($client),
             'may_admin' => $this->access->may(ClientVoter::ADMIN, $client),
-            'steps' => $this->account->nextSteps($clientId, 'production' === $this->smarthostEnv)]);
+            'steps' => $this->account->nextSteps($client, 'production' === $this->smarthostEnv)]);
     }
 
     #[Route('/validation-jobs', name: 'dashboard_client_validation_jobs', methods: ['GET'])]
@@ -165,7 +166,53 @@ final class ClientDashboardController extends AbstractController
             'blocked' => $this->read->suppressedMessages($clientId, '' === ($filters['recipient'] ?? '') ? null : $filters['recipient'], $blocked),
             'filters' => $filters, 'listing' => $listing,
             'may_lift' => $client->canSubmitGlobalSuppressions() && $client->mayCreateWork() && $this->access->may(ClientVoter::ADMIN, $client),
+            'may_block' => $this->access->may(ClientVoter::ADMIN, $client),
+            'may_lift_block' => AccountBlocks::mayLift($client) && $this->access->may(ClientVoter::ADMIN, $client),
         ]);
+    }
+
+    /** The account's own block of an address or a whole domain (2.13): its own page. */
+    #[Route('/suppressions/new', name: 'dashboard_client_block_new', methods: ['GET'])]
+    public function newBlock(string $clientId): Response
+    {
+        $client = $this->access->client($clientId, ClientVoter::ADMIN);
+
+        return $this->page('client/block_new.html.twig', $client, 'suppressions', ['value' => '', 'error' => null]);
+    }
+
+    #[Route('/suppressions/new', name: 'dashboard_client_block_add', methods: ['POST'])]
+    public function addBlock(string $clientId, Request $request, AccountBlocks $blocks): Response
+    {
+        $client = $this->access->client($clientId, ClientVoter::ADMIN);
+        $this->assertCsrf($request);
+        $input = mb_substr(trim($request->request->getString('value')), 0, 320);
+        try {
+            [$value, $scope] = AccountBlocks::parse($input);
+            [, $status] = $blocks->block($client, AuditActor::user($this->access->user()), $value, $scope);
+        } catch (DomainRuleViolation $e) {
+            return $this->page('client/block_new.html.twig', $client, 'suppressions', ['value' => $input, 'error' => $e->getMessage()])->setStatusCode(422);
+        }
+        $this->addFlash('success', 201 === $status
+            ? \sprintf('%s is blocked: this account sends nothing to %s.', $value, 'domain' === $scope->value ? 'any address at it' : 'it')
+            : \sprintf('%s was already blocked.', $value));
+
+        return $this->redirectToRoute('dashboard_client_suppressions', ['clientId' => $clientId]);
+    }
+
+    #[Route('/blocks/{id}/lift', name: 'dashboard_client_block_lift', methods: ['POST'])]
+    public function liftBlock(string $clientId, string $id, Request $request, AccountBlocks $blocks): RedirectResponse
+    {
+        $client = $this->access->client($clientId, ClientVoter::ADMIN);
+        $this->assertCsrf($request);
+        $block = $blocks->find($client, $id) ?? throw new NotFoundHttpException('Not found.');
+        try {
+            $blocks->lift($client, AuditActor::user($this->access->user()), $block);
+            $this->addFlash('success', \sprintf('The block of %s was lifted. Any other suppression of it still applies.', $block->getAddressOrDomain()));
+        } catch (DomainRuleViolation $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToRoute('dashboard_client_suppressions', ['clientId' => $clientId]);
     }
 
     /** Lifts this client's own recipient global opt-out (Phase 5 rules: capability, active/throttled client). */
@@ -186,7 +233,7 @@ final class ClientDashboardController extends AbstractController
     }
 
     #[Route('/usage', name: 'dashboard_client_usage', methods: ['GET'])]
-    public function usage(string $clientId, Request $request, \App\Usage\UsageReporting $reporting): Response
+    public function usage(string $clientId, Request $request, \App\Usage\UsageReporting $reporting, \App\Client\PlanCatalog $plans): Response
     {
         $client = $this->access->client($clientId);
         $filters = self::filters($request, ['type']);
@@ -206,7 +253,8 @@ final class ClientDashboardController extends AbstractController
             'usage' => $this->read->usage($clientId, '' === ($filters['type'] ?? '') ? null : $filters['type'], $listing),
             'filters' => $filters, 'listing' => $listing, 'periods' => $this->account->usagePeriods($clientId), 'custom' => $custom,
             'range' => ['from' => $request->query->getString('from'), 'to' => $request->query->getString('to')],
-            'statements' => $this->account->statements($clientId, false), 'limits' => $this->account->limits($client)]);
+            'statements' => $this->account->statements($clientId, false), 'limits' => $this->account->limits($client),
+            'plan' => $plans->name($client->getPlan()), 'custom_limits' => $plans->isCustom($client)]);
     }
 
     /** @param array<string, mixed> $vars */

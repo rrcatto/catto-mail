@@ -35,7 +35,7 @@ def validator_conninfo() -> str:
 def make_job(addresses: list[str], status: str = "active") -> tuple[str, str]:
     client, job = str(uuid.uuid7()), str(uuid.uuid7())
     with owner() as c:
-        c.execute("INSERT INTO clients (id, company_name, contact_email, plan, status) VALUES (%s, 'py-test', 'p@x.test', 'test', %s)",
+        c.execute("INSERT INTO clients (id, company_name, contact_email, plan, status) VALUES (%s, 'py-test', 'p@x.test', 'standard', %s)",
                   (client, status))
         c.execute("INSERT INTO validation_jobs (id, client_id, idempotency_key, request_hash, total_addresses) VALUES (%s, %s, %s, 'h', %s)",
                   (job, client, str(uuid.uuid7()), len(addresses)))

@@ -11,7 +11,7 @@ The private key stays inside the OpenDKIM container; you publish the public key 
 </section>
 <section class="card card-flush" aria-labelledby="dkim-dom-h">
 <div class="card-head"><div><h2 id="dkim-dom-h">Sending domains in the database</h2>
-<p class="muted small">Client admins set up their own domains' keys in the client workspace (Settings › Sending domains): the host agent generates the key when the domain is verified and activates it when DNS shows the record. Use the form below for the sign-in mail sender's domain and for domains you manage by hand.</p></div></div>
+<p class="muted small">Clients set up their own domains' keys in their account's dashboard (Settings › Sending domains): the host agent generates the key when the domain is verified and activates it when DNS shows the record. Use the form below for the sign-in mail sender's domain and for domains you manage by hand.</p></div></div>
 <div class="scroll"><table class="dense"><thead><tr><th scope="col">Domain</th><th scope="col">Client</th><th scope="col">DKIM status</th><th scope="col">Selector</th></tr></thead>
 <tbody>{% for d in domains ?? [] %}<tr><td>{{ d.domain }}</td><td>{{ d.company_name }}</td><td>{{ d.dkim_status }}</td><td>{{ d.dkim_selector ?? '—' }}</td></tr>{% else %}<tr><td colspan="4"><span class="muted">No verified sending domain yet: a client admin adds its domain in the client workspace (or you run <code>smarthost:domain:add</code>) and proves it with a TXT record.</span></td></tr>{% endfor %}</tbody></table></div>
 </section>

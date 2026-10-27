@@ -3,10 +3,10 @@
 {% block body %}
 <section class="narrow" aria-labelledby="connect-h">
     <h1 id="connect-h">Connect {{ connect.applicationName }} to {{ site_name() }}</h1>
-    <p><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through this {{ site_name() }} installation with your account.</p>
+    <p><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through {{ site_name() }} with your account.</p>
     {% include 'dashboard/connect/_request.html.twig' %}
-    <p>Sign in to choose the workspace to connect. You come back to this step afterwards, and nothing is connected before you approve it.</p>
+    <p>Sign in to choose your account. There is no password: a link is emailed to you, and it brings you back to this step. Nothing is connected until you approve it.</p>
     <p class="form-actions"><a class="btn" href="{{ path('dashboard_login', {return_to: return_to}) }}">Sign in</a>{% if public_sign_up_open() %} <a class="btn btn-secondary" href="{{ path('dashboard_sign_up', {return_to: return_to}) }}">Create an account</a>{% endif %}</p>
-    <p class="muted small">{% if public_sign_up_open() %}No account yet? Creating one takes your organisation's name and your email address, and it starts with low sending limits.{% else %}Accounts on this installation are created by its operator.{% endif %} If you did not start this from {{ connect.applicationName }}, close this page.</p>
+    <p class="muted small">{% if public_sign_up_open() %}No account yet? Creating one takes your organisation's name and your email address, and it starts with low sending limits.{% else %}No account yet? Accounts on this installation are opened by invitation: open the invitation link you were sent, then start again from {{ connect.applicationName }}.{% endif %} If you did not start this from {{ connect.applicationName }}, close this page.</p>
 </section>
 {% endblock %}

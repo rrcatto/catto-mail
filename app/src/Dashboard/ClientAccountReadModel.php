@@ -36,28 +36,47 @@ final class ClientAccountReadModel
     }
 
     /**
+     * The account's start page (owner decision 2026-10-27): the steps to its first message, each
+     * done or not. The policy step only when the account must accept the version in force; an
+     * application counts as connected through Connect, or as an API key and a webhook made by
+     * hand; a test message is any send job. domain_next is the domain whose DNS steps come next.
+     *
+     * @return array{policy: ?bool, domain: bool, domain_next: ?array{id: string, domain: string}, connected: bool, by_hand: bool, sent: bool, done: bool}
+     */
+    public function nextSteps(Client $client, bool $production): array
+    {
+        $clientId = $client->getId()->toRfc4122();
+        $r = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT EXISTS (SELECT 1 FROM sending_domains WHERE client_id = :c AND status = 'verified' AND (dkim_status = 'active' OR :prod = 0)) AS domain,
+                   EXISTS (SELECT 1 FROM application_connections WHERE client_id = :c AND status = 'active') AS connected,
+                   EXISTS (SELECT 1 FROM api_keys WHERE client_id = :c AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()))
+                   AND EXISTS (SELECT 1 FROM webhook_endpoints WHERE client_id = :c AND status = 'enabled') AS by_hand,
+                   EXISTS (SELECT 1 FROM send_jobs WHERE client_id = :c) AS sent
+            SQL, ['c' => $clientId, 'prod' => $production ? 1 : 0], ['prod' => \Doctrine\DBAL\ParameterType::INTEGER]) ?: [];
+        $next = $this->connection->fetchAssociative(<<<'SQL'
+            SELECT id::text AS id, domain FROM sending_domains
+             WHERE client_id = ? AND status <> 'disabled' AND NOT (status = 'verified' AND dkim_status = 'active')
+             ORDER BY created_at, id LIMIT 1
+            SQL, [$clientId]);
+        $policy = $this->lifecycle->policyStatus($client);
+        $steps = [
+            'policy' => null !== $policy['version_in_force'] && $policy['required'] ? $policy['accepted'] : null,
+            'domain' => (bool) ($r['domain'] ?? false),
+            'domain_next' => false === $next ? null : ['id' => (string) $next['id'], 'domain' => (string) $next['domain']],
+            'connected' => (bool) ($r['connected'] ?? false) || (bool) ($r['by_hand'] ?? false),
+            'by_hand' => (bool) ($r['by_hand'] ?? false),
+            'sent' => (bool) ($r['sent'] ?? false),
+        ];
+        $steps['done'] = false !== $steps['policy'] && $steps['domain'] && $steps['connected'] && $steps['sent'];
+
+        return $steps;
+    }
+
+    /**
      * Limits with their source, and the quotas with the current period's admitted work.
      *
      * @return array{limits: list<array<string, mixed>>, quotas: list<array<string, mixed>>}
      */
-    /**
-     * The first steps of a new client (shown on its overview until all are done): a sending domain
-     * that can send (verified, and in production with an active DKIM key), a usable API key, an
-     * enabled webhook endpoint.
-     *
-     * @return array{domain: bool, api_key: bool, webhook: bool}
-     */
-    public function nextSteps(string $clientId, bool $production): array
-    {
-        $r = $this->connection->fetchAssociative(<<<'SQL'
-            SELECT EXISTS (SELECT 1 FROM sending_domains WHERE client_id = :c AND status = 'verified' AND (dkim_status = 'active' OR :prod = 0)) AS domain,
-                   EXISTS (SELECT 1 FROM api_keys WHERE client_id = :c AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS api_key,
-                   EXISTS (SELECT 1 FROM webhook_endpoints WHERE client_id = :c AND status = 'enabled') AS webhook
-            SQL, ['c' => $clientId, 'prod' => $production ? 1 : 0], ['prod' => \Doctrine\DBAL\ParameterType::INTEGER]) ?: [];
-
-        return ['domain' => (bool) ($r['domain'] ?? false), 'api_key' => (bool) ($r['api_key'] ?? false), 'webhook' => (bool) ($r['webhook'] ?? false)];
-    }
-
     public function limits(Client $client): array
     {
         $own = $this->limits->clientLimits($client);

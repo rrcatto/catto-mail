@@ -1,0 +1,31 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Add a user{% endblock %}
+{% block crumb_tail %}Add a user{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Add a user</h1>
+    <p class="lead">Someone who signs in to this dashboard. They sign in with emailed links; there is no password. To open an account for an organisation, use <a href="{{ path('dashboard_operator_client_new') }}">New client</a> instead.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_operator_user_create') }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Email address</span>
+            <span class="field-help">Their sign-in address.</span>
+            <input type="email" name="email" value="{{ values.email }}" required maxlength="320" autocomplete="off" autofocus></label>
+        <label class="field"><span class="field-label">Name <span class="muted">(optional)</span></span>
+            <span class="field-help">Shown instead of the address in lists and the audit log.</span>
+            <input type="text" name="display_name" value="{{ values.display_name }}" maxlength="200"></label>
+        <label class="field"><span class="field-label">Role on this installation <span class="muted">(optional)</span></span>
+            <span class="field-help">What they may do in the operator console. None: they see only the accounts they belong to.</span>
+            <select name="role_id"><option value="">None</option>{% for r in roles %}{% if r.roleKey != 'ADMIN' or is_granted('SYSTEM.ROLE.MANAGE') %}<option value="{{ r.id.toRfc4122 }}"{% if values.role_id == r.id.toRfc4122 %} selected{% endif %}>{{ r.name }} ({{ r.roleKey }})</option>{% endif %}{% endfor %}</select></label>
+        <label class="field"><span class="field-label">Account <span class="muted">(optional)</span></span>
+            <span class="field-help">An organisation's account they belong to, and their role in it below.</span>
+            <select name="client_id"><option value="">None</option>{% for c in clients %}<option value="{{ c.id }}"{% if values.client_id == c.id %} selected{% endif %}>{{ c.company_name }}</option>{% endfor %}</select></label>
+        <label class="field"><span class="field-label">Their role in that account</span>
+            <span class="field-help">Admin: everything, including connecting applications and adding domains. Member: sends and checks DNS. Viewer: reads only.</span>
+            <select name="membership_role">{% for m in membership_roles %}<option value="{{ m.value }}"{% if values.membership_role == m.value %} selected{% endif %}>{{ m.value|capitalize }}</option>{% endfor %}</select></label>
+        <label class="checkline field"><input type="checkbox" name="send_link" value="1"{% if values.send_link %} checked{% endif %}> Email them a sign-in link now</label>
+        <div class="form-actions"><button type="submit">Add the user</button> <a class="btn btn-secondary" href="{{ path('dashboard_operator_users') }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

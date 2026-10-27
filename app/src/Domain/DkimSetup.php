@@ -37,6 +37,8 @@ use Symfony\Component\Uid\Uuid;
  *   advance     the host agent's periodic call (`smarthost:system:agent domains`): checkDns for
  *               every domain waiting for its record, so activation follows publication.
  *
+ * When a key becomes active the account's admins are emailed (DomainReadyMail, 2026-10-27).
+ *
  * Every request names its sending domain (params.sending_domain_id), so an outcome only ever
  * changes that client's domain. Requests are audited when they are made, results as the host
  * agent (sending_domain.dkim_changed).
@@ -58,6 +60,7 @@ final class DkimSetup
         private readonly TxtResolver $resolver,
         private readonly AuditLogger $audit,
         private readonly string $bounceDomain,
+        private readonly DomainReadyMail $readyMail,
     ) {
     }
 
@@ -106,15 +109,15 @@ final class DkimSetup
             throw new DomainRuleViolation(\sprintf('%s is not waiting for a DKIM record.', $domain->getDomain()));
         }
         if ($this->activationWaiting($domain)) {
-            return [true, \sprintf('Activation of %s is already requested; the host agent carries it out within a minute.', $domain->getDomain())];
+            return [true, \sprintf('Signing is already being switched on for %s; it takes a minute or two.', $domain->getDomain())];
         }
         $this->assertNothingWaiting($domain);
         $name = self::dkimName($selector, $domain->getDomain());
         try {
             $published = self::publishedKey($this->resolver->lookup($name));
             $error = match (true) {
-                null === $published => "No DKIM record found at $name yet.",
-                $published !== $key => "The DKIM record at $name does not match this domain's key; publish the value shown here.",
+                null === $published => "No signing key record found at $name yet.",
+                $published !== $key => "The record at $name does not match this domain's signing key; publish the value shown here.",
                 default => null,
             };
         } catch (DnsLookupFailed $e) {
@@ -141,7 +144,7 @@ final class DkimSetup
                 'sending_domain_id' => $domain->getId()->toRfc4122()], $user, $this->note($domain), AuditActor::system('dkim-setup'));
         });
 
-        return [true, \sprintf('The DKIM record of %s is published. The host agent activates the key within a minute; then the domain is active.', $domain->getDomain())];
+        return [true, \sprintf('The signing key of %s is published. Signing is being switched on; it takes a minute or two.', $domain->getDomain())];
     }
 
     /**
@@ -167,6 +170,7 @@ final class DkimSetup
             $this->domains->setDkim($domain, DkimStatus::PendingDns, $selector, AuditActor::system(self::AGENT), $key);
         } elseif ('dkim.activate' === $action && DkimStatus::PendingDns === $domain->getDkimStatus() && $selector === $domain->getDkimSelector()) {
             $this->domains->setDkim($domain, DkimStatus::Active, $selector, AuditActor::system(self::AGENT));
+            $this->readyMail->send($domain);
         }
     }
 
@@ -244,9 +248,29 @@ final class DkimSetup
         return [
             'txt' => ['name' => SendingDomainService::TXT_PREFIX.$domain, 'value' => SendingDomainService::TXT_VALUE_PREFIX.$token],
             'dkim' => $dkim,
-            'dmarc' => ['name' => '_dmarc.'.$domain, 'value' => "v=DMARC1; p=none; rua=mailto:dmarc-reports@$domain"],
+            // A policy that only reports; no report address is made up for the client (2026-10-27).
+            'dmarc' => ['name' => '_dmarc.'.$domain, 'value' => 'v=DMARC1; p=none'],
             'bounce_domain' => $this->bounceDomain,
         ];
+    }
+
+    /**
+     * The domain's DMARC record when it already has one (a TXT record at _dmarc.<domain> that
+     * starts with v=DMARC1), so the page can say "keep yours"; null when there is none or DNS
+     * did not answer.
+     */
+    public function existingDmarc(string $domain): ?string
+    {
+        try {
+            foreach ($this->resolver->lookup('_dmarc.'.$domain) as $record) {
+                if (1 === preg_match('/^\s*v\s*=\s*DMARC1\s*(;|$)/i', $record)) {
+                    return trim($record);
+                }
+            }
+        } catch (DnsLookupFailed) {
+        }
+
+        return null;
     }
 
     public static function dkimName(string $selector, string $domain): string

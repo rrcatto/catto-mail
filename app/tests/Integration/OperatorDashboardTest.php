@@ -100,9 +100,17 @@ final class OperatorDashboardTest extends DashboardTestCase
         self::assertSame('Mail flow', $mail->filter('.menubar-link[aria-current] .menubar-label')->text());
         self::assertSame('Unmatched bounces', $mail->filter('.menu-panel a[aria-current] .menu-label')->text());
         self::assertSame(['Open', 'Match requested', 'Matched', 'Dismissed'], $area->filter('.menu-item.has-views')->eq(2)->filter('.menu-flyout .menu-label')->each(static fn ($n): string => $n->text()));
-        self::assertStringContainsString('Mail flow › Unmatched bounces', preg_replace('/\s+/', ' ', $mail->filter('nav.crumbs')->text()));
+        self::assertSame(0, $mail->filter('nav.crumbs')->count(), 'a list page says where it is once, in its title (2.13)');
         $system = $mail->filter('.menubar-item')->reduce(static fn ($n): bool => 'System' === $n->filter('.menubar-label')->text());
         self::assertContains('Sign-in emails', $system->filter('.menu-flyout .menu-label')->each(static fn ($n): string => $n->text()), 'the audit log\'s views are in the menu');
+        // Every area, page and view of the menu bar has its Bootstrap Icons icon (owner decision 2026-10-27).
+        foreach (['.menubar-link', '.menu-panel > .menu-item > a', '.menu-flyout a'] as $selector) {
+            $links = $mail->filter($selector);
+            self::assertGreaterThan(0, $links->count(), $selector);
+            $links->each(static fn ($n) => self::assertSame(1, $n->filter('i.bi.icon[aria-hidden="true"]')->reduce(
+                static fn ($i): bool => !str_contains((string) $i->attr('class'), 'bi-chevron'))->count(), $selector.': '.$n->text()));
+        }
+        self::assertSame(1, $mail->filter('link[rel="stylesheet"][href*="bootstrap-icons"]')->count(), 'the icon font\'s stylesheet');
         $clients = $this->crawler('/dashboard/operator/clients?q=Operator%20View');
         self::assertSame(1, $clients->filter('tbody tr')->count());
         $detail = self::text($this->page('/dashboard/operator/clients/'.$client->getId()->toRfc4122().'?tab=access'));

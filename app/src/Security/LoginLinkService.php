@@ -43,6 +43,10 @@ use Symfony\Component\Uid\Uuid;
  * claimSignUpLink() uses it once (the confirming POST, inside its transaction). A sign-up link
  * never signs anyone in, and a sign-in link is never a sign-up.
  *
+ * An operator's invitation (owner decision 2026-10-27, App\Client\Invitations) uses sign-up links
+ * too, naming the invitation (invitation_id) and leading to <base>/dashboard/invitation/confirm.
+ * welcome() emails a new account's manager an ordinary sign-in link that leads to the account.
+ *
  * Both kinds of link carry an optional return path (a /dashboard path, safeReturnPath()): where
  * the person was going. The connect page (specification 2.12) uses it, so that signing in or
  * signing up from there leads back to the connect step, also when the link is opened in another
@@ -225,7 +229,7 @@ final class LoginLinkService
      *
      * @return bool whether a link was sent (never shown to the requester)
      */
-    public function requestSignUp(string $email, string $organisation, ?string $clientIp, ?string $returnPath = null): bool
+    public function requestSignUp(string $email, string $organisation, ?string $clientIp, ?string $returnPath = null, ?string $invitationId = null): bool
     {
         $since = Clock::now()->modify('-'.self::SIGN_UP_WINDOW_SECONDS.' seconds')->format('Y-m-d H:i:s.uP');
         if ((int) $this->connection->fetchOne("SELECT count(*) FROM auth_login_tokens WHERE lower(email) = lower(?) AND purpose = 'sign_up' AND created_at > ?",
@@ -241,8 +245,9 @@ final class LoginLinkService
             'id' => Uuid::v7()->toRfc4122(), 'email' => $email, 'user_id' => null, 'token_hash' => $hash, 'return_path' => self::safeReturnPath($returnPath),
             'requested_ip_hash' => hash_hmac('sha256', (string) $clientIp, $this->secret), 'purpose' => 'sign_up', 'organisation_name' => $organisation,
             'created_at' => $now->format('Y-m-d H:i:s.uP'), 'expires_at' => $now->modify('+'.$this->ttlSeconds.' seconds')->format('Y-m-d H:i:s.uP'),
+            'invitation_id' => $invitationId,
         ]);
-        $url = rtrim($this->publicBaseUrl, '/').'/dashboard/sign-up/verify?token='.$token;
+        $url = rtrim($this->publicBaseUrl, '/').(null === $invitationId ? '/dashboard/sign-up/verify' : '/dashboard/invitation/confirm').'?token='.$token;
         try {
             $this->mailer->send((new TemplatedEmail())
                 ->from(new Address($this->mailFrom, $this->installation->siteName()))
@@ -250,14 +255,14 @@ final class LoginLinkService
                 ->subject('Confirm your '.$this->installation->siteName().' sign-up')
                 ->textTemplate('email/sign_up_link.txt.twig')
                 ->htmlTemplate('email/sign_up_link.html.twig')
-                ->context(['url' => $url, 'minutes' => intdiv($this->ttlSeconds, 60), 'organisation' => $organisation]));
+                ->context(['url' => $url, 'minutes' => intdiv($this->ttlSeconds, 60), 'organisation' => $organisation, 'invitation' => null !== $invitationId]));
         } catch (\Throwable $e) {
             $this->connection->delete('auth_login_tokens', ['token_hash' => $hash]);
             $this->logger->error('The sign-up email could not be sent.', ['exception' => $e::class]);
             throw new \RuntimeException('The confirmation email could not be sent. Please try again shortly.', 0, $e);
         }
-        $this->audit->record(AuditActor::system('public-sign-up'), 'auth.sign_up_link_requested', 'user', null,
-            ['email_hash' => hash('sha256', strtolower($email))]);
+        $this->audit->record(AuditActor::system(null === $invitationId ? 'public-sign-up' : 'invitation'), 'auth.sign_up_link_requested', 'user', null,
+            ['email_hash' => hash('sha256', strtolower($email))] + (null === $invitationId ? [] : ['invitation_id' => $invitationId]));
 
         return true;
     }
@@ -265,7 +270,7 @@ final class LoginLinkService
     /**
      * A valid sign-up link, read without using it (the confirmation page).
      *
-     * @return array{email: string, organisation: string, return_path: ?string}|null
+     * @return array{email: string, organisation: string, return_path: ?string, invitation_id: ?string}|null
      */
     public function signUpLink(string $token): ?array
     {
@@ -273,19 +278,18 @@ final class LoginLinkService
             return null;
         }
         $row = $this->connection->fetchAssociative(<<<'SQL'
-            SELECT email, organisation_name, return_path FROM auth_login_tokens
+            SELECT email, organisation_name, return_path, invitation_id::text AS invitation_id FROM auth_login_tokens
              WHERE token_hash = ? AND purpose = 'sign_up' AND used_at IS NULL AND expires_at > now()
             SQL, [hash('sha256', $token)]);
 
-        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name'],
-            'return_path' => self::safeReturnPath($row['return_path'] ?? null)];
+        return false === $row ? null : self::signUpRow($row);
     }
 
     /**
      * Uses a sign-up link once (one atomic UPDATE ... RETURNING; call it inside the transaction
      * that creates the account, so a failure leaves the link usable).
      *
-     * @return array{email: string, organisation: string, return_path: ?string}|null
+     * @return array{email: string, organisation: string, return_path: ?string, invitation_id: ?string}|null
      */
     public function claimSignUpLink(string $token): ?array
     {
@@ -295,10 +299,54 @@ final class LoginLinkService
         $row = $this->connection->fetchAssociative(<<<'SQL'
             UPDATE auth_login_tokens SET used_at = now()
              WHERE token_hash = ? AND purpose = 'sign_up' AND used_at IS NULL AND expires_at > now()
-            RETURNING email, organisation_name, return_path
+            RETURNING email, organisation_name, return_path, invitation_id::text AS invitation_id
             SQL, [hash('sha256', $token)]);
 
-        return false === $row ? null : ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name'],
-            'return_path' => self::safeReturnPath($row['return_path'] ?? null)];
+        return false === $row ? null : self::signUpRow($row);
+    }
+
+    /**
+     * Emails the manager of a new account a sign-in link that leads to the account (an operator
+     * opened it for them: App\Client\AccountOpening). An ordinary single-use sign-in link with the
+     * usual lifetime; the email says how to ask for a new one.
+     */
+    public function welcome(User $user, string $organisation, string $returnPath, bool $mustAccept): void
+    {
+        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $hash = hash('sha256', $token);
+        $now = Clock::now();
+        $this->connection->insert('auth_login_tokens', [
+            'id' => Uuid::v7()->toRfc4122(), 'email' => $user->getEmail(), 'user_id' => $user->getId()->toRfc4122(), 'token_hash' => $hash,
+            'return_path' => self::safeReturnPath($returnPath), 'requested_ip_hash' => hash_hmac('sha256', 'welcome', $this->secret),
+            'created_at' => $now->format('Y-m-d H:i:s.uP'), 'expires_at' => $now->modify('+'.$this->ttlSeconds.' seconds')->format('Y-m-d H:i:s.uP'),
+        ]);
+        $base = rtrim($this->publicBaseUrl, '/');
+        try {
+            $this->mailer->send((new TemplatedEmail())
+                ->from(new Address($this->mailFrom, $this->installation->siteName()))
+                ->to(new Address($user->getEmail(), (string) $user->getDisplayName()))
+                ->subject('Your '.$this->installation->siteName().' account for '.$organisation)
+                ->textTemplate('email/welcome.txt.twig')
+                ->htmlTemplate('email/welcome.html.twig')
+                ->context(['url' => $base.'/dashboard/login/verify?token='.$token, 'sign_in' => $base.'/dashboard/login',
+                    'minutes' => intdiv($this->ttlSeconds, 60), 'organisation' => $organisation, 'must_accept' => $mustAccept]));
+        } catch (\Throwable $e) {
+            $this->connection->delete('auth_login_tokens', ['token_hash' => $hash]);
+            $this->logger->error('The welcome email could not be sent.', ['exception' => $e::class]);
+            throw new \RuntimeException('The account was opened, but the email to its manager could not be sent: they can sign in at the dashboard with their address.', 0, $e);
+        }
+        $this->audit->record(AuditActor::system('account-opening'), 'auth.login_link_requested', 'user', $user->getId()->toRfc4122(),
+            ['email_hash' => hash('sha256', strtolower($user->getEmail())), 'welcome' => true]);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @return array{email: string, organisation: string, return_path: ?string, invitation_id: ?string}
+     */
+    private static function signUpRow(array $row): array
+    {
+        return ['email' => (string) $row['email'], 'organisation' => (string) $row['organisation_name'],
+            'return_path' => self::safeReturnPath($row['return_path'] ?? null), 'invitation_id' => null === $row['invitation_id'] ? null : (string) $row['invitation_id']];
     }
 }

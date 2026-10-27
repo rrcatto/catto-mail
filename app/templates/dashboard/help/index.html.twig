@@ -2,7 +2,7 @@
 {% import 'dashboard/_icons.html.twig' as icon %}
 {% block title %}Help{% endblock %}
 {% block body %}
-{% set icons = {'Start here': 'overview', 'Validation and lists': 'check', 'Sending and results': 'send', 'Mail identity (DNS)': 'mail', 'The components in depth': 'system', 'Clients and integration': 'clients', 'Operations': 'settings'} %}
+{% set icons = constant('App\\Dashboard\\Navigation::HELP_GROUP_ICONS') %}
 <div class="pagehead">
     <div>
         <h1>Help and tutorials</h1>

@@ -1,21 +1,22 @@
 {% extends 'dashboard/help/_topic.html.twig' %}
 {% block content %}
-<p>A <strong>client</strong> is an application that uses catto-mail, for example your mailing-list application. Each client has its own data, limits, sending domains, API keys and webhook endpoints; clients never see each other's data.</p>
-<ol>
-<li>Create the client (Clients › Clients, or <em>New client</em> on the Overview). It starts <em>pending approval</em>; approve it with a reason (or create it active for your own internal application). When public sign-up is turned on (<code>APP_PUBLIC_ONBOARDING_ENABLED</code>), people also open accounts themselves: those clients are active at once in the starter tier, and you are emailed about each one (Clients › Clients › <em>Public sign-ups</em>).</li>
-<li>Give it limits if you want (sends per day, recipients per job…).</li>
-<li>Create an <strong>API key</strong> (the client's admins can do it on their API keys page). The key is shown <strong>once</strong>; store it in the client application's secret configuration. Give keys a name and preferably an expiry; rotate by creating a new key, deploying it, then revoking the old one.</li>
-<li>The client's admin adds and verifies its sending domain under Settings › Sending domains; the host agent generates and activates its DKIM key (see <a href="{{ path('dashboard_operator_help_topic', {topic: 'sending-domains'}) }}">Sending domains</a>).</li>
-<li>The client application calls the API with <code>Authorization: Bearer &lt;key&gt;</code>. The full contract and the integration guide are public at <a href="/docs/api">/docs/api</a>.</li>
-</ol>
-<h2>Connecting an application without copying a key</h2>
-<p>An application that supports it does steps 3 and the webhook endpoint by itself. It sends a client admin to this installation's connect page (<code>/dashboard/connect</code>), which shows the application's name, the site it returns to and the address its webhooks go to. The admin signs in (or, while public sign-up is on, opens an account there and then), chooses the workspace and presses <em>Connect</em>. The application then collects its API key and its webhook signing secret itself, with a code that works once, for 10 minutes.</p>
+<p>A <strong>client</strong> is an organisation that sends through catto-mail with its applications, for example a mailing-list site. Its people call it their <strong>account</strong>. Each client has its own data, plan and limits, sending domains, API keys and webhook endpoints; clients never see each other's data.</p>
+<h2>Opening an account</h2>
 <ul>
-<li>Only a client admin can connect an application, and only to an <em>active</em> client with room under its limits on usable API keys and webhook endpoints. If there is no room, the page says so and nothing is created.</li>
-<li>The API key (named after the application) and the webhook endpoint appear when the application collects its credentials, not at the approval. An approval that is never collected leaves nothing behind.</li>
-<li>The client workspace lists the connections under Settings › Connected applications. <em>Disconnect</em> there revokes the key and removes the endpoint; the application can also disconnect itself.</li>
-<li>Connecting the same application again (the same webhook address) replaces its earlier connection.</li>
+<li><strong>New client</strong> (Clients › New client): the organisation's name, the email address of the person who manages it, a plan and the service policy. The manager becomes the account's admin and is emailed a link to sign in. <em>Exempt</em> from the policy: the account is active at once. <em>Must accept</em>: it opens by itself when the manager accepts the policy on their first visit. You approve nothing afterwards.</li>
+<li><strong>Invitations</strong> (Clients › Invitations › <em>Invite someone</em>): you get a link to send, shown once, working once, for 7 days. Whoever opens it names their organisation, confirms their address and opens the account on the plan you chose. You are emailed when one is used, and you can withdraw an unused one. Invitations work while the public sign-up is closed.</li>
+<li><strong>Public sign-up</strong>, only when <code>APP_PUBLIC_ONBOARDING_ENABLED</code> is on: people open accounts themselves on the Starter plan, and you are emailed about each one (Clients › Clients › <em>Public sign-ups</em>).</li>
+</ul>
+<p><strong>Plans</strong> (Clients › Plans) are sets of limits defined once: Starter, Standard (no limits beyond this installation's own) and any you add. A client on a plan has its limits and changes with it. Change one client's limits on its page and it shows as <em>Custom</em>; <em>Put back on this plan</em> undoes that.</p>
+<h2>Connecting an application</h2>
+<p>An application that supports it connects with one approval, without anyone copying a key. It sends the account's admin to this installation's connect page (<code>/dashboard/connect</code>), which shows the application's name, its address, where it is told what happened and, when it says so, the domain it sends from. The admin signs in, chooses the account and presses <em>Connect</em>; the application then collects its API key and its webhook signing secret itself, with a code that works once, for 10 minutes.</p>
+<ul>
+<li>The page never dead-ends: someone signed in without an account opens one there with the organisation's name (while public sign-up is on, or when they are an operator); anyone else is told that accounts are opened by invitation.</li>
+<li>When the application names its sending domain, connecting adds it to the account (within its limit), and the application can link the admin straight to that domain's steps.</li>
+<li>Only an admin of the account can connect an application, and only to an <em>active</em> account with room under its limits on usable API keys and webhook endpoints. If there is no room, the page says so and nothing is created.</li>
+<li>The account lists its connections under Settings › Connected applications. <em>Disconnect</em> there revokes the key and removes the endpoint; the application can also disconnect itself. Connecting the same application again replaces its earlier connection.</li>
 <li>Connecting never lets a client report recipients' global opt-outs: you grant that yourself.</li>
 </ul>
+<p>Without Connect, a developer makes an <strong>API key</strong> (shown once) and a webhook endpoint under the account's Settings, and calls the API with <code>Authorization: Bearer &lt;key&gt;</code>; the contract and the integration guide are public at <a href="/docs/api">/docs/api</a>.</p>
 <p>Client states: <em>pending approval</em> (reads only), <em>active</em>, <em>throttled</em> (works, more slowly), <em>suspended</em> (reads only; running sends stop), <em>closed</em> (keys stop working). See the onboarding guide <code>docs/production/onboarding.md</code>.</p>
 {% endblock %}

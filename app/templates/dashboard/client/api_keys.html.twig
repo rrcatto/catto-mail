@@ -11,21 +11,12 @@
     </div>
     <div class="actionrow">
         <a class="btn btn-secondary" href="{{ path('docs_api') }}">API reference</a>
-        {% if may_manage and client.status.value != 'closed' %}
-        <details class="actionform"><summary class="btn">Create an API key</summary>
-            <form method="post" action="{{ path('dashboard_client_api_key_create', {clientId: cid}) }}" class="stack">
-                {{ ui.csrf() }}
-                <label>Descriptive name <input type="text" name="name" maxlength="100" placeholder="e.g. production server, rotation 2026-10"></label>
-                <label>Expires after (optional; the key stops working at the end of that day, {{ time_zone_abbreviation() }}) <input type="date" name="expires_on"></label>
-                <button type="submit">Create key (shown once)</button>
-            </form>
-        </details>
-        {% endif %}
+        {% if may_manage and client.status.value != 'closed' %}<a class="btn" href="{{ path('dashboard_client_api_key_new', {clientId: cid}) }}">Make an API key</a>{% endif %}
     </div>
 </div>
 {% set usable = keys|filter(k => k.usable) %}{% set old = keys|filter(k => not k.usable) %}
 <section class="card card-flush" aria-labelledby="keys-h">
-    <div class="card-head"><h2 id="keys-h">Keys</h2>{% if not may_manage %}{{ ui.tip('Client admins create and revoke keys.') }}{% endif %}</div>
+    <div class="card-head"><h2 id="keys-h">Keys</h2>{% if not may_manage %}{{ ui.tip('The account\'s admins make and revoke keys.') }}{% endif %}</div>
     {% if usable is empty %}<p class="empty">No usable API key yet.</p>{% else %}
     <div class="scroll"><table class="list">
         <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Last used</th><th scope="col">Expires</th>{% if may_manage %}<th scope="col"><span class="sr">Action</span></th>{% endif %}</tr></thead>

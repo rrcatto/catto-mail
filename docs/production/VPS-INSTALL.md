@@ -69,7 +69,7 @@ the sign-in page included, shows it in the footer as the contact for the service
 
 ## 2. Install
 
-catto-mail is installed from an exact **release**: a Git tag such as `v0.2.9`, which always
+catto-mail is installed from an exact **release**: a Git tag such as `v0.3.0`, which always
 names the same code (unlike the `main` branch, which moves). List the releases:
 
 ```sh
@@ -80,7 +80,7 @@ Each release is also listed, with its notes and source downloads, on the
 [releases page](https://github.com/rrcatto/catto-mail/releases). `v0.1.9` is the first release
 with this installer.
 
-As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.2.9`):
+As **root** on the new server (replace `vX.Y.Z` with the newest release, e.g. `v0.3.0`):
 
 ```sh
 apt-get update && apt-get install -y git
@@ -353,9 +353,10 @@ automatic DNS-01 renewal above.
 ## 6. DKIM
 
 Every sending domain needs a DKIM key; the private key never leaves the OpenDKIM container.
-A client's own sending domains are set up by the client in its workspace (Settings › Sending
-domains): once the domain is verified, the host agent generates the key, the page shows the
-records to publish, and the key is activated when DNS shows it (runbook §6a). For the sign-in
+A client's own sending domains are set up by the client in its account (Settings › Sending
+domains), one step at a time: once the domain is verified, the host agent generates the key, the
+domain's page shows the record to publish, and the key is activated when DNS shows it (runbook
+§6a). For the sign-in
 mail sender's domain (`APP_MAIL_FROM`) and any domain you manage yourself, use System setup ›
 DKIM, or the commands:
 

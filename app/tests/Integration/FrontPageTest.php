@@ -30,7 +30,7 @@ final class FrontPageTest extends DashboardTestCase
         self::assertContains('/docs/api', $links, 'the API documentation');
         self::assertContains('mailto:admin@smarthost-dev.test', $links, 'recipients can report unwanted mail');
         $text = $page->filter('main')->text();
-        self::assertStringContainsString('There is no public sign-up.', $text);
+        self::assertStringContainsString('There is no public sign-up: accounts are opened by invitation.', $text);
         self::assertStringContainsString('It sets no cookies.', $text);
         self::assertStringNotContainsString('delivered', strtolower($text), 'never claims delivery');
     }

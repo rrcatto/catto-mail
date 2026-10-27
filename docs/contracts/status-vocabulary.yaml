@@ -1,7 +1,7 @@
 # Smarthost canonical status and event vocabulary
 #
 # Normative contract referenced by docs/20260908-1644-smarthost-llm-spec.yaml
-# (specification 2.12). Every enum value used in the database, the /v1 API,
+# (specification 2.13). Every enum value used in the database, the /v1 API,
 # webhooks, Python and Go MUST come from this file. scripts/check-contracts.py
 # verifies that the spec, the OpenAPI document and the reference DDL use
 # exactly these values.
@@ -15,8 +15,8 @@
 # CHECK constraint (not a PostgreSQL ENUM type) so values can be added by a
 # Doctrine migration without ALTER TYPE.
 
-vocabulary_version: "2.7.0"
-specification_version: "2.12"
+vocabulary_version: "2.8.0"
+specification_version: "2.13"
 
 # ---------------------------------------------------------------------------
 # Jobs
@@ -426,7 +426,9 @@ client_origin:
   description: clients.origin (specification 2.10).
   values:
     operator: {origin: contract, meaning: Created by an operator (dashboard or console).}
-    public_application: {origin: contract, meaning: "Created through a public application channel; only while APP_PUBLIC_ONBOARDING_ENABLED is true, always pending_approval."}
+    public_application: {origin: contract, meaning: "Created through the public sign-up; only while APP_PUBLIC_ONBOARDING_ENABLED is true."}
+    invitation: {origin: contract, meaning: "Opened by the person who used an operator's invitation link (specification 2.13), also while public sign-up is closed."}
+    system: {origin: contract, meaning: "The installation's own client for its built-in system tests (Diagnostics), shown as internal (specification 2.13)."}
 
 quota_metric:
   description: client_quota_usage.metric - admitted work counted against client_limits (specification 2.10).
@@ -484,7 +486,9 @@ suppression_reason:
     suppressions.reason. D-30: hard_bounce, complaint and repeated_soft_bounce are created
     only by Go, globally (client_id NULL); recipient_global_opt_out only by a client with
     can_submit_global_suppressions through the API; operator_block and client_abuse_block
-    only by an operator. A client can never create any reason other than recipient_global_opt_out.
+    only by an operator; account_block only by the account itself (its admins in the
+    dashboard, or its application through POST /v1/blocks), scoped to that account. A client
+    can never create any other reason, and never a global or another account's suppression.
   values:
     hard_bounce: {origin: spec, lifetime: indefinite, meaning: "Recipient-specific permanent failure (failure_scope recipient)."}
     complaint: {origin: spec, lifetime: indefinite, meaning: An ARF complaint correlated to an exact message.}
@@ -504,6 +508,13 @@ suppression_reason:
         The recipient explicitly asked not to receive email from any source using this
         Smarthost installation, reported by a trusted client (source_client_id). Never an
         ordinary list, newsletter, campaign or client unsubscribe.
+    account_block:
+      origin: spec
+      lifetime: indefinite
+      meaning: >-
+        The account's own block of an address or a whole domain (specification 2.13, owner
+        decision 2026-10-27): client_id is that account, and it stops that account's mail
+        only. Lifted by the account (or an operator), never expires.
 
 global_suppression_request_operation:
   description: >-
@@ -511,11 +522,12 @@ global_suppression_request_operation:
     Idempotency-Key was used for. Lifting is naturally idempotent and records no request row.
   values:
     create_global_opt_out: {origin: contract, meaning: "POST /v1/global-suppressions (201 created, or 200 when this client's opt-out of the address was already active)."}
+    create_account_block: {origin: contract, meaning: "POST /v1/blocks (201 created, or 200 when the account's block of the value was already active)."}
 
 suppression_scope_type:
   values:
     address: {origin: contract, meaning: "Matches the D-18 normalised address (local part preserved, domain lower-cased)."}
-    domain: {origin: contract, meaning: "Matches every address at the lower-cased domain. Operator-created only."}
+    domain: {origin: contract, meaning: "Matches every address at exactly the lower-cased domain (not its subdomains). Created by an operator, or by an account for itself (account_block)."}
 
 usage_type:
   values:

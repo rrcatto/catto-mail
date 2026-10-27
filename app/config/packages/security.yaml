@@ -47,6 +47,8 @@ security:
         - { path: '^/dashboard/login(/sent|/verify)?$', roles: PUBLIC_ACCESS }
         # Public sign-up (owner decision 2026-10-11): 404 unless APP_PUBLIC_ONBOARDING_ENABLED is true.
         - { path: '^/dashboard/sign-up(/sent|/verify)?$', roles: PUBLIC_ACCESS }
+        # Invitations (owner decision 2026-10-27): an operator's single-use link, open also while sign-up is closed.
+        - { path: '^/dashboard/invitation(/sent|/confirm)?$', roles: PUBLIC_ACCESS }
         # Application connect (specification 2.12): the connect page shows a visitor what is asked
         # and offers sign-in (and sign-up); approving needs a signed-in client admin (the controller).
         - { path: '^/dashboard/connect$', roles: PUBLIC_ACCESS }

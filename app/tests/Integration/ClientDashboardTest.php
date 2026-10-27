@@ -80,7 +80,7 @@ final class ClientDashboardTest extends DashboardTestCase
         self::assertStringNotContainsString($token, (string) $this->browser->getResponse()->getContent(), 'tracking tokens are never shown');
 
         $domains = $this->crawler("$base/sending-domains");
-        self::assertStringContainsString('Verified', $domains->filter('tbody')->text());
+        self::assertStringContainsString('Step 2: signing key', $domains->filter('tbody')->text(), 'verified: the next step is its signing key');
         $usage = $this->crawler("$base/usage");
         self::assertStringContainsString('Validation addresses', $usage->text());
         self::assertSame(2, $usage->filter('table#usage-records tbody tr')->count());
@@ -145,7 +145,7 @@ final class ClientDashboardTest extends DashboardTestCase
         $action = "$base/sending-domains/{$domain->getId()->toRfc4122()}/verify";
 
         $this->signIn($viewer);
-        self::assertSame(0, $this->crawler("$base/sending-domains")->filter("form[action=\"$action\"]")->count(), 'no action for viewers');
+        self::assertSame(0, $this->crawler("$base/sending-domains/{$domain->getId()->toRfc4122()}")->filter("form[action=\"$action\"]")->count(), 'no action for viewers');
         $token = $this->browser->getCrawler()->filter('form input[name="_csrf_token"]')->attr('value'); // logout token only
         $this->browser->request('POST', $action, ['_token' => $token]);
         self::assertSame(404, $this->browser->getResponse()->getStatusCode(), 'viewer cannot operate');
@@ -155,7 +155,7 @@ final class ClientDashboardTest extends DashboardTestCase
         $this->browser->disableReboot();
         $this->container()->get(\App\Domain\Dns\TxtResolver::class)->set('_smarthost-verification.'.$domain->getDomain(),
             ['smarthost-verification='.$domain->getVerificationToken()]);
-        $r = $this->submit("$base/sending-domains", $action);
+        $r = $this->submit("$base/sending-domains/{$domain->getId()->toRfc4122()}", $action);
         self::assertSame(302, $r->getStatusCode());
         self::assertSame('verified', Db::owner()->fetchOne('SELECT status FROM sending_domains WHERE id = ?', [$domain->getId()->toRfc4122()]));
         self::assertSame(1, (int) Db::owner()->fetchOne("SELECT count(*) FROM audit_log WHERE action = 'sending_domain.verified' AND target_id = ?", [$domain->getId()->toRfc4122()]));
@@ -340,7 +340,7 @@ final class ClientDashboardTest extends DashboardTestCase
     {
         $a = $this->richClient();
         $this->signIn($this->newUser(false, null));
-        self::assertStringContainsString('not a member of any client', self::text($this->page('/dashboard')));
+        self::assertStringContainsString('You have no account here yet. Accounts on this installation are opened by invitation', self::text($this->page('/dashboard')));
         self::assertSame(404, $this->page("/dashboard/c/{$a['id']}")->getStatusCode());
         $disabled = $this->newUser(false, $a['client']);
         $this->browser->getCookieJar()->clear();

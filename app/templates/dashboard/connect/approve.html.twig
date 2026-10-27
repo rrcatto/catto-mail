@@ -1,49 +1,77 @@
 {% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
 {% block title %}Connect {{ connect.applicationName }}{% endblock %}
 {% block body %}
 <div class="pagehead">
     <div>
         <h1>Connect {{ connect.applicationName }}</h1>
-        <p class="sub"><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through {{ site_name() }} for one of your workspaces. Nothing is connected until you choose Connect.</p>
+        <p class="lead"><strong>{{ connect.applicationName }}</strong> asks to send email and check addresses through {{ site_name() }} with one of your accounts. Nothing is connected until you choose Connect.</p>
     </div>
 </div>
 <div class="grid">
-    <section class="card g-col-4 lg:g-col-2" aria-labelledby="choose-h">
-        <h2 id="choose-h">Choose the workspace</h2>
+    {% if accounts is empty %}
+    <section class="card g-col-4 lg:g-col-2 guide-card" aria-labelledby="open-h">
+        <h2 id="open-h">First, an account</h2>
         {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
-        {% include 'dashboard/connect/_request.html.twig' %}
+        {% if account_offer %}
+        <p>You are signed in as {{ app.user.email }}, but you have no account at {{ site_name() }} yet. An account holds your sending domains, your limits and the applications you connect. Name your organisation and it opens now; then you come straight back here.</p>
+        <form method="post" action="{{ path('dashboard_connect_account') }}" class="stack">
+            {% for name, value in connect.fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+            <input type="hidden" name="_token" value="{{ csrf_token('connect') }}">
+            <label>Organisation <input type="text" name="organisation" value="{{ organisation }}" required minlength="2" maxlength="200" autocomplete="organization" autofocus></label>
+            {% if account_offer == 'sign_up' and policy %}
+            <label class="checkline"><input type="checkbox" name="accept_policy" value="1" required> <span>I accept the <a href="{{ path('acceptable_use_policy') }}" target="_blank" rel="noopener">service policy</a> (version {{ policy }}).</span></label>
+            {% endif %}
+            <button type="submit">Open the account</button>
+        </form>
+        <p class="muted small">{% if account_offer == 'operator' %}As an operator you open it on the Standard plan, exempt from the service policy; change either under Clients afterwards.{% else %}New accounts start on the Starter plan with low sending limits; the operator of this installation can raise them.{% endif %}</p>
+        {% else %}
+        <p>You are signed in as {{ app.user.email }}, but you have no account at {{ site_name() }} yet. Accounts on this installation are opened by invitation: open the invitation link you were sent, then start again from {{ connect.applicationName }}.</p>
+        {% endif %}
+        <form method="post" action="{{ path('dashboard_connect_decide') }}" class="form-actions">
+            {% for name, value in connect.fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+            <input type="hidden" name="_token" value="{{ csrf_token('connect') }}">
+            <button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Cancel and go back to {{ connect.applicationName }}</button>
+        </form>
+    </section>
+    {% else %}
+    <section class="card g-col-4 lg:g-col-2 guide-card" aria-labelledby="choose-h">
+        <h2 id="choose-h">{{ accounts|length == 1 ? 'Your account' : 'Choose the account' }}</h2>
+        {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
         <form method="post" action="{{ path('dashboard_connect_decide') }}" class="stack">
             {% for name, value in connect.fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
             <input type="hidden" name="_token" value="{{ csrf_token('connect') }}">
-            {% if workspaces is empty %}
-                <p class="empty">Your account is not a member of any client, so there is no workspace to connect.</p>
-            {% else %}
-            <fieldset class="perms">
-                <legend>Workspace</legend>
-                {% for w in workspaces %}
-                    {% set cid = w.client.id.toRfc4122 %}
-                    {% if w.obstacle is null %}
-                    <label class="checkline"><input type="radio" name="client_id" value="{{ cid }}" required{% if chosen == cid or (chosen == '' and eligible == 1) %} checked{% endif %}> <strong>{{ w.client.companyName }}</strong></label>
-                    {% if w.replaces %}<p class="muted small">Replaces the connection of {{ w.replaces.application_name }} to the same webhook address, made {{ w.replaces.created_at|ts }}: its API key stops working when the new one is collected.</p>{% endif %}
+            <fieldset class="field">
+                <legend class="sr">Account</legend>
+                {% for a in accounts %}
+                    {% set cid = a.client.id.toRfc4122 %}
+                    {% if a.obstacle is null %}
+                    <label class="choice"><input type="radio" name="client_id" value="{{ cid }}" required{% if chosen == cid %} checked{% endif %}>
+                        <span class="choice-text"><span class="choice-title">{{ a.client.companyName }}</span>
+                        {% if a.domain == 'add' %}<span class="choice-help">{{ connect.sendingDomain }} is added to this account as a sending domain; you then publish its DNS records.</span>
+                        {% elseif a.domain == 'present' %}<span class="choice-help">It already has {{ connect.sendingDomain }} as a sending domain.</span>
+                        {% elseif a.domain == 'full' %}<span class="choice-help">It has no room for another sending domain, so {{ connect.sendingDomain }} is not added: ask the operator for a higher limit.</span>{% endif %}
+                        {% if a.replaces %}<span class="choice-help">It replaces the connection of {{ a.replaces.application_name }} made {{ a.replaces.created_at|ts }}; that one's key stops working.</span>{% endif %}</span>
+                    </label>
                     {% else %}
-                    <p class="muted small"><strong>{{ w.client.companyName }}</strong> cannot be chosen. {{ w.obstacle }}</p>
+                    <p class="muted small"><strong>{{ a.client.companyName }}</strong> cannot be chosen. {{ a.obstacle }}</p>
                     {% endif %}
                 {% endfor %}
             </fieldset>
-            {% endif %}
             <p class="form-actions">{% if eligible > 0 %}<button type="submit" name="decision" value="approve">Connect</button> {% endif %}<button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Cancel</button></p>
         </form>
     </section>
+    {% endif %}
     <section class="card g-col-4 lg:g-col-2" aria-labelledby="what-h">
         <h2 id="what-h">What connecting does</h2>
+        {% include 'dashboard/connect/_request.html.twig' %}
         <ul>
-            <li>You are sent back to <span class="url">{{ connect.redirectOrigin }}</span> with a code that works once, for {{ minutes }} minutes. No key or secret is in that address.</li>
-            <li>When {{ connect.applicationName }} collects its credentials with the code, the workspace gets an <strong>API key</strong> named “{{ connect.applicationName }}” and a <strong>webhook endpoint</strong> for the address above, within the workspace's limits.</li>
-            <li>The endpoint is subscribed to: {% for e in events %}<code>{{ e }}</code>{{ loop.last ? '.' : ', ' }}{% endfor %}</li>
-            <li>The application sends from the workspace's sending domains and within its limits. It is not allowed to report recipients' global opt-outs: only the operator of this installation grants that.</li>
-            <li>You can end the connection at any time under Settings › Connected applications; that revokes the key and removes the endpoint.</li>
+            <li>{{ connect.applicationName }} gets its own key to this account, so it can send and check addresses within the account's limits, and it is told what happens to them.{{ ui.tip('An API key named “' ~ connect.applicationName ~ '” and a webhook address that receives: ' ~ events|join(', ') ~ '.') }}</li>
+            {% if connect.sendingDomain %}<li>It sends from <strong>{{ connect.sendingDomain }}</strong>. If that domain is not ready to send at the account you choose, {{ connect.applicationName }} shows you the way to its DNS steps.</li>{% endif %}
+            <li>You return to {{ connect.applicationName }} at once. No key or password travels through your browser.</li>
+            <li>You can disconnect it at any time under Settings › Connected applications.</li>
         </ul>
-        <p class="caveat">Only a client admin can connect an application, and only to an active client. If you did not start this from {{ connect.applicationName }}, choose Cancel.</p>
+        <p class="caveat">If you did not start this from {{ connect.applicationName }}, choose Cancel.</p>
     </section>
 </div>
 {% endblock %}

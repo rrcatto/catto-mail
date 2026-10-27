@@ -1,0 +1,26 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% block title %}Open the account{% endblock %}
+{% block body %}
+<section class="narrow" aria-labelledby="confirm-h">
+    {% if found is null %}
+    <h1 id="confirm-h">This link cannot be used</h1>
+    <p>The confirmation link was used already or has expired, or its invitation can no longer be used. Open the invitation link again to get a new one, or ask the person who sent it.</p>
+    {% else %}
+    <h1 id="confirm-h">Open the account</h1>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <dl class="facts facts-2">
+        <div><dt>Organisation</dt><dd>{{ found.link.organisation }}</dd></div>
+        <div><dt>You sign in as</dt><dd>{{ found.link.email }}</dd></div>
+    </dl>
+    <p>You become the account's admin and are signed in. It opens on the {{ found.invitation.plan_name }} plan; the operator of this installation can change its limits.</p>
+    <form method="post" action="{{ path('dashboard_invitation_complete') }}" class="stack">
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('invitation-confirm') }}">
+        {% if found.invitation.policy_required and policy %}
+        <label class="checkline"><input type="checkbox" name="accept_policy" value="1" required> <span>I accept the <a href="{{ path('acceptable_use_policy') }}" target="_blank" rel="noopener">service policy</a> (version {{ policy }}) on behalf of {{ found.link.organisation }}.</span></label>
+        {% endif %}
+        <button type="submit">Open the account</button>
+    </form>
+    {% endif %}
+</section>
+{% endblock %}

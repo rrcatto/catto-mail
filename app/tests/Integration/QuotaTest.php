@@ -105,7 +105,7 @@ final class QuotaTest extends ApiTestCase
             $this->limit($client, ['max_api_keys' => 11]);
             self::fail('a client limit cannot raise the ceiling (APP_CLIENT_API_KEY_LIMIT=10)');
         } catch (DomainRuleViolation $e) {
-            self::assertStringContainsString('ceiling', $e->getMessage());
+            self::assertStringContainsString('the most this installation allows', $e->getMessage());
         }
         $this->limit($client, ['max_api_keys' => 2, 'max_sending_domains' => 1, 'max_webhook_endpoints' => 1]);
         [$first] = $keys->create($this->reload($client), 'one', self::actor());

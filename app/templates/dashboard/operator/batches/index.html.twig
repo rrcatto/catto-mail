@@ -9,23 +9,7 @@
     </div>
     <div class="actionrow">
         {{ ui.help('uploading-lists', 'Help: uploading lists') }}
-        <details class="actionform"><summary class="btn">Upload a list</summary>
-            <form method="post" action="{{ path('dashboard_operator_batch_preview') }}" enctype="multipart/form-data" class="stack">
-                {{ ui.csrf() }}
-                <label>File: TXT (one address per line) or CSV (with a header row) — at most 10 MiB and {{ max|number_format }} addresses
-                    <input type="file" name="file" accept=".txt,.csv,text/plain,text/csv" required></label>
-                <label>On behalf of client (its quotas, sending domains and suppressions apply)
-                    <select name="client" required><option value="">Choose…</option>{% for c in clients %}<option value="{{ c.id }}">{{ c.company_name }} ({{ c.status }})</option>{% endfor %}</select></label>
-                <label>Batch name <input name="name" required maxlength="200"></label>
-                <label>Purpose
-                    <select name="purpose"><option value="validation">Validation (and test sends)</option><option value="repermission">Re-permission: ask an old list whether they still want mail</option></select></label>
-                <label>List identifier (List-Id, e.g. <code>news.example.org</code>; needed for re-permission and any send beyond a seed test) <input name="list_id" maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"></label>
-                <label>Where the list comes from (optional) <input name="source" maxlength="500" placeholder="e.g. export of the 2019 newsletter list"></label>
-                <label>Description (optional) <textarea name="description" maxlength="2000" rows="2"></textarea></label>
-                <button type="submit">Preview</button>
-                <p class="small muted">The preview shows what will be imported before anything is stored; duplicates and rows that are not addresses are listed, never dropped silently.</p>
-            </form>
-        </details>
+        <a class="btn" href="{{ path('dashboard_operator_batch_new') }}">Upload a list</a>
     </div>
 </div>
 

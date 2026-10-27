@@ -196,12 +196,12 @@ final class OperatorOverview
         if ($can('PLATFORM.CLIENT.VIEW') && $o['new_sign_ups'] > 0) {
             $n = $o['new_sign_ups'];
             $add('info', 'user', 1 === $n ? 'New public sign-up: '.$o['newest_sign_up'] : \sprintf('%d new public sign-ups', $n),
-                'Last 7 days · active in the starter tier · review them', $url('dashboard_operator_clients', ['origin' => 'public_application', 'sort' => 'created', 'dir' => 'desc']));
+                'Last 7 days · active in the starter tier · review them', $url('dashboard_operator_clients_view', ['view' => 'sign-ups']));
         }
         if ($can('PLATFORM.CLIENT.VIEW') && ($o['clients']['pending_approval'] ?? 0) > 0) {
             $n = $o['clients']['pending_approval'];
             $add('info', 'user', 1 === $n ? $o['first_pending_client'].' awaits approval' : \sprintf('%d clients await approval', $n), 'Approval queue',
-                $url('dashboard_operator_clients', ['status' => 'pending_approval', 'sort' => 'status_changed', 'dir' => 'asc']));
+                $url('dashboard_operator_clients_view', ['view' => 'waiting']));
         }
         if ($can('SYSTEM.SETUP.MANAGE') && !$this->wizard->isComplete()) {
             $add('info', 'list', 'The system setup is not complete', 'Continue the setup wizard', $url('dashboard_operator_setup'));

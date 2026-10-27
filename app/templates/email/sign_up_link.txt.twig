@@ -1,6 +1,6 @@
-Confirm your {{ site_name() }} sign-up
+{{ invitation|default(false) ? 'Confirm your ' ~ site_name() ~ ' account' : 'Confirm your ' ~ site_name() ~ ' sign-up' }}
 
-Someone, hopefully you, asked to open a {{ site_name() }} account for {{ organisation }} with this
+Someone, hopefully you, {{ invitation|default(false) ? 'used an invitation to open' : 'asked to open' }} a {{ site_name() }} account for {{ organisation }} with this
 address. Open this link to confirm it; nothing is created until you do. It works once and expires
 in {{ minutes }} minutes:
 

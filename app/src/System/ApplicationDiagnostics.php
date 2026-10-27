@@ -7,7 +7,9 @@ namespace App\System;
 use App\Api\IdempotencyKey;
 use App\Audit\AuditActor;
 use App\Client\ClientLifecycle;
+use App\Client\PlanCatalog;
 use App\Entity\Client;
+use App\Enum\ClientOrigin;
 use App\Enum\ClientStatus;
 use App\Enum\SystemCheckSource;
 use App\Validation\ValidationJobService;
@@ -236,12 +238,16 @@ final class ApplicationDiagnostics
                 : 'Not in force.']];
     }
 
-    /** The internal client the system tests run as (created once, active, no policy requirement). */
+    /**
+     * The internal client the system tests run as (origin system: created once, active, no policy
+     * requirement; shown to operators as internal). It is needed for as long as the checks run, and
+     * made again when it is missing.
+     */
     public function systemTestClient(): Client
     {
-        $client = $this->em->getRepository(Client::class)->findOneBy(['companyName' => self::SYSTEM_TEST_CLIENT]);
+        $client = $this->em->getRepository(Client::class)->findOneBy(['origin' => ClientOrigin::System], ['createdAt' => 'ASC']);
 
-        return $client ?? $this->lifecycle->create(self::SYSTEM_TEST_CLIENT, 'postmaster@localhost.invalid', 'system',
-            ClientStatus::Active, AuditActor::system('system-diagnostics'), false, note: 'Internal client for the built-in system tests.');
+        return $client ?? $this->lifecycle->create(self::SYSTEM_TEST_CLIENT, 'postmaster@localhost.invalid', PlanCatalog::STANDARD,
+            ClientStatus::Active, AuditActor::system('system-diagnostics'), false, ClientOrigin::System, 'Internal client for the built-in system tests.');
     }
 }

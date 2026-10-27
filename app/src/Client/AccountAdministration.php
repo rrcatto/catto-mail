@@ -33,9 +33,9 @@ final class AccountAdministration
     }
 
     /**
-     * Creates a client record (App\Client\ClientLifecycle::create). A client created active
-     * by an operator is an internal client: it is approved at once and exempt from policy
-     * acceptance. A pending_approval client goes through the approval workflow.
+     * Creates a client record (App\Client\ClientLifecycle::create) on a plan (plans.id). A client
+     * created active by an operator is exempt from policy acceptance; a pending_approval client
+     * goes through the approval workflow.
      */
     public function createClient(string $companyName, string $contactEmail, string $plan, ClientStatus $status, AuditActor $actor): Client
     {

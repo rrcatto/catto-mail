@@ -6,14 +6,15 @@
 <div class="pagehead">
     <div>
         <h1>Suppressions</h1>
-        <p class="lead">Addresses and domains your messages are never sent to.{{ ui.tip('A message to an address (or domain) with an active suppression is never submitted. Some suppressions apply to this client only; global ones apply to every client of this installation. This is transport safety state, not your mailing-list or consent data.') }}</p>
+        <p class="lead">Addresses and domains your messages are never sent to.{{ ui.tip('A message to an address (or domain) with an active suppression is never submitted, also one already waiting to go. Your own blocks and some operator blocks apply to this account only; others apply to every account of this installation.') }}</p>
     </div>
+    {% if may_block %}<div class="actions"><a class="btn" href="{{ path('dashboard_client_block_new', {clientId: cid}) }}">Block an address or a domain</a></div>{% endif %}
 </div>
 
 <section aria-labelledby="full-h">
     <form method="get" class="searchline" role="search" aria-label="Find an address or domain">
-        <label class="sr" for="sup-q">Address or domain (exact)</label>
-        <input id="sup-q" type="search" name="address" value="{{ filters.address }}" placeholder="Is this address or domain suppressed?" autocomplete="off">
+        <label class="sr" for="sup-q">Address or domain</label>
+        <input id="sup-q" type="search" name="address" value="{{ filters.address }}" placeholder="Is this address or domain blocked?" title="An address also finds the block of its domain." autocomplete="off">
         <input type="hidden" name="state" value="{{ filters.state }}">
         <button type="submit">Find</button>
     </form>
@@ -23,7 +24,7 @@
         <a class="chip-link" href="#blocked">Messages not sent</a>
     </nav>
     <div class="card card-flush">
-        <div class="card-head"><h2 id="full-h">Suppressions</h2>{{ ui.tip('Suppressions scoped to this client, and the recipient global opt-outs this client reported.') }}</div>
+        <div class="card-head"><h2 id="full-h">Suppressions</h2>{{ ui.tip('This account\'s own blocks, the operator\'s blocks of this account, and the recipients\' global opt-outs this account reported.') }}</div>
         {% if page.rows is empty %}<p class="empty">No suppressions match.</p>{% else %}
         <div class="scroll">
         <table class="list">
@@ -33,10 +34,15 @@
                 <tr>
                     <td>{{ s.address_or_domain }}</td>
                     <td>{{ s.reason|label('suppression_reason') }}</td>
-                    <td>{{ s.is_global ? 'Every client' : 'This client' }}</td>
+                    <td>{{ s.is_global ? 'Every account' : 'This account' }}</td>
                     <td>{{ s.created_at|when }}</td>
                     <td class="tipcell">{{ ui.tip(s.scope_type ~ ' · ' ~ (s.lifted_at ? 'lifted ' ~ (s.lifted_at|ts) : (s.expires_at ? 'expires ' ~ (s.expires_at|ts) : 'never expires')) ~ (s.external_reference ? ' · your reference ' ~ s.external_reference : '')) }}</td>
                     <td>
+                        {% if s.reason == 'account_block' and s.lifted_at is null and may_lift_block %}
+                            <form method="post" action="{{ path('dashboard_client_block_lift', {clientId: cid, id: s.id}) }}" data-controller="confirm" data-confirm-message-value="Lift the block of {{ s.address_or_domain }}? This account can then send to it again, unless another suppression applies.">
+                                {{ ui.csrf() }}<button type="submit" class="secondary">Lift block</button>
+                            </form>
+                        {% endif %}
                         {% if s.reason == 'recipient_global_opt_out' and s.lifted_at is null and may_lift %}
                             <form method="post" action="{{ path('dashboard_client_opt_out_lift', {clientId: cid, id: s.id}) }}" data-controller="confirm" data-confirm-message-value="Lift the global opt-out for {{ s.address_or_domain }}? The address becomes sendable again for every client unless another suppression applies.">
                                 {{ ui.csrf() }}<button type="submit" class="secondary">Lift opt-out</button>
@@ -51,7 +57,8 @@
         {% endif %}
     </div>
     {{ ui.pager(page, 'suppressions') }}
-    {% if client.canSubmitGlobalSuppressions and not may_lift %}<p class="card-note">Lifting an opt-out needs the client admin role and an active or throttled client.</p>{% endif %}
+    {% if client.canSubmitGlobalSuppressions and not may_lift %}<p class="card-note">Lifting an opt-out needs an admin of this account, while the account is active or throttled.</p>{% endif %}
+    {% if may_block and not may_lift_block %}<p class="card-note">Lifting a block needs the account to be active or throttled.</p>{% endif %}
 </section>
 
 <section aria-labelledby="blocked">

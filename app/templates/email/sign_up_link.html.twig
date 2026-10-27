@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Confirm your {{ site_name() }} sign-up</title>
+<title>Confirm your {{ site_name() }} {{ invitation|default(false) ? 'account' : 'sign-up' }}</title>
 </head>
 <body style="margin: 0; padding: 0; background: #F2F6F3; color: #0E1411; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #F2F6F3;">
@@ -16,9 +16,9 @@
         </tr></table>
     </td></tr>
     <tr><td style="padding: 20px 32px 30px;">
-        <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 600; color: #0E1411;">Confirm your sign-up</h1>
-        <p style="margin: 0 0 22px; font-size: 15px; line-height: 1.5; color: #2E3832;">Someone, hopefully you, asked to open a {{ site_name() }} account for <strong>{{ organisation }}</strong> with this address. Use the button below to confirm it; nothing is created until you do. The link works once and expires in {{ minutes }} minutes.</p>
-        <p style="margin: 0 0 24px;"><a href="{{ url }}" style="display: inline-block; padding: 12px 26px; background: #0E1411; color: #FFFFFF; text-decoration: none; border-radius: 999px; font-size: 15px; font-weight: 600;">Confirm the sign-up</a></p>
+        <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 600; color: #0E1411;">{{ invitation|default(false) ? 'Confirm your account' : 'Confirm your sign-up' }}</h1>
+        <p style="margin: 0 0 22px; font-size: 15px; line-height: 1.5; color: #2E3832;">Someone, hopefully you, {{ invitation|default(false) ? 'used an invitation to open' : 'asked to open' }} a {{ site_name() }} account for <strong>{{ organisation }}</strong> with this address. Use the button below to confirm it; nothing is created until you do. The link works once and expires in {{ minutes }} minutes.</p>
+        <p style="margin: 0 0 24px;"><a href="{{ url }}" style="display: inline-block; padding: 12px 26px; background: #0E1411; color: #FFFFFF; text-decoration: none; border-radius: 999px; font-size: 15px; font-weight: 600;">{{ invitation|default(false) ? 'Open the account' : 'Confirm the sign-up' }}</a></p>
         <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #4E5A53;">Or paste this address into your browser:<br><span style="word-break: break-all; color: #0B6B35;">{{ url }}</span></p>
         <p style="margin: 18px 0 0; padding-top: 16px; border-top: 1px solid #EEF3EF; font-size: 13px; line-height: 1.5; color: #4E5A53;">If you did not ask for this, ignore this email: no account is opened without the link.</p>
     </td></tr>

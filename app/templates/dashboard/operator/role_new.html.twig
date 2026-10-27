@@ -1,0 +1,23 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Create a role{% endblock %}
+{% block crumb_tail %}Create a role{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Create a role</h1>
+    <p class="lead">A set of permissions you give to users. You choose its permissions on the next page.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_operator_role_create') }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Key</span>
+            <span class="field-help">A short code in capitals, for example SUPPORT. It cannot be changed later.</span>
+            <input type="text" name="role_key" value="{{ values.role_key }}" required pattern="[A-Za-z][A-Za-z0-9_]{1,63}" maxlength="64" autocomplete="off" autofocus></label>
+        <label class="field"><span class="field-label">Name</span>
+            <span class="field-help">Shown wherever the role is chosen.</span>
+            <input type="text" name="name" value="{{ values.name }}" required maxlength="100"></label>
+        <label class="field"><span class="field-label">What it is for <span class="muted">(optional)</span></span>
+            <input type="text" name="description" value="{{ values.description }}" maxlength="300"></label>
+        <div class="form-actions"><button type="submit">Create the role</button> <a class="btn btn-secondary" href="{{ path('dashboard_operator_roles') }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

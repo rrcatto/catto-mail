@@ -1,0 +1,34 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Invite someone{% endblock %}
+{% block body %}
+<div class="formpage">
+    <h1>Invite someone</h1>
+    <p class="lead">You get a link to send them. Whoever opens it names their organisation, confirms their email address and opens the account; the dashboard then guides them. The link works once, within {{ days }} days.</p>
+    {% if error %}<p class="flash flash-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ path('dashboard_operator_invitation_create') }}" class="card">
+        {{ ui.csrf() }}
+        <label class="field"><span class="field-label">Who it is for <span class="muted">(optional)</span></span>
+            <span class="field-help">Only you see it, in the list of invitations: a name or a reminder.</span>
+            <input type="text" name="note" value="{{ values.note }}" maxlength="200" autocomplete="off" autofocus></label>
+        <fieldset class="field"><legend>Sending limits</legend>
+            {% for p in plans %}
+            <label class="choice"><input type="radio" name="plan" value="{{ p.id }}" required{% if values.plan == p.id %} checked{% endif %}>
+                <span class="choice-text"><span class="choice-title">{{ p.name }}</span><span class="choice-help">{% include 'dashboard/operator/_plan_summary.html.twig' with {limits: p.limits} only %}</span></span></label>
+            {% endfor %}
+        </fieldset>
+        <fieldset class="field"><legend>Service policy</legend>
+            {% if policy_version %}
+            <label class="choice"><input type="radio" name="policy" value="must_accept" required{% if values.policy == 'must_accept' %} checked{% endif %}>
+                <span class="choice-text"><span class="choice-title">Must accept it</span><span class="choice-help">They accept the service policy (version {{ policy_version }}) before the account opens.</span></span></label>
+            <label class="choice"><input type="radio" name="policy" value="exempt" required{% if values.policy == 'exempt' %} checked{% endif %}>
+                <span class="choice-text"><span class="choice-title">Exempt</span><span class="choice-help">Your own organisation, or one bound by a separate agreement.</span></span></label>
+            {% else %}
+            <p class="field-help">No service policy is in force on this installation, so there is nothing to accept.</p>
+            <input type="hidden" name="policy" value="must_accept">
+            {% endif %}
+        </fieldset>
+        <div class="form-actions"><button type="submit">Make the link</button> <a class="btn btn-secondary" href="{{ path('dashboard_operator_invitations') }}">Cancel</a></div>
+    </form>
+</div>
+{% endblock %}

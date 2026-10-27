@@ -53,10 +53,12 @@ final class AccessDashboardController extends AbstractController
     }
 
     #[Route('/users', name: 'dashboard_operator_users', methods: ['GET'])]
+    #[Route('/users/{status}', name: 'dashboard_operator_users_view', methods: ['GET'], requirements: ['status' => 'active|disabled'])]
     #[IsGranted('PLATFORM.USER.VIEW')]
-    public function users(Request $request): Response
+    public function users(Request $request, string $status = ''): Response
     {
-        $filters = ClientDashboardController::filters($request, ['q', 'status', 'role']);
+        // The views have plain addresses (/users/active, /users/disabled; owner decision 2026-10-27).
+        $filters = ['status' => $status] + ClientDashboardController::filters($request, ['q', 'role']);
         $listing = Listing::fromRequest($request, array_keys(OperatorReadModel::USER_SORTS), 'email', 'asc');
 
         return $this->render('dashboard/operator/users.html.twig', [
@@ -65,9 +67,17 @@ final class AccessDashboardController extends AbstractController
         ]);
     }
 
+    /** Adding a user is its own page (owner decision 2026-10-27: no form beside the title). */
+    #[Route('/users/new', name: 'dashboard_operator_user_new', methods: ['GET'])]
+    #[IsGranted('PLATFORM.USER.MANAGE')]
+    public function newUser(): Response
+    {
+        return $this->userForm([], null);
+    }
+
     #[Route('/users', name: 'dashboard_operator_user_create', methods: ['POST'])]
     #[IsGranted('PLATFORM.USER.MANAGE')]
-    public function createUser(Request $request, LoginLinkService $links): RedirectResponse
+    public function createUser(Request $request, LoginLinkService $links): Response
     {
         $this->assertCsrf($request);
         $actor = $this->access->user();
@@ -89,13 +99,23 @@ final class AccessDashboardController extends AbstractController
 
             return $this->redirectToRoute('dashboard_operator_user', ['id' => $user->getId()->toRfc4122()]);
         } catch (DomainRuleViolation $e) {
-            $this->addFlash('error', $e->getMessage());
-
-            return $this->redirectToRoute('dashboard_operator_users');
+            return $this->userForm($request->request->all(), $e->getMessage());
         }
     }
 
-    #[Route('/users/{id}', name: 'dashboard_operator_user', methods: ['GET'])]
+    /** @param array<array-key, mixed> $values */
+    private function userForm(array $values, ?string $error): Response
+    {
+        $text = static fn (string $k, int $max): string => \is_string($values[$k] ?? null) ? mb_substr($values[$k], 0, $max) : '';
+
+        return $this->render('dashboard/operator/user_new.html.twig', ['section' => 'users', 'error' => $error,
+            'values' => ['email' => $text('email', 320), 'display_name' => $text('display_name', 200), 'role_id' => $text('role_id', 36),
+                'client_id' => $text('client_id', 36), 'membership_role' => $text('membership_role', 20) ?: 'viewer', 'send_link' => [] === $values || '1' === ($values['send_link'] ?? null)],
+            'roles' => $this->acl->roles(), 'clients' => $this->read->clientChoices(), 'membership_roles' => ClientMembershipRole::cases()],
+            new Response('', null === $error ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY));
+    }
+
+    #[Route('/users/{id}', name: 'dashboard_operator_user', methods: ['GET'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     #[IsGranted('PLATFORM.USER.VIEW')]
     public function user(string $id): Response
     {
@@ -198,9 +218,17 @@ final class AccessDashboardController extends AbstractController
             'permission_counts' => $permissionCounts, 'permission_total' => \count(PermissionCatalog::keys()), 'section' => 'roles']);
     }
 
+    /** Creating a role is its own page (owner decision 2026-10-27: no form beside the title). */
+    #[Route('/roles/new', name: 'dashboard_operator_role_new', methods: ['GET'])]
+    #[IsGranted('SYSTEM.ROLE.MANAGE')]
+    public function newRole(): Response
+    {
+        return $this->render('dashboard/operator/role_new.html.twig', ['section' => 'roles', 'error' => null, 'values' => ['role_key' => '', 'name' => '', 'description' => '']]);
+    }
+
     #[Route('/roles', name: 'dashboard_operator_role_create', methods: ['POST'])]
     #[IsGranted('SYSTEM.ROLE.MANAGE')]
-    public function createRole(Request $request): RedirectResponse
+    public function createRole(Request $request): Response
     {
         $this->assertCsrf($request);
         try {
@@ -210,13 +238,13 @@ final class AccessDashboardController extends AbstractController
 
             return $this->redirectToRoute('dashboard_operator_role', ['id' => $role->getId()->toRfc4122()]);
         } catch (DomainRuleViolation $e) {
-            $this->addFlash('error', $e->getMessage());
-
-            return $this->redirectToRoute('dashboard_operator_roles');
+            return $this->render('dashboard/operator/role_new.html.twig', ['section' => 'roles', 'error' => $e->getMessage(),
+                'values' => ['role_key' => mb_substr($request->request->getString('role_key'), 0, 64), 'name' => mb_substr($request->request->getString('name'), 0, 100),
+                    'description' => mb_substr($request->request->getString('description'), 0, 300)]], new Response('', Response::HTTP_UNPROCESSABLE_ENTITY));
         }
     }
 
-    #[Route('/roles/{id}', name: 'dashboard_operator_role', methods: ['GET'])]
+    #[Route('/roles/{id}', name: 'dashboard_operator_role', methods: ['GET'], requirements: ['id' => '[0-9a-fA-F-]{36}'])]
     #[IsGranted('SYSTEM.ROLE.VIEW')]
     public function roleDetail(string $id): Response
     {

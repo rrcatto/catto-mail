@@ -28,7 +28,7 @@
     {% endif %}
 
     <section class="card card-accent" aria-labelledby="this-h">
-        <div class="card-head"><h2 id="this-h">{{ step.state == 'done' ? 'This step is done' : 'When the checks are satisfactory' }}</h2>{% for t in topics %}{{ ui.help(t, 'Help: ' ~ t|replace({'-': ' '})) }}{% endfor %}</div>
+        <div class="card-head"><h2 id="this-h">{{ step.state == 'done' ? 'This step is done' : 'When the checks are satisfactory' }}</h2>{% for t in topics %}{{ ui.help(t, 'Help: ' ~ help_title(t)) }}{% endfor %}</div>
         {% if step.state %}<p class="muted">{{ step.state == 'done' ? 'Marked done' : 'Skipped' }} {{ step.updated_at|when }}{% if step.note %}: {{ step.note }}{% endif %}.</p>{% endif %}
         <form method="post" action="{{ path('dashboard_operator_setup_state', {step: step.key}) }}" class="stack">
             {{ ui.csrf() }}

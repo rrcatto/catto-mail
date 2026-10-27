@@ -47,6 +47,13 @@ final class SetupWizard
         'readiness' => ['Production readiness', 'One summary of every subsystem. Live delivery stays a separate, deliberate action.', [], [], ['delivery-states', 'emergency-pause']],
     ];
 
+    /**
+     * The steps that need the administrator (owner decision 2026-10-27): records to publish, an
+     * off-host backup, tests only a person can confirm, and the readiness review. Every other
+     * step is checked automatically and counts as done while its checks pass.
+     */
+    public const NEEDS_YOU = ['dns', 'backups', 'seed_test', 'bounce_test', 'reboot_test', 'readiness'];
+
     /** The steps as System › System setup and the menu group them (owner decision 2026-10-25). */
     public const GROUPS = [
         'Start here' => ['welcome'],
@@ -103,11 +110,12 @@ final class SetupWizard
         return $out;
     }
 
-    /** The first step not done or skipped, or null when every step was handled. */
+    /** The first step that needs the administrator and is not done or skipped, or null when every one was handled. */
     public function current(): ?string
     {
-        foreach ($this->steps() as $key => $s) {
-            if (null === $s['state']) {
+        $steps = $this->steps();
+        foreach (self::NEEDS_YOU as $key) {
+            if (null === $steps[$key]['state']) {
                 return $key;
             }
         }

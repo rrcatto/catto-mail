@@ -1,0 +1,31 @@
+{% extends 'dashboard/layout.html.twig' %}
+{% import 'dashboard/_macros.html.twig' as ui %}
+{% block title %}Invitations{% endblock %}
+{% block body %}
+{% set open = invitations|filter(i => i.state == 'open') %}
+<div class="pagehead">
+    <div>
+        <h1>Invitations</h1>
+        <p class="lead">{{ open|length }} invitation{{ open|length == 1 ? '' : 's' }} can still be used. Each link opens one account, within {{ days }} days.{{ ui.tip('Whoever opens the link names their organisation, confirms their email address and goes through the guided setup. It works while the public sign-up is closed. You are emailed when one is used.') }}</p>
+    </div>
+    <div class="actions"><a class="btn" href="{{ path('dashboard_operator_invitation_new') }}">Invite someone</a></div>
+</div>
+<section class="card card-flush" aria-labelledby="inv-h">
+    <div class="card-head"><h2 id="inv-h">Every invitation</h2></div>
+    {% if invitations is empty %}<p class="empty">None yet.</p>{% else %}
+    <div class="scroll"><table class="list">
+        <thead><tr><th scope="col">For</th><th scope="col">Plan</th><th scope="col">Policy</th><th scope="col">State</th><th scope="col">Made</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>{% for i in invitations %}<tr>
+            <td>{{ i.note ?? '—' }}</td>
+            <td>{{ i.plan_name }}</td>
+            <td>{{ i.policy_acceptance_required ? 'must accept' : 'exempt' }}</td>
+            <td>{% if i.state == 'used' %}<span class="st st-active">used</span> <a href="{{ path('dashboard_operator_client', {id: i.client_id}) }}">{{ i.company_name }}</a>
+                {% elseif i.state == 'open' %}<span class="st st-pending">open</span> <span class="muted small">until {{ i.expires_at|when }}</span>
+                {% else %}<span class="st">{{ i.state == 'revoked' ? 'withdrawn' : 'expired' }}</span>{% endif %}</td>
+            <td class="nowrap" title="{{ i.created_at|ts }} by {{ i.created_by }}">{{ i.created_at|when }}</td>
+            <td>{% if i.state == 'open' %}<form method="post" action="{{ path('dashboard_operator_invitation_revoke', {invitation: i.id}) }}" class="inline" data-controller="confirm" data-confirm-message-value="Withdraw this invitation? Its link stops working.">{{ ui.csrf() }}<button type="submit" class="secondary">Withdraw</button></form>{% endif %}</td>
+        </tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+</section>
+{% endblock %}

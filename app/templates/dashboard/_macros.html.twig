@@ -78,3 +78,6 @@
         </tr>{% endfor %}</tbody>
     </table></div>{% endif %}
 {% endmacro %}
+
+{# A value to copy elsewhere, with a copy button (owner decision 2026-10-27). label names it for screen readers ("Copy the TXT record's value"). #}
+{% macro copy(value, label = 'Copy', block = false) %}{% import 'dashboard/_icons.html.twig' as icon %}<span class="copy{{ block ? ' copy-block' : '' }}" data-controller="copy"><code class="token" data-copy-target="source">{{ value }}</code><button type="button" class="copy-btn" data-copy-target="button" data-action="copy#copy" hidden>{{ icon.i('copy', 16) }}<span data-copy-target="label">Copy</span><span class="sr"> {{ label }}</span></button></span>{% endmacro %}

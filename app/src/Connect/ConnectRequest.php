@@ -6,11 +6,13 @@ namespace App\Connect;
 
 use App\Domain\DomainRuleViolation;
 use App\Security\LoginLinkService;
+use App\Sending\AddressNormalizer;
 
 /**
  * What an application asks for when it sends a person to the connect page
  * (specification 2.12): its name, where to send the person back to, where its webhooks go,
- * its own state value and its PKCE code challenge (S256). Nothing here is secret, and nothing
+ * its own state value and its PKCE code challenge (S256); optionally (specification 2.13) the
+ * domain it sends from, which the approval adds to the account. Nothing here is secret, and nothing
  * is stored before a client admin approves: the request travels in the address of the page
  * (through sign-in or sign-up as the link's return path) and comes back with the approval.
  *
@@ -20,7 +22,7 @@ use App\Security\LoginLinkService;
 final class ConnectRequest
 {
     public const PATH = '/dashboard/connect';
-    public const PARAMETERS = ['application_name', 'redirect_uri', 'webhook_url', 'state', 'code_challenge', 'code_challenge_method'];
+    public const PARAMETERS = ['application_name', 'redirect_uri', 'webhook_url', 'state', 'code_challenge', 'code_challenge_method', 'sending_domain'];
     public const MAX_URL_LENGTH = 2000;
     private const MAX_PATH_LENGTH = 4000;
 
@@ -30,6 +32,8 @@ final class ConnectRequest
         public readonly string $webhookUrl,
         public readonly string $state,
         public readonly string $codeChallenge,
+        /** The domain the application sends from (lower case), or null. */
+        public readonly ?string $sendingDomain = null,
     ) {
     }
 
@@ -60,7 +64,14 @@ final class ConnectRequest
         if (1 !== preg_match('/^[A-Za-z0-9_-]{43}$/', $challenge)) {
             throw new DomainRuleViolation('code_challenge is required: the base64url SHA-256 of the code verifier (43 characters, no padding).');
         }
-        $request = new self($name, $redirect, $webhook, $state, $challenge);
+        $domain = null;
+        if ('' !== trim($value('sending_domain'))) {
+            $domain = AddressNormalizer::normalizeDomain(rtrim(trim($value('sending_domain')), '.'));
+            if (null === $domain || !AddressNormalizer::isHostname($domain) || !str_contains($domain, '.')) {
+                throw new DomainRuleViolation('sending_domain, when given, is the domain name the application sends from (the part after @ of its From address).');
+            }
+        }
+        $request = new self($name, $redirect, $webhook, $state, $challenge, $domain);
         if (\strlen($request->path()) > self::MAX_PATH_LENGTH) {
             throw new DomainRuleViolation('The connect request is too long.');
         }
@@ -78,7 +89,8 @@ final class ConnectRequest
     public function fields(): array
     {
         return ['application_name' => $this->applicationName, 'redirect_uri' => $this->redirectUri, 'webhook_url' => $this->webhookUrl,
-            'state' => $this->state, 'code_challenge' => $this->codeChallenge, 'code_challenge_method' => 'S256'];
+            'state' => $this->state, 'code_challenge' => $this->codeChallenge, 'code_challenge_method' => 'S256']
+            + (null === $this->sendingDomain ? [] : ['sending_domain' => $this->sendingDomain]);
     }
 
     /**

@@ -31,9 +31,10 @@ final class PageFrameTest extends DashboardTestCase
         self::assertSame(1, $meta->count(), "$uri: one application-name");
         self::assertSame('catto-mail v'.Version::VERSION, $meta->attr('content'), $uri);
         $sheets = $page->filter('head link[rel="stylesheet"]')->each(static fn (Crawler $l): string => (string) $l->attr('href'));
-        self::assertCount(2, $sheets, $uri);
+        self::assertCount(3, $sheets, $uri);
         self::assertMatchesRegularExpression('#^/assets/vendor/bootstrap/dist/css/bootstrap\.min-[^/]+\.css$#', $sheets[0], "$uri: Bootstrap first");
-        self::assertMatchesRegularExpression('#^/assets/styles/app-[^/]+\.css$#', $sheets[1], "$uri: the application's stylesheet last");
+        self::assertMatchesRegularExpression('#^/assets/vendor/bootstrap-icons/font/bootstrap-icons\.min-[^/]+\.css$#', $sheets[1], "$uri: Bootstrap Icons");
+        self::assertMatchesRegularExpression('#^/assets/styles/app-[^/]+\.css$#', $sheets[2], "$uri: the application's stylesheet last");
         self::assertSame(1, $page->filter('footer')->count(), "$uri: one footer");
         $foot = $page->filter('body > footer.sitefoot');
         self::assertSame(1, $foot->count(), "$uri: the footer follows the main content");

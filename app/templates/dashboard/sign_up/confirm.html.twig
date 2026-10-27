@@ -7,9 +7,9 @@
     {% if state == 'confirm' %}
     <dl class="facts facts-2">
         <div><dt>Organisation</dt><dd>{{ link.organisation }}</dd></div>
-        <div><dt>Client admin</dt><dd>{{ link.email }}</dd></div>
+        <div><dt>You sign in as</dt><dd>{{ link.email }}</dd></div>
     </dl>
-    <p>Opening the account makes you its client admin and signs you in. It starts in the starter tier: {{ limits.send_recipients_per_day|number_format }} recipients a day and {{ limits.send_recipients_per_month|number_format }} a month, {{ limits.validation_addresses_per_day|number_format }} addresses validated a day, {{ limits.max_sending_domains }} sending domain{{ limits.max_sending_domains == 1 ? '' : 's' }}, {{ limits.max_api_keys }} API key{{ limits.max_api_keys == 1 ? '' : 's' }} and {{ limits.max_webhook_endpoints }} webhook endpoint{{ limits.max_webhook_endpoints == 1 ? '' : 's' }}. The operator of this installation can raise them, and may restrict or close an account that is misused.</p>
+    <p>Opening the account makes you its admin and signs you in. It starts on the Starter plan: {{ limits.send_recipients_per_day|number_format }} recipients a day and {{ limits.send_recipients_per_month|number_format }} a month, {{ limits.validation_addresses_per_day|number_format }} addresses validated a day, {{ limits.max_sending_domains }} sending domain{{ limits.max_sending_domains == 1 ? '' : 's' }}, {{ limits.max_api_keys }} API key{{ limits.max_api_keys == 1 ? '' : 's' }} and {{ limits.max_webhook_endpoints }} webhook endpoint{{ limits.max_webhook_endpoints == 1 ? '' : 's' }}. The operator of this installation can raise them, and may restrict or close an account that is misused.</p>
     <form method="post" action="{{ path('dashboard_sign_up_confirm') }}" class="stack">
         <input type="hidden" name="token" value="{{ token }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token('sign-up-confirm') }}">

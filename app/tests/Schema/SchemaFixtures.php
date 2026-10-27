@@ -18,7 +18,7 @@ final class SchemaFixtures
     public static function client(Connection $c): string
     {
         $id = self::id();
-        $c->insert('clients', ['id' => $id, 'company_name' => 'Fixture', 'contact_email' => 'f@example.test', 'plan' => 'test']);
+        $c->insert('clients', ['id' => $id, 'company_name' => 'Fixture', 'contact_email' => 'f@example.test', 'plan' => 'standard']);
 
         return $id;
     }

@@ -36,7 +36,7 @@ final class Phase9DashboardTest extends DashboardTestCase
                 self::assertStringContainsString($needle, $html, $tab ?: 'summary');
             }
         }
-        self::assertStringContainsString('pending approval', strtolower(self::text($this->page('/dashboard/operator/clients?status=pending_approval&sort=status_changed&dir=asc'))));
+        self::assertStringContainsString('pending approval', strtolower(self::text($this->page('/dashboard/operator/clients/waiting'))));
 
         $action = "/dashboard/operator/clients/$id/status";
         self::assertSame(302, $this->submit($page, $action, ['status' => 'active', 'note' => ''])->getStatusCode());
@@ -93,9 +93,9 @@ final class Phase9DashboardTest extends DashboardTestCase
         $viewer = $this->newUser(false, $client, ClientMembershipRole::Viewer);
         $this->signIn($viewer);
         $html = self::text($this->page("/dashboard/c/$id"));
-        self::assertStringContainsString('awaits approval', $html);
-        self::assertStringContainsString('Ask a client admin to accept it', $html);
-        self::assertStringContainsString('Client admins create and revoke keys', self::text($this->page("/dashboard/c/$id/api-keys")));
+        self::assertStringContainsString('Your account is not open yet', $html);
+        self::assertStringContainsString('An admin of this account takes these steps', $html);
+        self::assertStringContainsString('The account\'s admins make and revoke keys', self::text($this->page("/dashboard/c/$id/api-keys")));
         $this->browser->request('POST', "/dashboard/c/$id/api-keys", ['_token' => 'x']);
         self::assertSame(404, $this->browser->getResponse()->getStatusCode(), 'a viewer may not create keys (like a foreign client)');
 
@@ -106,7 +106,7 @@ final class Phase9DashboardTest extends DashboardTestCase
         self::assertSame('client_dashboard', Db::owner()->fetchOne("SELECT source FROM client_policy_acceptances WHERE client_id = ? AND policy_version = 'aup-test-1'", [$id]));
         self::assertSame($admin->getId()->toRfc4122(), Db::owner()->fetchOne('SELECT accepted_by_user_id FROM client_policy_acceptances WHERE client_id = ?', [$id]));
         $this->container()->get(ClientLifecycle::class)->changeStatus($this->reload($client), ClientStatus::Active, self::actor(), 'approved after acceptance');
-        $r = $this->submit("/dashboard/c/$id/api-keys", "/dashboard/c/$id/api-keys", ['name' => 'ci']);
+        $r = $this->submit("/dashboard/c/$id/api-keys/new", "/dashboard/c/$id/api-keys", ['name' => 'ci']);
         self::assertSame(1, preg_match('/shk_[A-Za-z0-9_-]{43}/', (string) $r->getContent()));
         $html = self::text($this->page("/dashboard/c/$id/api-keys"));
         self::assertStringContainsString('ci', $html);

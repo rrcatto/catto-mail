@@ -11,4 +11,5 @@ namespace App\Enum;
 enum GlobalSuppressionRequestOperation: string
 {
     case CreateGlobalOptOut = 'create_global_opt_out';
+    case CreateAccountBlock = 'create_account_block';
 }

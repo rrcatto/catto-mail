@@ -9,19 +9,7 @@
         <h1>Webhooks</h1>
         <p class="lead">Where your application is told what happened to its jobs and messages.{% if failing is not empty %} <strong class="text-bad">{{ failing|length }} endpoint{{ failing|length == 1 ? ' is' : 's are' }} failing.</strong>{% endif %}{{ ui.tip('Signed HTTPS POST requests when your validation jobs, send jobs and messages change state. Each carries a Smarthost-Signature (HMAC-SHA256 over <t>.<body> with the endpoint\'s signing secret) and a Smarthost-Event-Id. Delivery is at-least-once: de-duplicate on the event id. Failed requests are retried with backoff; endpoints are never disabled automatically.') }}</p>
     </div>
-    {% if may_manage %}
-    <details class="actionform"><summary class="btn">Add an endpoint</summary>
-        <form method="post" action="{{ path('dashboard_client_webhook_create', {clientId: cid}) }}" class="stack">
-            {{ ui.csrf() }}
-            <label>HTTPS URL <input type="url" name="url" required maxlength="2000" placeholder="https://app.example/webhooks/smarthost"></label>
-            <fieldset class="perms"><legend>Events</legend>
-                {% for t in event_types %}<label class="checkline"><input type="checkbox" name="event_types[]" value="{{ t }}" checked> <code>{{ t }}</code></label>{% endfor %}
-            </fieldset>
-            <button type="submit">Add endpoint</button>
-            <p class="small muted">The signing secret is shown once, right after the endpoint is created or its secret rotated. Store it in your application's secret configuration.</p>
-        </form>
-    </details>
-    {% endif %}
+    {% if may_manage %}<div class="actions"><a class="btn" href="{{ path('dashboard_client_webhook_new', {clientId: cid}) }}">Add an endpoint</a></div>{% endif %}
 </div>
 
 <section class="card card-flush" aria-labelledby="ep-h">

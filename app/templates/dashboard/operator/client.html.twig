@@ -11,10 +11,10 @@
 {% set tab = app.request.query.get('tab') in tabs|keys ? app.request.query.get('tab') : 'summary' %}
 <div class="pagehead">
     <div>
-        <div class="titleline"><h1>{{ c.company_name }}</h1>{{ ui.status(c.status, 'client_status') }}</div>
-        <p class="lead">{{ c.status|label('client_status') }} since {{ c.status_changed_at|when }} · {{ c.plan }} plan · {{ c.origin|label('client_origin') }}</p>
+        <div class="titleline"><h1>{{ c.company_name }}</h1>{{ ui.status(c.status, 'client_status') }}{% if c.origin == 'system' %}<span class="tag internal-tag">internal: self-tests</span>{% endif %}</div>
+        <p class="lead">{{ c.status|label('client_status') }} since {{ c.status_changed_at|when }} · {{ custom ? 'custom limits (based on ' ~ (c.plan_name ?? c.plan) ~ ')' : (c.plan_name ?? c.plan) ~ ' plan' }} · {{ c.origin|label('client_origin') }}</p>
     </div>
-    <div class="actions"><a class="btn btn-secondary" href="{{ path('dashboard_client_overview', {clientId: c.id}) }}">Open the client's workspace</a></div>
+    <div class="actions"><a class="btn btn-secondary" href="{{ path('dashboard_client_overview', {clientId: c.id}) }}">Open the client's account</a></div>
 </div>
 <nav class="chips" aria-label="Parts of this client">
     {% for key, label in tabs %}<a class="chip-link" href="{{ path('dashboard_operator_client', key == 'summary' ? {id: c.id} : {id: c.id, tab: key}) }}"{% if key == tab %} aria-current="page"{% endif %}>{{ label }}{% if key == 'reputation' and open_alerts %} <span class="count count-bad">{{ open_alerts }}</span>{% endif %}</a>{% endfor %}
@@ -30,8 +30,11 @@
 <div class="grid">
     <section class="card g-col-4 xl:g-col-2" aria-labelledby="life-h">
         <h2 id="life-h">Status</h2>
-        <p>{{ ui.status(c.status, 'client_status') }} {{ c.status|label('client_status_meaning') }}</p>
-        {% if c.status == 'pending_approval' and policy.blocks_approval %}
+        <p>{{ ui.status(c.status, 'client_status') }} {{ c.status|label('client_status_operator') }}</p>
+        {% if c.origin == 'system' %}<p class="muted small">This is the installation's own client: System › Diagnostics runs its built-in tests as it. It is needed while those tests run, and it is made again whenever it is missing, so there is no point in closing it.</p>{% endif %}
+        {% if c.status == 'pending_approval' and c.opens_on_policy_acceptance %}
+            <p class="caveat">It opens by itself when its manager accepts the service policy (version {{ policy.version_in_force }}) after signing in. You need not approve it.</p>
+        {% elseif c.status == 'pending_approval' and policy.blocks_approval %}
             <p class="warn">Approval needs an acceptance of policy version {{ policy.version_in_force }}: see <a href="{{ path('dashboard_operator_client', {id: c.id, tab: 'policy'}) }}">Policy &amp; opt-outs</a>.</p>
         {% endif %}
         {% if transitions is empty %}<p class="muted">A closed client is final: no further status change.</p>{% else %}
@@ -57,23 +60,20 @@
 
     <section class="card g-col-4 xl:g-col-2" aria-labelledby="acc-h">
         <div class="card-head"><h2 id="acc-h">Account</h2></div>
+        {% set admins = c.members|filter(m => m.role == 'admin') %}
         <dl class="rows">
-            <dt>Operational contact</dt><dd>{{ c.contact_email }}</dd>
-            <dt>Billing contact</dt><dd>{{ c.billing_contact_email ?? 'same as operational' }}</dd>
-            <dt>Abuse contact</dt><dd>{{ c.abuse_contact_email ?? '—' }}</dd>
-            <dt>Created</dt><dd title="{{ c.created_at|ts }}">{{ c.created_at|when }}{% if c.approved_at %} · approved {{ c.approved_at|when }}{% endif %}{% if c.closed_at %} · closed {{ c.closed_at|when }}{% endif %}</dd>
-            <dt>Client id</dt><dd><code>{{ c.id }}</code></dd>
+            <dt>Managed by</dt><dd>{% for m in admins %}{{ m.email }}{% if m.last_login_at is null %} <span class="muted small">(not signed in yet)</span>{% endif %}{{ not loop.last ? ', ' }}{% else %}nobody yet{% endfor %}</dd>
+            {% if c.contact_email not in admins|map(m => m.email) %}<dt>Opened for</dt><dd>{{ c.contact_email }}</dd>{% endif %}
+            <dt>Plan</dt><dd>{{ c.plan_name ?? c.plan }}{% if custom %} <span class="tag tag-warn">custom limits</span>{% endif %} <a class="small" href="{{ path('dashboard_operator_client', {id: c.id, tab: 'limits'}) }}">Limits</a></dd>
+            <dt>Opened</dt><dd title="{{ c.created_at|ts }}">{{ c.created_at|when }}{% if c.approved_at %} · active since {{ c.approved_at|when }}{% endif %}{% if c.closed_at %} · closed {{ c.closed_at|when }}{% endif %}</dd>
+            <dt>Client id</dt><dd>{{ ui.copy(c.id, 'the client id') }}</dd>
         </dl>
         {% if is_granted('PLATFORM.CLIENT.MANAGE') %}
-        <details class="actionform"><summary class="btn btn-secondary">Edit account details</summary>
+        <details class="actionform"><summary class="btn btn-secondary">Rename</summary>
             <form method="post" action="{{ path('dashboard_operator_client_account', {id: c.id}) }}" class="stack">
                 {{ ui.csrf() }}
-                <label>Organisation name <input type="text" name="company_name" value="{{ c.company_name }}" required maxlength="200"></label>
-                <label>Operational contact <input type="email" name="contact_email" value="{{ c.contact_email }}" required></label>
-                <label>Billing contact <input type="email" name="billing_contact_email" value="{{ c.billing_contact_email }}"></label>
-                <label>Abuse/security contact <input type="email" name="abuse_contact_email" value="{{ c.abuse_contact_email }}"></label>
-                <label>Plan <input type="text" name="plan" value="{{ c.plan }}" required maxlength="100"></label>
-                <button type="submit">Save account details</button>
+                <label>Organisation <input type="text" name="company_name" value="{{ c.company_name }}" required maxlength="200"></label>
+                <button type="submit">Save the name</button>
             </form>
         </details>
         {% endif %}
@@ -101,7 +101,16 @@
 {% if tab == 'limits' %}
 <div class="grid">
     <section class="card card-flush g-col-4 xl:g-col-2" aria-labelledby="lim-h">
-        <div class="card-head"><h2 id="lim-h">Limits</h2>{{ ui.tip('A client limit can only lower an installation ceiling. Volume quotas have no ceiling and apply only where set. Periods are calendar days and months in ' ~ time_zone_label() ~ '.') }}</div>
+        <div class="card-head"><h2 id="lim-h">Limits</h2>{{ ui.tip('The plan sets them; change one here and the client shows as custom. A limit of this installation itself (the Installation column) always applies. Volume limits apply only where set. Periods are calendar days and months in ' ~ time_zone_label() ~ '.') }}</div>
+        <p class="card-note">{% if custom %}Custom limits, changed by hand from the {{ c.plan_name ?? c.plan }} plan: a change to that plan does not reach this client.{% else %}The limits of the {{ c.plan_name ?? c.plan }} plan; they change when the plan changes.{% endif %}</p>
+        {% if is_granted('PLATFORM.CLIENT_LIMIT.MANAGE') %}
+        <form method="post" action="{{ path('dashboard_operator_client_plan', {id: c.id}) }}" class="card-foot formrow">
+            {{ ui.csrf() }}
+            <label for="plan-choice">Plan</label>
+            <select id="plan-choice" name="plan">{% for id, name in plans %}<option value="{{ id }}"{% if id == c.plan %} selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+            <button type="submit" class="secondary">{{ custom ? 'Put back on this plan' : 'Move to this plan' }}</button>
+        </form>
+        {% endif %}
         <div class="scroll"><table class="list">
             <thead><tr><th scope="col">Limit</th><th scope="col" class="num">Client</th><th scope="col" class="num">Installation</th><th scope="col" class="num">In force</th></tr></thead>
             <tbody>{% for l in limits.limits %}<tr><td>{{ l.column|label('limit') }}</td><td class="num">{{ l.own ?? '—' }}</td><td class="num">{{ l.ceiling ?? 'none' }}</td><td class="num"><strong>{{ l.effective ?? 'unlimited' }}</strong></td></tr>{% endfor %}</tbody>

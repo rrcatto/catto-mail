@@ -87,9 +87,9 @@ if ('prepare' === $command) {
     $accounts = $container->get(AccountAdministration::class);
     /** @var ApiKeyManager $keys */
     $keys = $container->get(ApiKeyManager::class);
-    $active = $accounts->createClient('Phase 3 e2e', 'e2e@example.test', 'test', ClientStatus::Active, $actor);
+    $active = $accounts->createClient('Phase 3 e2e', 'e2e@example.test', 'standard', ClientStatus::Active, $actor);
     [, $activeKey] = $keys->create($active, 'e2e', $actor);
-    $soon = $accounts->createClient('Phase 3 e2e suspended', 's@example.test', 'test', ClientStatus::Active, $actor);
+    $soon = $accounts->createClient('Phase 3 e2e suspended', 's@example.test', 'standard', ClientStatus::Active, $actor);
     [, $soonKey] = $keys->create($soon, 'e2e', $actor);
     Db::app()->executeStatement("INSERT INTO disposable_domains (domain, source) VALUES ('tempmail.test', 'phase3-e2e') ON CONFLICT DO NOTHING");
 

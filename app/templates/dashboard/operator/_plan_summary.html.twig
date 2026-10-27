@@ -1,0 +1,9 @@
+{# A plan's limits in one line (limits: client_limits column => value, null = no limit). #}
+{%- set parts = [] -%}
+{%- if limits.send_recipients_per_day is not null %}{% set parts = parts|merge([limits.send_recipients_per_day|number_format ~ ' recipients a day']) %}{% endif -%}
+{%- if limits.send_recipients_per_month is not null %}{% set parts = parts|merge([limits.send_recipients_per_month|number_format ~ ' a month']) %}{% endif -%}
+{%- if limits.validation_addresses_per_day is not null %}{% set parts = parts|merge([limits.validation_addresses_per_day|number_format ~ ' addresses checked a day']) %}{% endif -%}
+{%- if limits.max_sending_domains is not null %}{% set parts = parts|merge([limits.max_sending_domains ~ ' sending domain' ~ (limits.max_sending_domains == 1 ? '' : 's')]) %}{% endif -%}
+{%- if limits.max_api_keys is not null %}{% set parts = parts|merge([limits.max_api_keys ~ ' application key' ~ (limits.max_api_keys == 1 ? '' : 's')]) %}{% endif -%}
+{%- set others = limits|filter((v, k) => v is not null and k not in ['send_recipients_per_day', 'send_recipients_per_month', 'validation_addresses_per_day', 'max_sending_domains', 'max_api_keys'])|length -%}
+{{- parts is empty ? (others ? 'Limits set; see Plans' : 'No limits beyond this installation\'s own') : parts|join(', ') ~ (others ? ', and more' : '') -}}

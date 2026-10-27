@@ -1,7 +1,7 @@
 project:
   name: Smarthost
-  specification_version: "2.12"
-  specification_date: "2026-10-11"
+  specification_version: "2.13"
+  specification_date: "2026-10-27"
   original_specification_date: "2026-09-08"
   version_note: >-
     The specification version is a documentation/specification revision number. It is not a
@@ -390,6 +390,8 @@ project_boundaries:
       - address_batch_entries
       - address_batch_sends
       - application_connections
+      - plans
+      - client_invitations
     client_application_owns:
       - mailing_lists
       - subscribers
@@ -668,6 +670,7 @@ api:
         - POST /v1/send-jobs/{id}/recipients
         - POST /v1/send-jobs/{id}/submit
         - POST /v1/global-suppressions/{id}/lift
+        - POST /v1/blocks/{id}/lift
       not_work_creation:
         # D-37
         - >-
@@ -676,6 +679,10 @@ api:
           can_submit_global_suppressions may create one in any status that authenticates,
           including pending_approval and suspended; lifting one makes an address sendable again
           and is forbidden (403) for pending_approval and suspended clients
+        - >-
+          POST /v1/blocks (an account block, 2.13) is likewise a do-not-contact operation, allowed
+          in every status that authenticates and needing no capability; lifting one is forbidden
+          (403) for pending_approval and suspended accounts
       reads: >-
         suspended and pending_approval clients still authenticate and may read their existing
         resources (pending_approval may also perform non-work onboarding operations where supported)
@@ -701,9 +708,11 @@ api:
       - send job creation
       - send-job recipient batch upload
       - recipient global opt-out creation (D-30; durable request records, D-38)
+      - account block creation (2.13; the same durable request records)
     naturally_idempotent:
       - send-job submit (submitting an already sealed job returns its current state)
       - global opt-out lift (lifting an already lifted opt-out returns its current state)
+      - account block lift (lifting an already lifted block returns its current state)
     mechanism: Idempotency-Key header persisted with the created resource
     global_opt_out_mechanism:
       # D-38
@@ -771,6 +780,18 @@ api:
     - method: POST
       path: /global-suppressions/{id}/lift
       purpose: report that the recipient withdrew a global opt-out this client reported (D-30)
+    - method: GET
+      path: /blocks
+      purpose: the account's own blocks, newest first (status and exact value filters; never other suppressions; 2.13)
+    - method: POST
+      path: /blocks
+      purpose: block an address or a whole domain for this account's mail (exactly one of address and domain; idempotent; 2.13)
+    - method: GET
+      path: /blocks/{id}
+      purpose: retrieve one of the account's blocks
+    - method: POST
+      path: /blocks/{id}/lift
+      purpose: lift one of the account's blocks (an active or throttled account)
     - method: POST
       path: /connect/exchange
       purpose: >-
@@ -796,6 +817,10 @@ api:
         state: 1-512 printable ASCII characters without spaces; returned unchanged
         code_challenge: BASE64URL(SHA-256(code verifier)), 43 characters
         code_challenge_method: S256
+        sending_domain: >-
+          optional (specification 2.13): the domain the application sends from (the part after @
+          of its From address); approving adds it to the chosen account when the account does not
+          have it and its max_sending_domains leaves room
       rules:
         - plain http for redirect_uri and webhook_url only when SMARTHOST_ENV is development or test
         - GET never changes state and stores nothing; the request travels in the page's address
@@ -805,8 +830,17 @@ api:
           APP_PUBLIC_ONBOARDING_ENABLED is true, account creation through the public sign-up
           (saas_operations.public_sign_up); both carry the connect path as the return path of
           their emailed link (auth_login_tokens.return_path), so the person returns to the
-          connect step, also from another browser
-        - a signed-in person chooses one of their client workspaces
+          connect step, also from another browser. While the sign-up is closed the page says in
+          one sentence that accounts are opened by invitation (saas_operations.invitations)
+        - a signed-in person chooses one of their accounts (the customer's word for a client, specification 2.13)
+        - >-
+          the page never dead-ends (owner decision 2026-10-27): a signed-in person without an
+          account opens one there with the organisation's name alone (POST
+          /dashboard/connect/account, CSRF), then continues to the approval with it chosen: while
+          APP_PUBLIC_ONBOARDING_ENABLED is true through the public sign-up (the Starter plan, the
+          policy in force accepted on the same form), or as an operator holding
+          PLATFORM.CLIENT.APPROVE (the Standard plan, exempt from the policy); anyone else is told
+          that accounts are opened by invitation
     approval:
       - POST with CSRF; only a client admin (client_memberships role admin) of the chosen client, and only while the client is active
       - >-
@@ -821,6 +855,11 @@ api:
         answers 303 to redirect_uri with code and state; declining answers 303 with
         error=access_denied, error_description and state; a key or secret is never in a redirect
       - audited as application_connection.approved by the approving user
+      - >-
+        when the request names sending_domain and the chosen client does not have it, the
+        approval also adds it (SendingDomainService::register, audited as sending_domain.created)
+        within the client's max_sending_domains; the page says beforehand, per account, whether
+        the domain is already there, will be added, or cannot be added for want of room
     exchange:
       - POST /v1/connect/exchange {code, code_verifier, redirect_uri}, server to server, without an API key; limited per client address
       - >-
@@ -1283,15 +1322,35 @@ sending:
       OpenDKIM volume) and returns only the public half, which the application records with
       dkim_status pending_dns when the request is finished. The page then shows the DKIM record, a
       DMARC record to start with (p=none) and SPF guidance (nothing to add: the envelope sender is
-      SMARTHOST_BOUNCE_DOMAIN). When the published record equals the recorded key - on "Check DNS
-      now" or on the host agent's periodic `smarthost:system:agent domains` (every five minutes,
-      each domain at most every ten) - the application requests dkim.activate; the agent compares
+      SMARTHOST_BOUNCE_DOMAIN). When the published record equals the recorded key - on "Check now",
+      on the domain page's own check or on the host agent's periodic `smarthost:system:agent
+      domains` (every five minutes, each domain at most every ten) - the application requests
+      dkim.activate; the agent compares
       DNS with the private key again and runs `prod dkim activate`, and the finish records
       dkim_status active as `smarthost:domain:dkim ... active` does. Progress shown per domain:
       added, TXT verified, DKIM pending in DNS, active. A result changes only the sending domain
       the request names. No self-service key for a domain another client has also verified (one
       key signs a domain for everyone); the operator sets it up. Every action is POST with CSRF,
       permission-checked and audited. The console commands keep working.
+    guided_steps: >-
+      owner decisions (2026-10-27, specification 2.13). Each domain has its own page in the
+      client dashboard, /dashboard/c/{client}/sending-domains/{domain}, which shows one step at a
+      time in plain words: prove it is yours (the TXT record), publish its signing key (the DKIM
+      record, once the host agent made the key), ready to send. Every record has copy buttons and
+      one sentence on what it is for. While the page waits, it asks every 30 seconds (POST with
+      CSRF, JSON) for the next check and moves on by itself when the domain's stage changes; an
+      automatic check is recorded on the domain (last_checked_at, last_check_error) but not in
+      the audit log, and looks at DNS at most every 20 seconds per domain; "Check now" does the
+      same from a button and is audited. When the key becomes active the account's admins are
+      emailed that the domain is ready. On the ready step the page recognises an existing DMARC
+      record (a TXT record at _dmarc.<domain> starting v=DMARC1: "keep yours, nothing to add")
+      and otherwise suggests v=DMARC1; p=none, without a report address (none is made up for the
+      client). The API's SendingDomain carries setup_url, the domain's page; an application may
+      add back=<an absolute URL on the redirect origin of one of the account's active
+      connections>, and the page then offers "Back to <application>". Adding a domain is its own
+      page and leads to its steps. On the development pod, `smarthostctl dev-agent` carries out
+      the DKIM requests with the pod's OpenDKIM (the production host agent is not installed
+      there).
     live_sending_rule: >-
       live sending rejects an unverified From/sending domain (and, in production, a domain
       without active DKIM) except in explicitly controlled local/test modes
@@ -1597,11 +1656,44 @@ suppression_and_reputation:
     - operator_block
     - client_abuse_block
     - recipient_global_opt_out
+    - account_block
   distinction: >-
     Smarthost suppression is transport/reputation safety state. It is not the same as a client's
-    mailing-list membership, consent or unsubscribe business state. The single exception is the
-    explicit recipient global opt-out (D-30): a do-not-contact instruction for the whole
-    Smarthost installation that a trusted client reports; Smarthost then owns that state.
+    mailing-list membership, consent or unsubscribe business state. Two exceptions: the explicit
+    recipient global opt-out (D-30), a do-not-contact instruction for the whole Smarthost
+    installation that a trusted client reports; and the account block (2.13), an address or a
+    whole domain an account never sends to. Smarthost then owns that state.
+  account_blocks:
+    # specification 2.13, owner decision 2026-10-27
+    purpose: >-
+      An account (its admins in the dashboard, or its connected application through POST
+      /v1/blocks) blocks an address or a whole domain it must never mail again, for example
+      someone who complained to it directly or asked for their whole domain to be left alone.
+      Its applications no longer need a block list of their own.
+    row: >-
+      a suppressions row with reason account_block, client_id the account (never global),
+      scope_type address or domain, no expiry, an optional external_reference
+    scope: >-
+      that account's mail only (every application sending through it); never other accounts.
+      An installation-wide block stays an operator function (operator_block, Mail flow ›
+      Suppressions).
+    matching: >-
+      like every suppression: the exact D-18-normalised address, or every address at exactly the
+      lower-cased domain (not its subdomains); Go checks it when it creates a message and again
+      immediately before submission, so queued messages are stopped too
+    api: >-
+      POST /v1/blocks (exactly one of address and domain; Idempotency-Key; 201 created or 200
+      already active; requests recorded durably in global_suppression_requests, operation
+      create_account_block), GET /v1/blocks (the account's own blocks only, newest first, status
+      and exact value filters), GET /v1/blocks/{id}, POST /v1/blocks/{id}/lift
+    statuses: >-
+      creating is a do-not-contact operation, accepted in every account status that
+      authenticates; lifting makes mail sendable again and needs an active or throttled account
+    dashboard: >-
+      Sending › Suppressions lists them with the account's other suppressions; an admin adds one
+      on its own page (Block an address or a domain) and lifts one from the list
+    uniqueness: one active block per account, scope and value (suppressions_account_block_active_uq)
+    audit: suppression.account_block_created, suppression.account_block_reaffirmed and suppression.account_block_lifted, naming the user or API key
   address_matching:
     normalisation: trim surrounding whitespace, preserve the local part exactly, lowercase/canonicalise the domain
     exact_rule:
@@ -1688,18 +1780,22 @@ suppression_and_reputation:
         temporary mailbox condition never becomes permanent; a new qualifying sequence after
         expiry creates a new suppression
       operator_block: indefinite unless the operator sets an expiry
+      account_block: indefinite until lifted by the account or an operator
     active: lifted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
     matching:
       address: exact D-18-normalised address (local part byte-for-byte, domain lower-cased)
-      domain: the lower-cased normalised domain; global domain blocks are an operator function only
+      domain: >-
+        exactly the lower-cased normalised domain (not its subdomains); global domain blocks are an
+        operator function only, an account may block a domain for its own mail (account_block)
     precedence: >-
       any active applicable suppression stops submission; independent rows (different reasons or
       reporting clients) coexist and are never collapsed into one mutable row; lifting one row
       never makes an address sendable while another applicable row is active
     uniqueness: >-
       at most one active global address suppression per address and reason for hard_bounce and
-      complaint, per address for repeated_soft_bounce, and per reporting client and address for
-      recipient_global_opt_out; repeated or concurrent evidence does not create duplicates
+      complaint, per address for repeated_soft_bounce, per reporting client and address for
+      recipient_global_opt_out, and per account, scope and value for account_block; repeated or
+      concurrent evidence does not create duplicates
     provenance:
       system: source_message_id and source_event_id name the message and the authoritative event
       client_opt_out: >-
@@ -1708,26 +1804,31 @@ suppression_and_reputation:
         external_reference, the durable request records (global_suppression_requests, D-38) and
         audit_log entries
       operator: the audit_log entry names the operator (actor user) and the written note
+      account_block: client_id (the account), an optional external_reference, the durable request records and audit_log entries naming the user or API key
     lifting:
       mechanism: set lifted_at; rows are never deleted as the normal unsuppression mechanism (only configured retention deletes)
       client: >-
         the reporting client (with the capability) may lift only its own active
-        recipient_global_opt_out row; the operation is idempotent and audited
+        recipient_global_opt_out row; the operation is idempotent and audited. An account may lift
+        its own account_block rows (dashboard admin or API), idempotent and audited, while active or
+        throttled
       operator: an operator may lift any suppression through an audited console command with a written note
     future_sends: >-
       Go checks for an active applicable suppression when it creates a message and again
       immediately before submission; a match records message_suppressed and nothing is
       submitted to Postfix. Mail Postfix has already accepted is not recalled.
     client_api_limits:
-      - address scope only; a client can never create a domain suppression
-      - only reason recipient_global_opt_out; system reasons cannot be forged
+      - a global suppression only as recipient_global_opt_out, address scope only
+      - an account block (address or domain) only for the account itself
+      - system and operator reasons cannot be forged
       - the representation never reveals other clients' or system suppressions of the address
     no_address_lookup: >-
       Decision (specification 2.8): there is no API that lets a client ask whether an arbitrary
       address is suppressed. Smarthost is authoritative for transport suppression and enforces it
       at send time; the client learns the outcome through its send/message state and events
       (message_suppressed, suppressed messages). Global suppression state is never exposed as an
-      address-query oracle.
+      address-query oracle. GET /v1/blocks lists only the account's own blocks (2.13), which is
+      the account's own data, not a lookup of other suppressions.
   provider_reputation:
     future_metrics:
       - rolling_bounce_rate
@@ -1766,12 +1867,11 @@ schema:
         - created_at
         - can_submit_global_suppressions
         - origin
-        - billing_contact_email
-        - abuse_contact_email
         - status_changed_at
         - approved_at
         - closed_at
         - policy_acceptance_required
+        - opens_on_policy_acceptance
     users:
       purpose: human dashboard accounts (passwordless, emailed sign-in links); never API keys
       key_fields:
@@ -1810,6 +1910,7 @@ schema:
         - requested_ip_hash
         - expires_at
         - used_at
+        - invitation_id_nullable
     client_memberships:
       key_fields:
         - id
@@ -2025,8 +2126,9 @@ schema:
         - external_reference
     global_suppression_requests:
       purpose: >-
-        durable idempotency of recipient global opt-out requests (D-38): one row per accepted
-        (client, operation, Idempotency-Key), independent of the suppression row
+        durable idempotency of recipient global opt-out requests (D-38) and account block requests
+        (2.13): one row per accepted (client, operation, Idempotency-Key), independent of the
+        suppression row
       key_fields:
         - id
         - client_id
@@ -2384,6 +2486,42 @@ schema:
         - webhook_endpoint_id_nullable
         - revoked_at
         - created_at
+    plans:
+      purpose: >-
+        named sets of client limits, defined once (saas_operations.plans, specification 2.13);
+        clients.plan names one. Built in: standard and starter
+      key_fields:
+        - id
+        - name
+        - api_requests_per_minute
+        - validation_jobs_per_day
+        - validation_addresses_per_day
+        - validation_addresses_per_month
+        - send_jobs_per_day
+        - send_recipients_per_day
+        - send_recipients_per_month
+        - max_recipients_per_send_job
+        - max_api_keys
+        - max_webhook_endpoints
+        - max_sending_domains
+        - created_at
+        - updated_at
+    client_invitations:
+      purpose: >-
+        an operator's single-use invitation to open an account (saas_operations.invitations,
+        specification 2.13); only the SHA-256 of the link's token; operator-only
+      key_fields:
+        - id
+        - token_hash
+        - plan
+        - policy_acceptance_required
+        - note_nullable
+        - created_by_user_id
+        - created_at
+        - expires_at
+        - used_at
+        - client_id_nullable
+        - revoked_at
   indexes_required:
     - validation_addresses.job_id
     - validation_addresses.normalized_address
@@ -2395,6 +2533,7 @@ schema:
     - suppressions.global_address_reason_active_unique
     - global_suppression_requests.client_id_operation_idempotency_key_unique
     - suppressions.source_client_id_address_active_opt_out_unique
+    - suppressions.account_block_active_unique
     - messages.recipient_address
     - api_keys.key_hash_unique
     - send_jobs.client_id_status
@@ -2493,8 +2632,9 @@ saas_operations:
   principle: >-
     One client model (clients, client_memberships, api_keys) extended for external clients; no
     second account system. Public self-service onboarding stays disabled unless the operator
-    enables it; every client is approved by an operator. Monitoring raises alerts for people and
-    never acts on a client by itself.
+    enables it. Accounts are opened by an operator (operator_account_opening) or by someone the
+    operator invited (invitations); either is the operator's approval. Monitoring raises alerts
+    for people and never acts on a client by itself.
   client_lifecycle:
     statuses:
       pending_approval: authenticates and reads; creates no resource-consuming work; awaits operator review
@@ -2535,12 +2675,10 @@ saas_operations:
     nothing else is created until it is used. The link's page (GET) changes nothing; its
     confirming POST (CSRF), in one transaction, uses the link, calls ClientLifecycle::apply (plan
     starter), makes the person the client admin, records the acceptance of
-    APP_ACCEPTABLE_USE_POLICY_VERSION when one is in force (required), sets the starter limits
-    (APP_STARTER_SEND_RECIPIENTS_PER_DAY, _PER_MONTH, APP_STARTER_VALIDATION_ADDRESSES_PER_DAY,
-    APP_STARTER_API_KEY_LIMIT, APP_STARTER_WEBHOOK_ENDPOINT_LIMIT, APP_STARTER_SENDING_DOMAIN_LIMIT;
-    dashboard settings; never above the installation ceilings) and activates the client (audited
-    as public-sign-up), then signs the person in and leads to the overview's next steps (a sending
-    domain, an API key, a webhook). Abuse protection without third-party services: 10 form
+    APP_ACCEPTABLE_USE_POLICY_VERSION when one is in force (required), puts the client on the
+    Starter plan (plans; its limits, never above the installation ceilings; until 2.13 the
+    APP_STARTER_* settings) and activates the client (audited as public-sign-up), then signs the
+    person in and leads to the account's start page (user_interfaces.guided_setup). Abuse protection without third-party services: 10 form
     submissions an hour per client IP, 3 links an hour per address, 20 verification requests an
     hour per client IP, 5 confirmations an hour per address, a honeypot field, and no account
     enumeration (an address that already belongs to a user or a client's contact gets no sign-up
@@ -2556,8 +2694,48 @@ saas_operations:
     - clients.policy_acceptance_required (true for new clients; operator-created active clients and pre-Phase 9 clients are exempt) blocks approval until the version in force is accepted
     - client admins accept in the dashboard (source client_dashboard, the version in force only); operators record an acceptance obtained elsewhere with a reference (source operator_recorded); one row per client and version; audited as client.policy_accepted
   client_metadata: >-
-    clients.contact_email, billing_contact_email, abuse_contact_email, origin; operator-only
-    private notes in client_notes (never shown to the client, audited as client.note_added).
+    clients.contact_email (the address the account was opened for), origin (operator,
+    public_application, invitation, or system: the installation's own self-test client, shown to
+    operators as "internal: self-tests"), plan; operator-only private notes in client_notes
+    (never shown to the client, audited as client.note_added). The billing and abuse contact
+    addresses were removed in 2.13: nothing used them (owner decision 2026-10-27).
+  plans: >-
+    owner decision (2026-10-27, specification 2.13): named sets of client limits, defined once
+    under Clients › Plans (viewing PLATFORM.CLIENT.VIEW, changing PLATFORM.CLIENT_LIMIT.MANAGE).
+    clients.plan names a plan (foreign key). Assigning a plan copies its limits into
+    client_limits (each capped at its installation ceiling), so enforcement keeps reading
+    client_limits alone. A client whose limits an operator changed by hand no longer equals its
+    plan and is shown as Custom; assigning the plan again puts it back. Changing a plan changes
+    the limits of every client on it that is not custom. Built in and never deleted: standard (no
+    client limits) and starter (the plan of public sign-ups; seeded with the former APP_STARTER_*
+    defaults). A plan named by a client or an invitation is not deleted. Audited: plan.created,
+    plan.updated (with how many clients changed), plan.deleted, client.plan_changed.
+  invitations: >-
+    owner decision (2026-10-27, specification 2.13; "invitations first": no public registration
+    and no waiting list for now). An operator holding PLATFORM.CLIENT.APPROVE makes an invitation
+    under Clients › Invitations, choosing the plan and whether the service policy must be
+    accepted, with an optional private note for whom it is: a single-use link of 256 random
+    bits, valid 7 days, shown once (only its SHA-256 is stored, client_invitations). Whoever
+    opens /dashboard/invitation?token=… gives the organisation and their address and confirms the
+    emailed link (a sign-up link of auth_login_tokens naming the invitation); someone signed in
+    gives the organisation only. Opening the account, in one transaction: the invitation is used,
+    the client is created (origin invitation) on its plan, the person becomes its client admin,
+    the acceptance of the version in force is recorded when the invitation requires it (the
+    checkbox on the page), and the client is activated (audited as invitation.used). It works
+    whatever APP_PUBLIC_ONBOARDING_ENABLED says; the same rate limits and honeypot as the public
+    sign-up apply, an address that already has an account gets an ordinary sign-in link and the
+    same answer, and the operator is emailed. An unused invitation can be withdrawn
+    (invitation.revoked). nginx logs the invitation and sign-up links without their tokens.
+  operator_account_opening: >-
+    owner decision (2026-10-27, specification 2.13), replacing "create a pending client, approve
+    it, add yourself under Users": Clients › New client is its own page (PLATFORM.CLIENT.APPROVE)
+    asking only for what is used: the organisation's name, the email of the person who manages
+    it (they become its client admin; their user is created when it does not exist), the plan,
+    the service policy (must accept or exempt, each explained) and a private note. Exempt: the
+    client is active at once. Must accept (while a version is in force): the client starts
+    pending_approval with opens_on_policy_acceptance, and when its admin accepts the version in
+    force it is activated by itself (audited as policy-acceptance): creating it was the
+    operator's approval. The manager is emailed a sign-in link to the account.
   client_limits:
     storage: client_limits (one row per client; NULL = no client-specific limit)
     limits:
@@ -2736,7 +2914,11 @@ operator_self_service:
     worker, backups, seed delivery test, bounce test, reboot test, production readiness. Progress
     is stored (setup_steps), the wizard is resumable, an administrator is taken to it after sign-in
     until the readiness step is done, and it stays available afterwards. Live delivery remains a
-    separate, deliberate action.
+    separate, deliberate action. The page (owner decision 2026-10-27, specification 2.13) lists
+    first the steps that need the administrator - DNS, backups, the seed delivery test, the
+    bounce test and the reboot test - and folds the steps the system checks by itself under
+    "Checked automatically", showing there only the checks that warn or fail; those steps count
+    as done while their checks pass.
   delivery_modes: >-
     HELD (live delivery not activated), LIVE, PAUSED (the emergency stop or pause flag; the Postfix
     queue held), STOPPED (the delivery daemon has no fresh heartbeat). Shown on every operator page.
@@ -3075,7 +3257,7 @@ user_interfaces:
     System setup steps with their state, the audit log's views such as sign-in emails, the settings
     groups, the help topics); below 1100px it folds behind a Menu button. Areas, pages, views and badges
     appear only where the user's permission keys allow. A breadcrumb (area › page › item) sits above
-    every page title. Every page follows the same rules: one page, one job, with its title and a
+    the title of a detail page only (2.13: a list page's title says where it is once). Every page follows the same rules: one page, one job, with its title and a
     sentence that says the state; what needs attention first, and only when something does; at most
     four key figures, each with an information button saying what it counts; one main list or chart and
     at most two supporting cards; explanations behind information buttons (tooltips on hover or focus)
@@ -3192,6 +3374,22 @@ user_interfaces:
       - LiveComponent (server-rendered GET forms and links did not need it)
 
 smtp_reputation_and_deliverability:
+  guided_setup: >-
+    Owner decisions (2026-10-27, specification 2.13). The customer's screens say "account" for a
+    client (the operator console keeps "client"). An account's start page (its Overview) shows,
+    until all are done, the steps to its first message, one current at a time: accept the
+    service policy (only when the account must and the version in force is not accepted; an
+    account waiting for it opens on acceptance), make a sending domain ready (to its steps page:
+    sending_domains.guided_steps), connect an application (with Connect from the application; an
+    API key and a webhook made by hand count too and are folded under "For developers"), send a
+    test message (any send job). Pages and addresses (operator console and client dashboard
+    alike): every create form is its own centred page (New client, Invite someone, New plan, Add
+    a domain, ...) asking only for what is used, each field saying what it does; a list takes
+    the full width; ready-made views have plain addresses (/dashboard/operator/clients/waiting,
+    /active, /throttled, /suspended, /closed, /invited, /sign-ups) instead of internal values in
+    the query; every value a person copies elsewhere (DNS names and values, a key or secret shown
+    once, an invitation link, an id) has a copy button; no internal name (host agent, origin,
+    fan-out) appears on screen without being explained.
   production_prerequisites:
     - dedicated Smarthost VPS/IP
     - forward DNS
@@ -3695,5 +3893,26 @@ revision_history:
       global-opt-out capability stays operator-only. The acceptable use policy is published at
       /acceptable-use-policy from docs/AUP.md and linked from every footer. OpenAPI
       1.0.0-draft.10; status vocabulary 2.7.0. No existing /v1 operation changes.
+    decisions_incorporated: []
+    decision_log: docs/architecture/open-decisions.md
+  - version: "2.13"
+    date: "2026-10-27"
+    summary: >-
+      Guided account setup (owner decisions 2026-10-27): the connect page never dead-ends (an
+      account opened on the way with one field, or one sentence saying accounts are opened by
+      invitation) and takes an optional sending_domain, which the approval adds to the account;
+      SendingDomain.setup_url and the domain's own steps page (one step at a time, copy buttons,
+      a check every 30 seconds, an email when the domain is ready, an existing DMARC record
+      recognised, a way back to the application); the account's start page as a checklist;
+      plans (named limit sets, Clients › Plans; the APP_STARTER_* settings become the built-in
+      Starter plan); invitations (Clients › Invitations; accounts open by invitation while the
+      public sign-up stays closed); New client on its own page (the manager becomes the admin
+      and is emailed; active at once, or opening when the manager accepts the policy); the
+      self-test client's origin system; the billing and abuse contact addresses removed; plain
+      addresses for the client views; the breadcrumb on detail pages only; the operator setup
+      page split into "needs you" and "checked automatically"; the development pod's DKIM
+      stand-in (smarthostctl dev-agent). Schema: plans, client_invitations,
+      clients.opens_on_policy_acceptance, auth_login_tokens.invitation_id, clients.origin
+      invitation and system. OpenAPI 1.0.0-draft.11; status vocabulary 2.8.0.
     decisions_incorporated: []
     decision_log: docs/architecture/open-decisions.md

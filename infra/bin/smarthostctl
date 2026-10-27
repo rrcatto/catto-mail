@@ -152,6 +152,9 @@ usage: smarthostctl <command>        (development; production: smarthostctl prod
   install           render, install the systemd units (start at boot) and create the pod if missing
   create            create the persistent pod and its containers (fails if the pod exists)
   dkim-dev-key [domain selector]   generate a DISPOSABLE dev DKIM key inside the OpenDKIM volume
+  dev-agent [--once]               development stand-in for the host agent: carries out the client
+                                   dashboard's DKIM requests with this pod's OpenDKIM (leave it running
+                                   while you set up a sending domain; Ctrl+C stops it)
   start             start the existing pod: PostgreSQL, DB tasks (roles, migrations, grants), services
   stop              stop the pod; the pod and its containers are KEPT (podman pod stop)
   restart           stop + start of the same pod and containers
@@ -215,6 +218,7 @@ case "${1:-}" in
     if pod exists; then echo "pod smarthost exists (kept; use 'recreate' to replace it)"; else pod create; fi ;;
   create) do_render && pod create ;;
   dkim-dev-key) shift; cmd_dkim_dev_key "$@" ;;
+  dev-agent) shift; dev_only; exec python3 "$REPO/infra/lib/smarthost_agent.py" dev-dkim "$@" ;;
   start) cmd_start ;;
   stop) cmd_stop ;;
   restart) cmd_stop && cmd_start ;;

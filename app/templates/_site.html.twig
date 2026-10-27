@@ -6,8 +6,10 @@
 {% macro application_meta() %}<meta name="application-name" content="catto-mail v{{ app_version() }}">{% endmacro %}
 
 {# Bootstrap 6 is the base (owner decision, 2026-10-10): its compiled CSS sits in cascade layers, so
-   the application's stylesheet, loaded after it and unlayered, always takes precedence. #}
+   the application's stylesheet, loaded after it and unlayered, always takes precedence. Bootstrap Icons
+   (owner decision 2026-10-27) draws every icon (dashboard/_icons.html.twig). #}
 {% macro stylesheets() %}<link rel="stylesheet" href="{{ asset('vendor/bootstrap/dist/css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('vendor/bootstrap-icons/font/bootstrap-icons.min.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/app.css') }}">{% endmacro %}
 
 {# with_contact false: the acceptable use policy page, which names one address only, abuse@ the
