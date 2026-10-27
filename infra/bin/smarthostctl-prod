@@ -147,10 +147,18 @@ cmd_build() {
   if podman image exists "$pg"; then echo "present $pg"; else podman pull -q "$pg" >/dev/null && echo "pulled $pg"; fi
 }
 
-# Live delivery may only be (re)created after the activation preflight passes.
+# Live delivery may only be (re)created after the activation preflight passes. While the services
+# still run an older release than the configured one (an upgrade, also one that upgrade-catto-mail
+# resumes with build and recreate), the database lacks the new release's tables and grants until
+# the start below migrates it: the grants are compared after that start (the runtime preflight
+# that follows every upgrade), not here.
 activation_gate() {
   if [[ "$(envval SMARTHOST_LIVE_DELIVERY_ENABLED)" == true ]]; then
-    "${PREFLIGHT[@]}" --activation --quiet || die "the activation preflight failed: live delivery is not (re)created (fix the FAIL items, or set SMARTHOST_LIVE_DELIVERY_ENABLED=false)"
+    local pre=() running
+    running="$(podman ps --filter "label=smarthost.instance=$(I)" --filter label=smarthost.topology=production --format '{{.Image}}' 2>/dev/null \
+      | sed -n 's#^localhost/smarthost-[a-z]*:##p' | sort -u | tr '\n' ' ' || true)"
+    [[ -n "$running" && "$running" != "$(envval SMARTHOST_IMAGE_TAG) " ]] && pre=(--pre-upgrade)
+    "${PREFLIGHT[@]}" --activation "${pre[@]}" --quiet || die "the activation preflight failed: live delivery is not (re)created (fix the FAIL items, or set SMARTHOST_LIVE_DELIVERY_ENABLED=false)"
   fi
 }
 

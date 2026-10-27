@@ -656,6 +656,24 @@ class PreUpgradeTest(unittest.TestCase):
         self.assertEqual("SKIP", before["grants current"])
         self.assertEqual("FAIL", after["grants current"], "no grants at all: the post-upgrade check still compares them")
 
+    def test_a_live_upgrade_compares_the_grants_after_the_migrations(self) -> None:
+        """A live installation's upgrade passes the activation gate before the new release's migrations
+        have created its tables: that gate skips the grant comparison, and the runtime preflight after
+        the upgrade makes it (0.2.9 to 0.3.0 on a live server stopped here)."""
+        values = production_values()
+        healthy = {s: {"State": {"Health": {"Status": "healthy"}}} for s in pf.SERVICES}
+        host = FakeHost(values, inspect=healthy, sql={"SELECT 1": [["1"]], "role_table_grants": [], "client_reputation_metrics": [["60"]]},
+                        exec_={("symfony-app", "php", "bin/console", "doctrine:migrations:up-to-date"): (0, "up to date")})
+        gate = {c.name: c.level for c in pf.Preflight(values, host, FakeResolver({}), activation=True, pre_upgrade=True).run(("runtime",))}
+        self.assertEqual("SKIP", gate["grants current"])
+        script = (ROOT / "infra/bin/smarthostctl-prod").read_text(encoding="utf-8")
+        gate_fn = script.split("activation_gate() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('[[ -n "$running" && "$running" != "$(envval SMARTHOST_IMAGE_TAG) " ]] && pre=(--pre-upgrade)', gate_fn)
+        self.assertIn('--activation "${pre[@]}"', gate_fn)
+        upgrade = script.split("cmd_upgrade() {", 1)[1].split("\n}", 1)[0]
+        self.assertLess(upgrade.index('set_env SMARTHOST_IMAGE_TAG "$tag"'), upgrade.index("cmd_recreate"), "the new tag is configured before the gate")
+        self.assertIn('"${PREFLIGHT[@]}" --section runtime ||', upgrade.split("cmd_recreate", 1)[1])
+
 
 class LocalEngineTest(unittest.TestCase):
     """The production units use the user's own Podman API socket; that engine is still local."""

@@ -699,6 +699,11 @@ units and integration tests; `test phase8` 29/29; `test installer --with-upgrade
 installer --from v0.2.9` 14/15: the released 0.2.9 installed by its own installer, upgraded to the
 working tree in 13 steps (both migrations) and rolled back, all passing; the one failure was the
 development-pod check, because the pod was rebuilt for the version change while that test ran.
+After those runs, the first live server's upgrade from 0.2.9 stopped at the activation check
+(the grants of the new tables compared before the migrations); the fix in `smarthostctl-prod`
+was tested with `test phase8` 29/29 (a new `PreUpgradeTest` case, which fails without it), the
+gate run with stubbed containers, and `prod preflight --activation --pre-upgrade` on that server;
+the installer tests, which run in HELD mode and never reach the changed branch, were not run again.
 The guided setup and account blocks were also walked in Chromium against the pod (the guided setup
 in Firefox too), and a block made in ctnlist's development copy was followed into the account's
 Suppressions page and lifted again.

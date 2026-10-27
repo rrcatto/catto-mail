@@ -81,6 +81,14 @@ two migrations; public sign-up stays as it was (off unless the operator turned i
   plan's id.
 - nginx logs sign-up and invitation links without their tokens.
 
+### Fixed
+- **The upgrade of an installation with live delivery stopped at its activation check** when the
+  new release adds tables: the check compared the database grants with the new release's before
+  the migrations had created those tables (`grants current`: `plans/app: want [...] have []`),
+  and the old release kept running. While the services still run an older release than the
+  configured one, the activation check now leaves the grants to the runtime check that follows
+  the upgrade; this also covers an upgrade that `upgrade-catto-mail` resumes.
+
 ## [0.2.9] - 2026-10-26
 
 A new dashboard layout (owner decision 2026-10-25, from approved mockups) and three fixes found
